@@ -148,7 +148,7 @@ function Header({ activePage, setActivePage }) {
           </span>
           <span>
             <span className="block text-xl font-bold tracking-tight">TennisTipz</span>
-            <span className="block text-xs text-slate-400">live tennis intelligence</span>
+            <span className="block text-xs text-slate-400">live tennis predictions</span>
           </span>
         </button>
         <nav className="flex gap-2 overflow-x-auto pb-1 md:pb-0">
