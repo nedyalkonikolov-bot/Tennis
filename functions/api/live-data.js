@@ -1,5 +1,8 @@
 const TENNIS_API_BASE = "https://api.api-tennis.com/tennis/";
-const NEWS_API_BASE = "https://newsapi.org/v2/everything";
+const RSS_NEWS_FEEDS = [
+  { source: "Tennis.com", url: "https://www.tennis.com/roots/rss-feeds/news/" },
+  { source: "Google News", url: "https://news.google.com/rss/search?q=tennis%20ATP%20WTA&hl=en-US&gl=US&ceid=US:en" },
+];
 
 const fallbackMatches = [
   {
@@ -31,10 +34,10 @@ const fallbackPlayers = [
 const fallbackNews = [
   {
     id: "demo-news-1",
-    title: "Live tennis feed is waiting for API keys",
+    title: "Free RSS news feed is waiting for deployment",
     category: "Setup",
     time: "Now",
-    summary: "Add API_TENNIS_KEY and NEWS_API_KEY in Cloudflare Pages secrets to replace demo content with live data.",
+    summary: "Redeploy Cloudflare Pages to replace this fallback with live tennis headlines from free RSS feeds.",
     url: "#",
     source: "TennisTipz",
   },
@@ -45,7 +48,7 @@ function jsonResponse(payload, status = 200) {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": "public, max-age=60, stale-while-revalidate=300",
+      "cache-control": "public, max-age=300, stale-while-revalidate=900",
     },
   });
 }
@@ -65,6 +68,25 @@ function asNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function decodeXml(value = "") {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getTagValue(item, tag) {
+  const match = item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  return decodeXml(match?.[1] || "");
+}
+
 function inferSurface(event) {
   const text = `${event.tournament_name || ""} ${event.event_type_type || ""}`.toLowerCase();
 
@@ -77,6 +99,14 @@ function inferTour(value = "") {
   const text = value.toLowerCase();
   if (text.includes("wta") || text.includes("women")) return "WTA";
   return "ATP";
+}
+
+function inferNewsCategory(title = "") {
+  const text = title.toLowerCase();
+  if (text.includes("injur") || text.includes("withdraw") || text.includes("return")) return "Player News";
+  if (text.includes("rank") || text.includes("stat")) return "Trend";
+  if (text.includes("draw") || text.includes("schedule") || text.includes("open") || text.includes("masters")) return "Tournament";
+  return "News";
 }
 
 function normalizeFixture(event) {
@@ -126,19 +156,31 @@ function normalizePlayer(player, tour) {
   };
 }
 
-function normalizeArticle(article, index) {
-  const published = article.publishedAt ? new Date(article.publishedAt) : null;
-  const time = published && !Number.isNaN(published.getTime()) ? published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Latest";
+function normalizeRssItem(item, source, index) {
+  const title = getTagValue(item, "title");
+  const url = getTagValue(item, "link") || getTagValue(item, "guid");
+  const summary = getTagValue(item, "description") || "Read the latest tennis update.";
+  const published = new Date(getTagValue(item, "pubDate") || getTagValue(item, "published"));
+  const time = Number.isNaN(published.getTime())
+    ? "Latest"
+    : published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
   return {
-    id: article.url || `news-${index}`,
-    title: article.title || "Tennis update",
-    category: article.title?.toLowerCase?.().includes("injur") ? "Player News" : "News",
+    id: url || `${source}-${index}`,
+    title: title || "Tennis update",
+    category: inferNewsCategory(title),
     time,
-    summary: article.description || article.content || "Read the latest tennis update.",
-    url: article.url || "#",
-    source: article.source?.name || "NewsAPI",
+    summary,
+    url: url || "#",
+    source,
   };
+}
+
+function parseRssItems(xml, source) {
+  return [...xml.matchAll(/<item[\s\S]*?<\/item>/gi)]
+    .map((match, index) => normalizeRssItem(match[0], source, index))
+    .filter((article) => article.title && article.url)
+    .slice(0, 10);
 }
 
 async function fetchApiTennis(env, method, params = {}) {
@@ -189,34 +231,28 @@ async function getPlayers(env) {
   ];
 }
 
-async function getNews(env) {
-  if (!env.NEWS_API_KEY) return [];
+async function getNews() {
+  const feedResults = await Promise.all(
+    RSS_NEWS_FEEDS.map(async (feed) => {
+      const response = await fetch(feed.url, { headers: { accept: "application/rss+xml, application/xml, text/xml" } });
+      if (!response.ok) throw new Error(`${feed.source} returned ${response.status}`);
+      const xml = await response.text();
+      return parseRssItems(xml, feed.source);
+    }),
+  );
 
-  const url = new URL(NEWS_API_BASE);
-  url.searchParams.set("q", "tennis");
-  url.searchParams.set("searchIn", "title,description");
-  url.searchParams.set("language", "en");
-  url.searchParams.set("sortBy", "publishedAt");
-  url.searchParams.set("pageSize", "12");
-  url.searchParams.set("apiKey", env.NEWS_API_KEY);
-
-  const response = await fetch(url, { headers: { accept: "application/json" } });
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) throw new Error(payload.message || `NewsAPI returned ${response.status}`);
-  if (payload.status === "error") throw new Error(payload.message || "NewsAPI returned an error");
-
-  return (payload.articles || []).slice(0, 12).map(normalizeArticle);
+  const articles = feedResults.flat();
+  return Array.from(new Map(articles.map((article) => [article.url, article])).values()).slice(0, 12);
 }
 
 export async function onRequestGet({ env }) {
   const errors = [];
   const diagnostics = {
     hasApiTennisKey: Boolean(env.API_TENNIS_KEY),
-    hasNewsApiKey: Boolean(env.NEWS_API_KEY),
     matchCount: 0,
     playerCount: 0,
     newsCount: 0,
+    newsProvider: "RSS",
   };
   let matches = [];
   let players = [];
@@ -237,23 +273,22 @@ export async function onRequestGet({ env }) {
   }
 
   try {
-    news = await getNews(env);
+    news = await getNews();
     diagnostics.newsCount = news.length;
   } catch (error) {
     errors.push(`news: ${error.message}`);
   }
 
   if (!diagnostics.hasApiTennisKey) errors.push("missing API_TENNIS_KEY Cloudflare secret");
-  if (!diagnostics.hasNewsApiKey) errors.push("missing NEWS_API_KEY Cloudflare secret");
 
   const hasLiveTennis = Boolean(env.API_TENNIS_KEY && (matches.length || players.length));
-  const hasLiveNews = Boolean(env.NEWS_API_KEY && news.length);
+  const hasLiveNews = Boolean(news.length);
 
   return jsonResponse({
     generatedAt: new Date().toISOString(),
     source: {
       tennis: hasLiveTennis ? "API-Tennis" : "fallback",
-      news: hasLiveNews ? "NewsAPI" : "fallback",
+      news: hasLiveNews ? "RSS" : "fallback",
     },
     matches: matches.length ? matches : fallbackMatches,
     players: players.length ? players : fallbackPlayers,
