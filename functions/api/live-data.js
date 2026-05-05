@@ -193,20 +193,17 @@ async function getNews(env) {
   if (!env.NEWS_API_KEY) return [];
 
   const url = new URL(NEWS_API_BASE);
-  url.searchParams.set("q", "tennis OR ATP OR WTA");
+  url.searchParams.set("q", "tennis");
+  url.searchParams.set("searchIn", "title,description");
   url.searchParams.set("language", "en");
   url.searchParams.set("sortBy", "publishedAt");
   url.searchParams.set("pageSize", "12");
+  url.searchParams.set("apiKey", env.NEWS_API_KEY);
 
-  const response = await fetch(url, {
-    headers: {
-      accept: "application/json",
-      "x-api-key": env.NEWS_API_KEY,
-    },
-  });
+  const response = await fetch(url, { headers: { accept: "application/json" } });
+  const payload = await response.json().catch(() => ({}));
 
-  if (!response.ok) throw new Error(`NewsAPI returned ${response.status}`);
-  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.message || `NewsAPI returned ${response.status}`);
   if (payload.status === "error") throw new Error(payload.message || "NewsAPI returned an error");
 
   return (payload.articles || []).slice(0, 12).map(normalizeArticle);
