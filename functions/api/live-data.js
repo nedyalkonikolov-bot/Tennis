@@ -5,36 +5,6 @@ const RSS_NEWS_FEEDS = [
   { source: "Tennis.com", url: "https://www.tennis.com/roots/rss-feeds/news/" },
 ];
 
-const fallbackMatches = [
-  {
-    id: "demo-1",
-    tournament: "Madrid Masters",
-    startTime: "Today 14:30",
-    playerA: "Jannik Sinner",
-    playerB: "Carlos Alcaraz",
-    surface: "Clay",
-    market: "Sinner to Win",
-    formA: 88,
-    formB: 84,
-    recentA: { wins: 16, losses: 3, winRate: 84, matches: 19 },
-    recentB: { wins: 14, losses: 5, winRate: 74, matches: 19 },
-    serveHoldA: 91,
-    serveHoldB: 88,
-    returnEdge: 3,
-    h2hEdge: -2,
-    odds: "1.86",
-    oddsSource: "Demo",
-    predictedWinner: "Jannik Sinner",
-    predictedWinnerOdds: "1.86",
-    confidence: 62,
-    status: "Scheduled",
-    score: "",
-    live: false,
-    tour: "ATP",
-    betUrl: DEFAULT_CLOUDBET_URL,
-  },
-];
-
 const fallbackPlayers = [
   { id: "demo-player-1", name: "Jannik Sinner", sex: "ATP", tour: "ATP", rank: 1, points: 10550, country: "Italy", movement: "same", form: 88, hold: 91, breakRate: 28, clay: 84, hard: 92, grass: 79, trend: "+6" },
   { id: "demo-player-2", name: "Carlos Alcaraz", sex: "ATP", tour: "ATP", rank: 2, points: 8850, country: "Spain", movement: "same", form: 84, hold: 88, breakRate: 31, clay: 91, hard: 86, grass: 83, trend: "+3" },
@@ -62,10 +32,6 @@ function jsonResponse(payload, status = 200) {
       "cache-control": "public, max-age=300, stale-while-revalidate=900",
     },
   });
-}
-
-function formatDate(date) {
-  return date.toISOString().slice(0, 10);
 }
 
 function addDays(date, days) {
@@ -119,7 +85,6 @@ function namesLookSimilar(a, b) {
   const left = normalizeName(a).split(" ").filter(Boolean);
   const right = normalizeName(b).split(" ").filter(Boolean);
   if (!left.length || !right.length) return false;
-
   const leftLast = left[left.length - 1];
   const rightLast = right[right.length - 1];
   return leftLast === rightLast || normalizeName(a).includes(rightLast) || normalizeName(b).includes(leftLast);
@@ -167,36 +132,27 @@ function getRssImageUrl(item) {
 
 function getMetaImageUrl(html = "") {
   const metaTags = html.match(/<meta[^>]+>/gi) || [];
-
   for (const tag of metaTags) {
     const property = (getAttributeValue(tag, "property") || getAttributeValue(tag, "name")).toLowerCase();
     if (!["og:image", "og:image:url", "twitter:image", "twitter:image:src"].includes(property)) continue;
-
     const content = normalizeImageUrl(getAttributeValue(tag, "content"));
     if (content) return content;
   }
-
   const directMatch = html.match(/(?:og:image(?::url)?|twitter:image(?::src)?)[^>]+content=(?:["']([^"']+)["']|([^\s>]+))/i);
   const directUrl = normalizeImageUrl(directMatch?.[1] || directMatch?.[2] || "");
   if (directUrl) return directUrl;
-
   const jsonLdMatch = html.match(/"image"\s*:\s*(?:"([^"]+)"|\[\s*"([^"]+)")/i);
   return normalizeImageUrl(jsonLdMatch?.[1] || jsonLdMatch?.[2] || "");
 }
 
 async function fetchArticleImageUrl(articleUrl) {
   if (!articleUrl || !articleUrl.includes("tennis.com/")) return "";
-
   try {
     const response = await fetch(articleUrl, {
-      headers: {
-        accept: "text/html,application/xhtml+xml",
-        "user-agent": "Mozilla/5.0 TennisTipzBot/1.0",
-      },
+      headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 TennisTipzBot/1.0" },
     });
     if (!response.ok) return "";
-    const html = await response.text();
-    return getMetaImageUrl(html);
+    return getMetaImageUrl(await response.text());
   } catch {
     return "";
   }
@@ -204,7 +160,6 @@ async function fetchArticleImageUrl(articleUrl) {
 
 function inferSurface(event) {
   const text = `${event.tournament_name || ""} ${event.event_type_type || ""} ${event.competition?.name || ""} ${event.name || ""}`.toLowerCase();
-
   if (text.includes("grass") || text.includes("queens") || text.includes("halle") || text.includes("wimbledon")) return "Grass";
   if (text.includes("clay") || text.includes("roland") || text.includes("madrid") || text.includes("rome") || text.includes("monte")) return "Clay";
   return "Hard";
@@ -240,7 +195,6 @@ function getRecentForm(events = [], playerKey, days = 100) {
   const wins = recent.filter((event) => getMatchWinner(event, playerKey)).length;
   const losses = Math.max(0, recent.length - wins);
   const winRate = recent.length ? Math.round((wins / recent.length) * 100) : 50;
-
   return { wins, losses, matches: recent.length, winRate };
 }
 
@@ -253,7 +207,6 @@ function makePredictionFromForm(event, firstRecent, secondRecent, cloudbetOdds) 
   const predictedSide = firstScore >= secondScore ? "home" : "away";
   const predictedWinnerOdds = predictedSide === "home" ? cloudbetOdds?.home : cloudbetOdds?.away;
   const confidence = Math.max(52, Math.min(82, Math.round(55 + Math.abs(firstScore - secondScore) * 0.35)));
-
   return { predictedWinner, predictedSide, confidence, predictedWinnerOdds: predictedWinnerOdds || "N/A" };
 }
 
@@ -281,44 +234,6 @@ function isUpcomingEvent(event) {
   if (isLiveEvent(event) || isFinishedEvent(event)) return false;
   if (!status || status === "-" || status === "scheduled" || status === "not started" || status === "upcoming" || status === "trading") return true;
   return status.includes("scheduled") || status.includes("not started") || status.includes("trading");
-}
-
-function normalizeFixture(event, recentForms = {}, cloudbetOdds = null, betUrl = DEFAULT_CLOUDBET_URL) {
-  const playerA = event.event_first_player || "Player A";
-  const playerB = event.event_second_player || "Player B";
-  const recentA = recentForms.first || { wins: 0, losses: 0, matches: 0, winRate: 50 };
-  const recentB = recentForms.second || { wins: 0, losses: 0, matches: 0, winRate: 50 };
-  const prediction = makePredictionFromForm(event, recentA, recentB, cloudbetOdds);
-
-  return {
-    id: String(event.event_key || `${playerA}-${playerB}-${event.event_date}`),
-    tournament: event.tournament_name || event.event_type_type || "Tennis",
-    startTime: `${event.event_date || "Today"} ${event.event_time || ""}`.trim(),
-    playerA,
-    playerB,
-    surface: inferSurface(event),
-    market: `${prediction.predictedWinner} to Win`,
-    formA: recentA.winRate,
-    formB: recentB.winRate,
-    recentA,
-    recentB,
-    serveHoldA: 68 + (asNumber(event.first_player_key, 3) % 24),
-    serveHoldB: 68 + (asNumber(event.second_player_key, 4) % 24),
-    returnEdge: recentA.winRate - recentB.winRate,
-    h2hEdge: 0,
-    odds: prediction.predictedWinnerOdds,
-    oddsSource: cloudbetOdds ? "Cloudbet" : "N/A",
-    cloudbetOdds: cloudbetOdds || null,
-    predictedWinner: prediction.predictedWinner,
-    predictedSide: prediction.predictedSide,
-    predictedWinnerOdds: prediction.predictedWinnerOdds,
-    confidence: prediction.confidence,
-    status: event.event_status || "Scheduled",
-    score: eventScore(event),
-    live: isLiveEvent(event),
-    tour: inferTour(event.event_type_type),
-    betUrl,
-  };
 }
 
 function normalizeCloudbetMatch(event, recentForms = {}, betUrl = DEFAULT_CLOUDBET_URL) {
@@ -369,7 +284,6 @@ function normalizePlayer(player, tour) {
   const points = asNumber(player.points, 0);
   const name = player.player || player.player_name || player.name || "Unknown player";
   const seed = rank === 999 ? name.length : rank;
-
   return {
     id: String(player.player_key || player.player_id || `${tour}-${name}`),
     name,
@@ -398,17 +312,7 @@ function normalizeRssItem(item, source, index) {
   const time = Number.isNaN(published.getTime())
     ? "Latest"
     : published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-
-  return {
-    id: url || `${source}-${index}`,
-    title: title || "Tennis update",
-    category: inferNewsCategory(title),
-    time,
-    summary,
-    url: url || "#",
-    imageUrl,
-    source,
-  };
+  return { id: url || `${source}-${index}`, title: title || "Tennis update", category: inferNewsCategory(title), time, summary, url: url || "#", imageUrl, source };
 }
 
 function parseRssItems(xml, source) {
@@ -420,17 +324,14 @@ function parseRssItems(xml, source) {
 
 async function fetchApiTennis(env, method, params = {}) {
   if (!env.API_TENNIS_KEY) return null;
-
   const url = new URL(TENNIS_API_BASE);
   url.searchParams.set("method", method);
   url.searchParams.set("APIkey", env.API_TENNIS_KEY);
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
   });
-
   const response = await fetch(url, { headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`${method} returned ${response.status}`);
-
   const payload = await response.json();
   if (payload.success === 0) throw new Error(payload.error || `${method} returned no success flag`);
   return payload.result ?? [];
@@ -438,15 +339,9 @@ async function fetchApiTennis(env, method, params = {}) {
 
 async function fetchCloudbet(env, path) {
   if (!env.CLOUDBET_API_KEY) return null;
-
   const response = await fetch(`${CLOUDBET_API_BASE}${path}`, {
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
-      "x-api-key": env.CLOUDBET_API_KEY,
-    },
+    headers: { accept: "application/json", "content-type": "application/json", "x-api-key": env.CLOUDBET_API_KEY },
   });
-
   if (!response.ok) throw new Error(`Cloudbet ${path} returned ${response.status}`);
   return response.json();
 }
@@ -465,23 +360,19 @@ function isEnabledSelection(selection) {
 
 function extractWinnerOddsFromEvent(event) {
   if (!event?.home?.name || !event?.away?.name || isFinishedEvent(event)) return null;
-
   const markets = event.markets || {};
   const winnerEntry = Object.entries(markets).find(([key, market]) => {
     const name = String(market?.name || "").toLowerCase();
     return key === "tennis.winner" || key.endsWith(".winner") || name === "winner" || name.includes("money line") || name.includes("moneyline");
   });
   if (!winnerEntry) return null;
-
   const [marketKey, market] = winnerEntry;
   const selections = getMarketSelections(market).filter(isEnabledSelection);
   const homeSelection = selections.find((selection) => selection.outcome === "home" || selection.name === event.home?.name);
   const awaySelection = selections.find((selection) => selection.outcome === "away" || selection.name === event.away?.name);
-
   const home = asFloat(homeSelection?.price || homeSelection?.odds);
   const away = asFloat(awaySelection?.price || awaySelection?.odds);
   if (!home || !away) return null;
-
   return {
     eventId: event.id,
     eventKey: event.key,
@@ -496,18 +387,9 @@ function extractWinnerOddsFromEvent(event) {
   };
 }
 
-function matchCloudbetOdds(match, oddsEvents) {
-  return oddsEvents.find((event) => {
-    const homeAwayMatch = namesLookSimilar(match.event_first_player, event.homeName) && namesLookSimilar(match.event_second_player, event.awayName);
-    const awayHomeMatch = namesLookSimilar(match.event_first_player, event.awayName) && namesLookSimilar(match.event_second_player, event.homeName);
-    return homeAwayMatch || awayHomeMatch;
-  }) || null;
-}
-
 function normalizeCloudbetEvent(event) {
   const odds = extractWinnerOddsFromEvent(event);
   if (!odds) return null;
-
   return {
     event_key: String(event.id || event.key || odds.eventName),
     event_first_player: odds.homeName,
@@ -517,7 +399,6 @@ function normalizeCloudbetEvent(event) {
     tournament_name: event.competition?.name || event.name || "Cloudbet Tennis",
     event_type_type: event.competition?.category?.name || event.competition?.key || "Cloudbet",
     event_date: event.startTime || event.cutoffTime || "",
-    event_time: "",
     event_status: event.status || "TRADING",
     startTime: event.startTime || event.cutoffTime || "",
     cutoffTime: event.cutoffTime || "",
@@ -533,20 +414,21 @@ function sortCloudbetEvents(a, b) {
   return String(a.startTime || a.cutoffTime || "").localeCompare(String(b.startTime || b.cutoffTime || ""));
 }
 
+function dedupeEvents(events) {
+  return Array.from(new Map(events.map((event) => [event.event_key || JSON.stringify(event), event])).values());
+}
+
 async function getCloudbetTennisEvents(env) {
   if (!env.CLOUDBET_API_KEY) return [];
-
   const sport = await fetchCloudbet(env, "/sports/tennis");
   const competitions = (sport?.categories || [])
     .flatMap((category) => (category.competitions || []).map((competition) => ({ ...competition, category })))
     .filter((competition) => competition.eventCount > 0)
     .sort((a, b) => (b.eventCount || 0) - (a.eventCount || 0))
     .slice(0, 40);
-
   const competitionPayloads = await Promise.all(
     competitions.map((competition) => fetchCloudbet(env, `/competitions/${competition.key}?markets=tennis.winner`).catch(() => null)),
   );
-
   return dedupeEvents(
     competitionPayloads
       .flatMap((payload) => payload?.events || [])
@@ -561,7 +443,6 @@ async function findApiTennisPlayerKey(env, playerName, cache) {
   const key = normalizeName(playerName);
   if (!key || !env.API_TENNIS_KEY) return "";
   if (cache.has(key)) return cache.get(key);
-
   try {
     const lastName = key.split(" ").at(-1);
     const result = await fetchApiTennis(env, "get_players", { player_name: lastName });
@@ -577,7 +458,6 @@ async function findApiTennisPlayerKey(env, playerName, cache) {
 
 async function enrichCloudbetEventsWithApiTennisKeys(env, events) {
   const cache = new Map();
-
   return Promise.all(
     events.map(async (event) => ({
       ...event,
@@ -591,26 +471,16 @@ async function getRecentFormsForMatches(env, matches) {
   return Promise.all(
     matches.map(async (match) => {
       if (!match.first_player_key || !match.second_player_key) {
-        return {
-          first: { wins: 0, losses: 0, matches: 0, winRate: 50 },
-          second: { wins: 0, losses: 0, matches: 0, winRate: 50 },
-        };
+        return { first: { wins: 0, losses: 0, matches: 0, winRate: 50 }, second: { wins: 0, losses: 0, matches: 0, winRate: 50 } };
       }
-
       try {
-        const result = await fetchApiTennis(env, "get_H2H", {
-          first_player_key: match.first_player_key,
-          second_player_key: match.second_player_key,
-        });
+        const result = await fetchApiTennis(env, "get_H2H", { first_player_key: match.first_player_key, second_player_key: match.second_player_key });
         return {
           first: getRecentForm(result.firstPlayerResults || [], match.first_player_key, 100),
           second: getRecentForm(result.secondPlayerResults || [], match.second_player_key, 100),
         };
       } catch {
-        return {
-          first: { wins: 0, losses: 0, matches: 0, winRate: 50 },
-          second: { wins: 0, losses: 0, matches: 0, winRate: 50 },
-        };
+        return { first: { wins: 0, losses: 0, matches: 0, winRate: 50 }, second: { wins: 0, losses: 0, matches: 0, winRate: 50 } };
       }
     }),
   );
@@ -620,28 +490,21 @@ function isSinglesMatch(event) {
   return !String(event.event_first_player || "").includes("/") && !String(event.event_second_player || "").includes("/");
 }
 
-function dedupeEvents(events) {
-  return Array.from(new Map(events.map((event) => [event.event_key || JSON.stringify(event), event])).values());
-}
-
 async function getMatches(env, betUrl) {
   const cloudbetEvents = (await getCloudbetTennisEvents(env)).filter(isSinglesMatch);
   const liveEvents = cloudbetEvents.filter(isLiveEvent).slice(0, 8);
   const upcomingEvents = cloudbetEvents.filter((event) => !isLiveEvent(event)).slice(0, 12);
   const bettingEvents = await enrichCloudbetEventsWithApiTennisKeys(env, [...liveEvents, ...upcomingEvents]);
   const recentForms = await getRecentFormsForMatches(env, bettingEvents);
-
   return bettingEvents.map((event, index) => normalizeCloudbetMatch(event, recentForms[index], betUrl));
 }
 
 async function getPlayers(env) {
   if (!env.API_TENNIS_KEY) return [];
-
   const [atp, wta] = await Promise.all([
     fetchApiTennis(env, "get_standings", { event_type: "ATP" }).catch(() => []),
     fetchApiTennis(env, "get_standings", { event_type: "WTA" }).catch(() => []),
   ]);
-
   return [
     ...(atp || []).slice(0, 150).map((player) => normalizePlayer(player, "ATP")),
     ...(wta || []).slice(0, 150).map((player) => normalizePlayer(player, "WTA")),
@@ -653,19 +516,11 @@ async function getNews() {
     RSS_NEWS_FEEDS.map(async (feed) => {
       const response = await fetch(feed.url, { headers: { accept: "application/rss+xml, application/xml, text/xml" } });
       if (!response.ok) throw new Error(`${feed.source} returned ${response.status}`);
-      const xml = await response.text();
-      return parseRssItems(xml, feed.source);
+      return parseRssItems(await response.text(), feed.source);
     }),
   );
-
   const articles = Array.from(new Map(feedResults.flat().map((article) => [article.url, article])).values()).slice(0, 12);
-
-  return Promise.all(
-    articles.map(async (article) => ({
-      ...article,
-      imageUrl: article.imageUrl || (await fetchArticleImageUrl(article.url)),
-    })),
-  );
+  return Promise.all(articles.map(async (article) => ({ ...article, imageUrl: article.imageUrl || (await fetchArticleImageUrl(article.url)) })));
 }
 
 export async function onRequestGet({ env }) {
@@ -730,7 +585,7 @@ export async function onRequestGet({ env }) {
       news: hasLiveNews ? "Tennis.com" : "fallback",
     },
     betUrl,
-    matches: matches.length ? matches : fallbackMatches.map((match) => ({ ...match, betUrl })),
+    matches,
     players: players.length ? players : fallbackPlayers,
     news: news.length ? news : fallbackNews,
     errors,
