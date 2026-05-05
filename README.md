@@ -26,7 +26,7 @@ CLOUDBET_AFFILIATE_URL=your_cloudbet_affiliate_link
 
 No news API key is required. Redeploy after adding or changing secrets. The status bar on the site will show whether tennis, odds, and news data are coming from live providers or fallback data.
 
-For Cloudbet, use the API key generated from your affiliate profile for odds display. Put your actual affiliate click-through URL in `CLOUDBET_AFFILIATE_URL`; the Predictions page uses that URL for the clickable Cloudbet odds button. Keep both Cloudbet values server-side only; the Cloudflare Function calls Cloudbet from `/api/live-data`, so the React frontend never receives the API key.
+For Cloudbet, use the API key generated from your affiliate profile for odds display. Put your actual affiliate click-through URL in `CLOUDBET_AFFILIATE_URL`; the Predictions page uses that URL for the clickable Cloudbet odds button. Keep `CLOUDBET_API_KEY` private on the server side. The affiliate URL is returned to the frontend intentionally as the public outbound click target.
 
 ## Development
 
