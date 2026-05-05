@@ -4,7 +4,7 @@ const DEFAULT_CLOUDBET_URL = "https://www.cloudbet.com/en/sports/tennis";
 const RSS_NEWS_FEEDS = [{ source: "Tennis.com", url: "https://www.tennis.com/roots/rss-feeds/news/" }];
 
 const DEFAULT_FORM = { wins: 0, losses: 0, matches: 0, winRate: 50 };
-const CLOUDBET_COMPETITION_LIMIT = 24;
+const CLOUDBET_COMPETITION_LIMIT = 32;
 const NEWS_ARTICLE_IMAGE_LIMIT = 4;
 
 const fallbackPlayers = [
@@ -176,10 +176,6 @@ function getCloudbetTourFromText(value = "") {
 
 function getCloudbetTour(competition = {}) {
   return getCloudbetTourFromText(getCloudbetCompetitionText(competition));
-}
-
-function isAtpOrWtaCompetition(competition = {}) {
-  return Boolean(getCloudbetTour(competition));
 }
 
 function inferSurface(event) {
@@ -477,7 +473,6 @@ function normalizeCloudbetEvent(event) {
   const odds = extractWinnerOddsFromEvent(event);
   if (!odds) return null;
   const tour = getCloudbetTour(event.competition || {});
-  if (!tour) return null;
 
   return {
     event_key: String(event.id || event.key || odds.eventName),
@@ -486,7 +481,7 @@ function normalizeCloudbetEvent(event) {
     first_player_key: "",
     second_player_key: "",
     tournament_name: event.competition?.name || event.name || "Cloudbet Tennis",
-    event_type_type: event.competition?.category?.name || event.competition?.key || tour,
+    event_type_type: event.competition?.category?.name || event.competition?.key || tour || "Cloudbet",
     event_date: event.startTime || event.cutoffTime || "",
     event_status: event.status || "TRADING",
     startTime: event.startTime || event.cutoffTime || "",
@@ -519,8 +514,11 @@ async function getCloudbetTennisEvents(env) {
   const competitions = (sport?.categories || [])
     .flatMap((category) => (category.competitions || []).map((competition) => ({ ...competition, category })))
     .filter((competition) => competition.eventCount > 0)
-    .filter(isAtpOrWtaCompetition)
-    .sort((a, b) => (b.eventCount || 0) - (a.eventCount || 0))
+    .sort((a, b) => {
+      const aTour = getCloudbetTour(a) ? 1 : 0;
+      const bTour = getCloudbetTour(b) ? 1 : 0;
+      return bTour - aTour || (b.eventCount || 0) - (a.eventCount || 0);
+    })
     .slice(0, CLOUDBET_COMPETITION_LIMIT);
   const competitionPayloads = await Promise.all(
     competitions.map(async (competition) => ({
@@ -538,21 +536,39 @@ async function getCloudbetTennisEvents(env) {
   );
 }
 
-function findPlayerProfile(players, playerName, tour) {
-  return players.find((player) => player.tour === tour && namesLookSimilar(player.name, playerName)) || null;
+function findPlayerProfile(players, playerName, tour = "") {
+  return players.find((player) => (!tour || player.tour === tour) && namesLookSimilar(player.name, playerName)) || null;
 }
 
 function enrichCloudbetEventsWithProfiles(events, players = []) {
   return events.map((event) => {
-    const first = findPlayerProfile(players, event.event_first_player, event.tour);
-    const second = findPlayerProfile(players, event.event_second_player, event.tour);
+    let first = findPlayerProfile(players, event.event_first_player, event.tour);
+    let second = findPlayerProfile(players, event.event_second_player, event.tour || first?.tour || "");
+
+    if (!first && second) first = findPlayerProfile(players, event.event_first_player, second.tour);
+    if (first && second && first.tour !== second.tour) {
+      first = null;
+      second = null;
+    }
+
+    const tour = event.tour || first?.tour || second?.tour || "";
     return {
       ...event,
+      tour,
       first_player_key: first?.playerKey || "",
       second_player_key: second?.playerKey || "",
       profiles: { first, second },
     };
   });
+}
+
+function isAtpOrWtaProfileMatch(event) {
+  return Boolean(
+    event.profiles?.first &&
+      event.profiles?.second &&
+      event.profiles.first.tour === event.profiles.second.tour &&
+      ["ATP", "WTA"].includes(event.profiles.first.tour),
+  );
 }
 
 async function getRecentFormsForMatches(env, matches) {
@@ -580,9 +596,10 @@ function isSinglesMatch(event) {
 
 async function getMatches(env, betUrl, players = []) {
   const cloudbetEvents = (await getCloudbetTennisEvents(env)).filter(isSinglesMatch);
-  const liveEvents = cloudbetEvents.filter(isLiveEvent).slice(0, 8);
-  const upcomingEvents = cloudbetEvents.filter((event) => !isLiveEvent(event)).slice(0, 12);
-  const bettingEvents = enrichCloudbetEventsWithProfiles([...liveEvents, ...upcomingEvents], players);
+  const profileEvents = enrichCloudbetEventsWithProfiles(cloudbetEvents, players).filter(isAtpOrWtaProfileMatch);
+  const liveEvents = profileEvents.filter(isLiveEvent).slice(0, 8);
+  const upcomingEvents = profileEvents.filter((event) => !isLiveEvent(event)).slice(0, 12);
+  const bettingEvents = [...liveEvents, ...upcomingEvents];
   const recentForms = await getRecentFormsForMatches(env, bettingEvents);
   return bettingEvents.map((event, index) => normalizeCloudbetMatch(event, recentForms[index], betUrl));
 }
@@ -624,7 +641,7 @@ export async function onRequestGet({ env }) {
     hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY),
     hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL),
     cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT,
-    cloudbetCompetitionScope: "ATP/WTA only",
+    cloudbetCompetitionScope: "Cloudbet tennis markets filtered to top-150 ATP/WTA profile matches",
     newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT,
     matchCount: 0,
     liveMatchCount: 0,
@@ -634,7 +651,7 @@ export async function onRequestGet({ env }) {
     newsWithImagesCount: 0,
     newsProvider: "Tennis.com RSS",
     playerStats: "Top 150 ATP + Top 150 WTA",
-    predictionSource: "Cloudbet ATP/WTA tennis.winner markets + API-Tennis form/rank signals",
+    predictionSource: "Cloudbet tennis.winner markets + top-150 ATP/WTA profile filter + API-Tennis form/rank signals",
     predictionVariables: "Cloudbet implied probability, 100-day form, sample size, ranking, points, surface rating, trend, live status",
     predictionWindow: "Last 100 days where API-Tennis player keys match",
   };
