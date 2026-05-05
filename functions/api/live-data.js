@@ -4,8 +4,13 @@ const DEFAULT_CLOUDBET_URL = "https://www.cloudbet.com/en/sports/tennis";
 const RSS_NEWS_FEEDS = [{ source: "Tennis.com", url: "https://www.tennis.com/roots/rss-feeds/news/" }];
 
 const DEFAULT_FORM = { wins: 0, losses: 0, matches: 0, winRate: 50 };
-const CLOUDBET_COMPETITION_LIMIT = 32;
-const NEWS_ARTICLE_IMAGE_LIMIT = 4;
+const CLOUDBET_COMPETITION_LIMIT = 28;
+const PUBLIC_PLAYER_LIMIT = 150;
+const PREDICTION_PLAYER_LIMIT = 500;
+const NEWS_ARTICLE_LIMIT = 16;
+const NEWS_ARTICLE_IMAGE_LIMIT = 16;
+const H2H_LOOKUP_LIMIT = 2;
+const DEFAULT_NEWS_IMAGE = "https://images.tennis.com/image/upload/t_q-best/tenniscom-prd/colectyfnidvc41bazww.jpg";
 const BLOCKED_CLOUDBET_MARKET_RE = /\b(simulated|simulation|simulator|virtual|srl|sr\s*league|simulated\s*reality|reality\s*league)\b/i;
 
 const fallbackPlayers = [
@@ -14,7 +19,7 @@ const fallbackPlayers = [
   { id: "demo-player-3", playerKey: "", name: "Iga Swiatek", sex: "WTA", tour: "WTA", rank: 1, points: 9200, country: "Poland", movement: "same", form: 92, hold: 82, breakRate: 46, clay: 96, hard: 88, grass: 73, trend: "+8" },
 ];
 
-const fallbackNews = [{ id: "demo-news-1", title: "Free RSS news feed is waiting for deployment", category: "Setup", time: "Now", summary: "Redeploy Cloudflare Pages to replace this fallback with live tennis headlines from free RSS feeds.", url: "#", imageUrl: "", source: "TennisTipz" }];
+const fallbackNews = [{ id: "demo-news-1", title: "Free RSS news feed is waiting for deployment", category: "Setup", time: "Now", summary: "Redeploy Cloudflare Pages to replace this fallback with live tennis headlines from free RSS feeds.", url: "#", imageUrl: DEFAULT_NEWS_IMAGE, source: "TennisTipz" }];
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300, stale-while-revalidate=900" } });
@@ -170,7 +175,7 @@ function normalizeRssItem(item, source, index) {
   const time = Number.isNaN(published.getTime()) ? "Latest" : published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   return { id: url || `${source}-${index}`, title: title || "Tennis update", category: inferNewsCategory(title), time, summary, url: url || "#", imageUrl, source };
 }
-function parseRssItems(xml, source) { return [...xml.matchAll(/<item[\s\S]*?<\/item>/gi)].map((match, index) => normalizeRssItem(match[0], source, index)).filter((article) => article.title && article.url).slice(0, 10); }
+function parseRssItems(xml, source) { return [...xml.matchAll(/<item[\s\S]*?<\/item>/gi)].map((match, index) => normalizeRssItem(match[0], source, index)).filter((article) => article.title && article.url).slice(0, NEWS_ARTICLE_LIMIT); }
 
 async function fetchApiTennis(env, method, params = {}) {
   if (!env.API_TENNIS_KEY) return null;
@@ -248,9 +253,15 @@ function enrichCloudbetEventsWithProfiles(events, players = []) {
     return { ...event, tour, first_player_key: first?.playerKey || "", second_player_key: second?.playerKey || "", profiles: { first, second } };
   });
 }
-function isAtpOrWtaProfileMatch(event) { return Boolean(event.profiles?.first && event.profiles?.second && event.profiles.first.tour === event.profiles.second.tour && ["ATP", "WTA"].includes(event.profiles.first.tour)); }
+function isAtpOrWtaProfileMatch(event) {
+  const profileTour = event.profiles?.first && event.profiles?.second && event.profiles.first.tour === event.profiles.second.tour ? event.profiles.first.tour : "";
+  const tour = event.tour || profileTour;
+  if (!["ATP", "WTA"].includes(tour)) return false;
+  if (event.profiles?.first && event.profiles?.second) return event.profiles.first.tour === event.profiles.second.tour;
+  return Boolean(event.tour && (event.profiles?.first || event.profiles?.second));
+}
 async function getRecentFormsForMatches(env, matches) {
-  const keyedMatches = matches.filter((match) => match.first_player_key && match.second_player_key).slice(0, 6);
+  const keyedMatches = matches.filter((match) => match.first_player_key && match.second_player_key).slice(0, H2H_LOOKUP_LIMIT);
   const formByEvent = new Map();
   await Promise.all(keyedMatches.map(async (match) => {
     try {
@@ -270,27 +281,32 @@ async function getMatches(env, betUrl, players = []) {
   const recentForms = await getRecentFormsForMatches(env, bettingEvents);
   return bettingEvents.map((event, index) => normalizeCloudbetMatch(event, recentForms[index], betUrl));
 }
-async function getPlayers(env) {
+async function getPlayers(env, limit = PUBLIC_PLAYER_LIMIT) {
   if (!env.API_TENNIS_KEY) return [];
   const [atp, wta] = await Promise.all([fetchApiTennis(env, "get_standings", { event_type: "ATP" }).catch(() => []), fetchApiTennis(env, "get_standings", { event_type: "WTA" }).catch(() => [])]);
-  return [...(atp || []).slice(0, 150).map((player) => normalizePlayer(player, "ATP")), ...(wta || []).slice(0, 150).map((player) => normalizePlayer(player, "WTA"))];
+  return [...(atp || []).slice(0, limit).map((player) => normalizePlayer(player, "ATP")), ...(wta || []).slice(0, limit).map((player) => normalizePlayer(player, "WTA"))];
 }
+function getPublicPlayers(players) { return [...players.filter((player) => player.tour === "ATP").slice(0, PUBLIC_PLAYER_LIMIT), ...players.filter((player) => player.tour === "WTA").slice(0, PUBLIC_PLAYER_LIMIT)]; }
 async function getNews() {
   const feedResults = await Promise.all(RSS_NEWS_FEEDS.map(async (feed) => { const response = await fetch(feed.url, { headers: { accept: "application/rss+xml, application/xml, text/xml" } }); if (!response.ok) throw new Error(`${feed.source} returned ${response.status}`); return parseRssItems(await response.text(), feed.source); }));
-  const articles = Array.from(new Map(feedResults.flat().map((article) => [article.url, article])).values()).slice(0, 12);
-  return Promise.all(articles.map(async (article, index) => ({ ...article, imageUrl: article.imageUrl || (index < NEWS_ARTICLE_IMAGE_LIMIT ? await fetchArticleImageUrl(article.url) : "") })));
+  const articles = Array.from(new Map(feedResults.flat().map((article) => [article.url, article])).values()).slice(0, NEWS_ARTICLE_LIMIT);
+  return Promise.all(articles.map(async (article, index) => {
+    const imageUrl = article.imageUrl || (index < NEWS_ARTICLE_IMAGE_LIMIT ? await fetchArticleImageUrl(article.url) : "");
+    return { ...article, imageUrl: imageUrl || DEFAULT_NEWS_IMAGE };
+  }));
 }
 
 export async function onRequestGet({ env }) {
   const betUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_CLOUDBET_URL).trim();
   const errors = [];
-  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT, cloudbetCompetitionScope: "Cloudbet tennis markets filtered to top-150 ATP/WTA profile matches; simulated markets excluded", blockedCloudbetMarkets: "Simulated Reality League, SRL, virtual, simulation", newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT, matchCount: 0, liveMatchCount: 0, upcomingMatchCount: 0, playerCount: 0, newsCount: 0, newsWithImagesCount: 0, newsProvider: "Tennis.com RSS", playerStats: "Top 150 ATP + Top 150 WTA", predictionSource: "Cloudbet tennis.winner markets + top-150 ATP/WTA profile filter + API-Tennis form/rank signals", predictionVariables: "Cloudbet implied probability, 100-day form, sample size, ranking, points, surface rating, trend, live status", predictionWindow: "Last 100 days where API-Tennis player keys match" };
+  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT, cloudbetCompetitionScope: "Cloudbet tennis markets filtered to ATP/WTA ranking profile matches; simulated markets excluded", blockedCloudbetMarkets: "Simulated Reality League, SRL, virtual, simulation", newsArticleLimit: NEWS_ARTICLE_LIMIT, newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT, h2hLookupLimit: H2H_LOOKUP_LIMIT, matchCount: 0, liveMatchCount: 0, upcomingMatchCount: 0, playerCount: 0, predictionPlayerPool: 0, newsCount: 0, newsWithImagesCount: 0, newsProvider: "Tennis.com RSS", playerStats: "Top 150 ATP + Top 150 WTA", predictionSource: "Cloudbet tennis.winner markets + expanded ATP/WTA ranking profile filter + API-Tennis form/rank signals", predictionVariables: "Cloudbet implied probability, 100-day form, sample size, ranking, points, surface rating, trend, live status", predictionWindow: "Last 100 days where API-Tennis player keys match" };
   let matches = [];
   let players = [];
+  let predictionPlayers = [];
   let news = [];
 
-  try { players = await getPlayers(env); diagnostics.playerCount = players.length; } catch (error) { errors.push(`player stats: ${error.message}`); }
-  try { matches = await getMatches(env, betUrl, players); diagnostics.matchCount = matches.length; diagnostics.liveMatchCount = matches.filter((match) => match.live).length; diagnostics.upcomingMatchCount = matches.filter((match) => !match.live).length; } catch (error) { errors.push(`cloudbet predictions: ${error.message}`); }
+  try { predictionPlayers = await getPlayers(env, PREDICTION_PLAYER_LIMIT); players = getPublicPlayers(predictionPlayers); diagnostics.playerCount = players.length; diagnostics.predictionPlayerPool = predictionPlayers.length; } catch (error) { errors.push(`player stats: ${error.message}`); }
+  try { matches = await getMatches(env, betUrl, predictionPlayers); diagnostics.matchCount = matches.length; diagnostics.liveMatchCount = matches.filter((match) => match.live).length; diagnostics.upcomingMatchCount = matches.filter((match) => !match.live).length; } catch (error) { errors.push(`cloudbet predictions: ${error.message}`); }
   try { news = await getNews(); diagnostics.newsCount = news.length; diagnostics.newsWithImagesCount = news.filter((article) => article.imageUrl).length; } catch (error) { errors.push(`news: ${error.message}`); }
 
   if (!diagnostics.hasApiTennisKey) errors.push("missing API_TENNIS_KEY Cloudflare secret");
