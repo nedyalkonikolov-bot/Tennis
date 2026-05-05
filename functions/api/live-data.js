@@ -85,7 +85,7 @@ function asFloat(value, fallback = null) {
 }
 
 function decodeEntities(value = "") {
-  return value
+  return String(value)
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
@@ -106,7 +106,7 @@ function cleanText(value = "") {
 }
 
 function normalizeName(value = "") {
-  return value
+  return String(value)
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -135,8 +135,14 @@ function getTagValue(item, tag) {
 }
 
 function getAttributeValue(markup = "", attribute) {
-  const match = markup.match(new RegExp(`${attribute}=(?:["']([^"']+)["']|([^\\s>]+))`, "i"));
+  const match = String(markup).match(new RegExp(`${attribute}=(?:["']([^"']+)["']|([^\\s>]+))`, "i"));
   return decodeEntities(match?.[1] || match?.[2] || "").trim();
+}
+
+function normalizeImageUrl(value = "") {
+  const clean = decodeEntities(value).trim();
+  if (clean.startsWith("//")) return `https:${clean}`;
+  return /^https?:\/\//i.test(clean) ? clean : "";
 }
 
 function getRssImageUrl(item) {
@@ -148,36 +154,46 @@ function getRssImageUrl(item) {
   ];
 
   for (const candidate of candidates) {
-    const url = getAttributeValue(candidate, "url") || getAttributeValue(candidate, "href") || getAttributeValue(candidate, "src");
-    if (url && /^https?:\/\//i.test(url)) return url;
+    const url = normalizeImageUrl(
+      getAttributeValue(candidate, "url") || getAttributeValue(candidate, "href") || getAttributeValue(candidate, "src"),
+    );
+    if (url) return url;
   }
 
   const description = getTagRawValue(item, "description");
-  const inlineImage = description.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1];
-  const decodedInlineImage = decodeEntities(inlineImage || "").trim();
-
-  return /^https?:\/\//i.test(decodedInlineImage) ? decodedInlineImage : "";
+  const inlineImage = description.match(/<img[^>]+src=(?:["']([^"']+)["']|([^\s>]+))/i);
+  return normalizeImageUrl(inlineImage?.[1] || inlineImage?.[2] || "");
 }
 
 function getMetaImageUrl(html = "") {
   const metaTags = html.match(/<meta[^>]+>/gi) || [];
 
   for (const tag of metaTags) {
-    const property = getAttributeValue(tag, "property") || getAttributeValue(tag, "name");
-    if (!["og:image", "twitter:image", "twitter:image:src"].includes(property)) continue;
+    const property = (getAttributeValue(tag, "property") || getAttributeValue(tag, "name")).toLowerCase();
+    if (!["og:image", "og:image:url", "twitter:image", "twitter:image:src"].includes(property)) continue;
 
-    const content = getAttributeValue(tag, "content");
-    if (content && /^https?:\/\//i.test(content)) return content;
+    const content = normalizeImageUrl(getAttributeValue(tag, "content"));
+    if (content) return content;
   }
 
-  return "";
+  const directMatch = html.match(/(?:og:image(?::url)?|twitter:image(?::src)?)[^>]+content=(?:["']([^"']+)["']|([^\s>]+))/i);
+  const directUrl = normalizeImageUrl(directMatch?.[1] || directMatch?.[2] || "");
+  if (directUrl) return directUrl;
+
+  const jsonLdMatch = html.match(/"image"\s*:\s*(?:"([^"]+)"|\[\s*"([^"]+)")/i);
+  return normalizeImageUrl(jsonLdMatch?.[1] || jsonLdMatch?.[2] || "");
 }
 
 async function fetchArticleImageUrl(articleUrl) {
   if (!articleUrl || !articleUrl.includes("tennis.com/")) return "";
 
   try {
-    const response = await fetch(articleUrl, { headers: { accept: "text/html" } });
+    const response = await fetch(articleUrl, {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        "user-agent": "Mozilla/5.0 TennisTipzBot/1.0",
+      },
+    });
     if (!response.ok) return "";
     const html = await response.text();
     return getMetaImageUrl(html);
@@ -241,8 +257,30 @@ function makePredictionFromForm(event, firstRecent, secondRecent, cloudbetOdds) 
   return { predictedWinner, predictedSide, confidence, predictedWinnerOdds: predictedWinnerOdds || "N/A" };
 }
 
+function eventStatus(event) {
+  return String(event.event_status || "").toLowerCase().trim();
+}
+
+function eventScore(event) {
+  return String(event.event_final_result || event.event_game_result || "").trim();
+}
+
 function isLiveEvent(event) {
-  return event.event_live === "1" || event.event_status?.toLowerCase?.().includes("set");
+  const status = eventStatus(event);
+  return event.event_live === "1" || /^set\s*\d+/i.test(status) || status.includes("in progress") || status === "live";
+}
+
+function isFinishedEvent(event) {
+  const status = eventStatus(event);
+  const finishedTerms = ["finished", "ended", "complete", "retired", "walkover", "w/o", "wo", "cancelled", "canceled", "abandoned"];
+  return Boolean(eventScore(event)) || finishedTerms.some((term) => status.includes(term));
+}
+
+function isUpcomingEvent(event) {
+  const status = eventStatus(event);
+  if (isLiveEvent(event) || isFinishedEvent(event)) return false;
+  if (!status || status === "-" || status === "scheduled" || status === "not started" || status === "upcoming") return true;
+  return status.includes("scheduled") || status.includes("not started");
 }
 
 function normalizeFixture(event, recentForms = {}, cloudbetOdds = null, betUrl = DEFAULT_CLOUDBET_URL) {
@@ -276,7 +314,7 @@ function normalizeFixture(event, recentForms = {}, cloudbetOdds = null, betUrl =
     predictedWinnerOdds: prediction.predictedWinnerOdds,
     confidence: prediction.confidence,
     status: event.event_status || "Scheduled",
-    score: event.event_final_result || event.event_game_result || "",
+    score: eventScore(event),
     live: isLiveEvent(event),
     tour: inferTour(event.event_type_type),
     betUrl,
@@ -466,10 +504,10 @@ async function getMatches(env, betUrl) {
     fetchApiTennis(env, "get_fixtures", { date_start, date_stop, timezone: "Europe/Sofia" }),
   ]);
 
-  const liveEvents = dedupeEvents((liveScores || []).filter(isSinglesMatch)).slice(0, 8);
+  const liveEvents = dedupeEvents((liveScores || []).filter(isSinglesMatch).filter((event) => !isFinishedEvent(event))).slice(0, 8);
   const liveIds = new Set(liveEvents.map((event) => String(event.event_key || "")));
   const upcomingEvents = dedupeEvents((fixtures || []).filter(isSinglesMatch))
-    .filter((event) => !isLiveEvent(event) && !liveIds.has(String(event.event_key || "")))
+    .filter((event) => isUpcomingEvent(event) && !liveIds.has(String(event.event_key || "")))
     .sort(sortUpcomingEvents)
     .slice(0, 12);
   const uniqueEvents = [...liveEvents, ...upcomingEvents];
@@ -528,6 +566,7 @@ export async function onRequestGet({ env }) {
     upcomingMatchCount: 0,
     playerCount: 0,
     newsCount: 0,
+    newsWithImagesCount: 0,
     newsProvider: "Tennis.com RSS",
     playerStats: "Top 150 ATP + Top 150 WTA",
     predictionWindow: "Last 100 days",
@@ -555,6 +594,7 @@ export async function onRequestGet({ env }) {
   try {
     news = await getNews();
     diagnostics.newsCount = news.length;
+    diagnostics.newsWithImagesCount = news.filter((article) => article.imageUrl).length;
   } catch (error) {
     errors.push(`news: ${error.message}`);
   }
