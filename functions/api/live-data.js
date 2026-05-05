@@ -1,5 +1,6 @@
 const TENNIS_API_BASE = "https://api.api-tennis.com/tennis/";
 const CLOUDBET_API_BASE = "https://sports-api.cloudbet.com/pub/v2/odds";
+const DEFAULT_CLOUDBET_URL = "https://www.cloudbet.com/en/sports/tennis";
 const RSS_NEWS_FEEDS = [
   { source: "Tennis.com", url: "https://www.tennis.com/roots/rss-feeds/news/" },
 ];
@@ -27,7 +28,10 @@ const fallbackMatches = [
     predictedWinnerOdds: "1.86",
     confidence: 62,
     status: "Scheduled",
+    score: "",
     live: false,
+    tour: "ATP",
+    betUrl: DEFAULT_CLOUDBET_URL,
   },
 ];
 
@@ -96,7 +100,7 @@ function cleanText(value = "") {
   return decodeEntities(value)
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+\|\s*[^|<>]+$/g, "")
-    .replace(/\s+[-–]\s+(ATP Tour|WTA Tennis|Tennis\.com)$/i, "")
+    .replace(/\s+[-\u2013]\s+(ATP Tour|WTA Tennis|Tennis\.com)$/i, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -122,7 +126,7 @@ function namesLookSimilar(a, b) {
 }
 
 function getTagRawValue(item, tag) {
-  const match = item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  const match = item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`, "i"));
   return decodeEntities(match?.[1] || "");
 }
 
@@ -237,7 +241,7 @@ function makePredictionFromForm(event, firstRecent, secondRecent, cloudbetOdds) 
   return { predictedWinner, predictedSide, confidence, predictedWinnerOdds: predictedWinnerOdds || "N/A" };
 }
 
-function normalizeFixture(event, recentForms = {}, cloudbetOdds = null) {
+function normalizeFixture(event, recentForms = {}, cloudbetOdds = null, betUrl = DEFAULT_CLOUDBET_URL) {
   const playerA = event.event_first_player || "Player A";
   const playerB = event.event_second_player || "Player B";
   const isLive = event.event_live === "1" || event.event_status?.toLowerCase?.().includes("set");
@@ -272,6 +276,7 @@ function normalizeFixture(event, recentForms = {}, cloudbetOdds = null) {
     score: event.event_final_result || event.event_game_result || "",
     live: isLive,
     tour: inferTour(event.event_type_type),
+    betUrl,
   };
 }
 
@@ -436,7 +441,7 @@ async function getRecentFormsForMatches(env, matches) {
   );
 }
 
-async function getMatches(env) {
+async function getMatches(env, betUrl) {
   const today = new Date();
   const date_start = formatDate(today);
   const date_stop = formatDate(addDays(today, 2));
@@ -455,7 +460,7 @@ async function getMatches(env) {
     getCloudbetTennisOdds(env).catch(() => []),
   ]);
 
-  return uniqueEvents.map((event, index) => normalizeFixture(event, recentForms[index], matchCloudbetOdds(event, cloudbetOdds)));
+  return uniqueEvents.map((event, index) => normalizeFixture(event, recentForms[index], matchCloudbetOdds(event, cloudbetOdds), betUrl));
 }
 
 async function getPlayers(env) {
@@ -493,10 +498,12 @@ async function getNews() {
 }
 
 export async function onRequestGet({ env }) {
+  const betUrl = env.CLOUDBET_AFFILIATE_URL || DEFAULT_CLOUDBET_URL;
   const errors = [];
   const diagnostics = {
     hasApiTennisKey: Boolean(env.API_TENNIS_KEY),
     hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY),
+    hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL),
     matchCount: 0,
     playerCount: 0,
     newsCount: 0,
@@ -509,7 +516,7 @@ export async function onRequestGet({ env }) {
   let news = [];
 
   try {
-    matches = await getMatches(env);
+    matches = await getMatches(env, betUrl);
     diagnostics.matchCount = matches.length;
   } catch (error) {
     errors.push(`tennis matches: ${error.message}`);
@@ -531,6 +538,7 @@ export async function onRequestGet({ env }) {
 
   if (!diagnostics.hasApiTennisKey) errors.push("missing API_TENNIS_KEY Cloudflare secret");
   if (!diagnostics.hasCloudbetApiKey) errors.push("missing CLOUDBET_API_KEY Cloudflare secret for Cloudbet odds");
+  if (!diagnostics.hasCloudbetAffiliateUrl) errors.push("missing CLOUDBET_AFFILIATE_URL Cloudflare variable for affiliate click-throughs");
 
   const hasLiveTennis = Boolean(env.API_TENNIS_KEY && (matches.length || players.length));
   const hasLiveNews = Boolean(news.length);
@@ -542,7 +550,8 @@ export async function onRequestGet({ env }) {
       odds: diagnostics.hasCloudbetApiKey ? "Cloudbet" : "fallback",
       news: hasLiveNews ? "Tennis.com" : "fallback",
     },
-    matches: matches.length ? matches : fallbackMatches,
+    betUrl,
+    matches: matches.length ? matches : fallbackMatches.map((match) => ({ ...match, betUrl })),
     players: players.length ? players : fallbackPlayers,
     news: news.length ? news : fallbackNews,
     errors,
