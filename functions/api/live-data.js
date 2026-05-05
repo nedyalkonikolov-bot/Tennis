@@ -45,7 +45,7 @@ function jsonResponse(payload, status = 200) {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": "public, max-age=180, stale-while-revalidate=600",
+      "cache-control": "public, max-age=60, stale-while-revalidate=300",
     },
   });
 }
@@ -155,6 +155,7 @@ async function fetchApiTennis(env, method, params = {}) {
   if (!response.ok) throw new Error(`${method} returned ${response.status}`);
 
   const payload = await response.json();
+  if (payload.success === 0) throw new Error(payload.error || `${method} returned no success flag`);
   return Array.isArray(payload.result) ? payload.result : [];
 }
 
@@ -206,33 +207,47 @@ async function getNews(env) {
 
   if (!response.ok) throw new Error(`NewsAPI returned ${response.status}`);
   const payload = await response.json();
+  if (payload.status === "error") throw new Error(payload.message || "NewsAPI returned an error");
 
   return (payload.articles || []).slice(0, 12).map(normalizeArticle);
 }
 
 export async function onRequestGet({ env }) {
   const errors = [];
+  const diagnostics = {
+    hasApiTennisKey: Boolean(env.API_TENNIS_KEY),
+    hasNewsApiKey: Boolean(env.NEWS_API_KEY),
+    matchCount: 0,
+    playerCount: 0,
+    newsCount: 0,
+  };
   let matches = [];
   let players = [];
   let news = [];
 
   try {
     matches = await getMatches(env);
+    diagnostics.matchCount = matches.length;
   } catch (error) {
     errors.push(`tennis matches: ${error.message}`);
   }
 
   try {
     players = await getPlayers(env);
+    diagnostics.playerCount = players.length;
   } catch (error) {
     errors.push(`player stats: ${error.message}`);
   }
 
   try {
     news = await getNews(env);
+    diagnostics.newsCount = news.length;
   } catch (error) {
     errors.push(`news: ${error.message}`);
   }
+
+  if (!diagnostics.hasApiTennisKey) errors.push("missing API_TENNIS_KEY Cloudflare secret");
+  if (!diagnostics.hasNewsApiKey) errors.push("missing NEWS_API_KEY Cloudflare secret");
 
   const hasLiveTennis = Boolean(env.API_TENNIS_KEY && (matches.length || players.length));
   const hasLiveNews = Boolean(env.NEWS_API_KEY && news.length);
@@ -247,5 +262,6 @@ export async function onRequestGet({ env }) {
     players: players.length ? players : fallbackPlayers,
     news: news.length ? news : fallbackNews,
     errors,
+    diagnostics,
   });
 }
