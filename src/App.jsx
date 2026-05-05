@@ -65,6 +65,26 @@ function StatBar({ value }) {
   );
 }
 
+function NewsImage({ item }) {
+  if (item.imageUrl) {
+    return (
+      <img
+        src={item.imageUrl}
+        alt=""
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        className="h-48 w-full object-cover"
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-48 w-full items-center justify-center bg-slate-900">
+      <Newspaper size={42} className="text-lime-300/70" />
+    </div>
+  );
+}
+
 function DataStatus({ liveData, loading, error, onRefresh }) {
   return (
     <div className="border-b border-white/10 bg-slate-900/60 px-5 py-3 text-sm text-slate-400 md:px-6">
@@ -357,20 +377,23 @@ function NewsPage({ news }) {
         ))}
       </div>
 
-      <div className="mt-8 grid gap-5 md:grid-cols-2">
+      <div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
         {filteredNews.map((item) => (
-          <article key={item.id || item.title} className="border border-white/10 bg-white/[0.04] p-6 hover:border-lime-400/40">
-            <div className="mb-4 flex items-center justify-between gap-3 text-sm">
-              <span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category}</span>
-              <span className="text-slate-500">{item.time}</span>
+          <article key={item.id || item.title} className="overflow-hidden border border-white/10 bg-white/[0.04] hover:border-lime-400/40">
+            <NewsImage item={item} />
+            <div className="p-6">
+              <div className="mb-4 flex items-center justify-between gap-3 text-sm">
+                <span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category}</span>
+                <span className="text-slate-500">{item.time}</span>
+              </div>
+              <h2 className="text-xl font-black leading-tight">{item.title}</h2>
+              <p className="mt-4 leading-7 text-slate-400">{item.summary}</p>
+              {item.url && item.url !== "#" && (
+                <a href={item.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">
+                  Read from {item.source}
+                </a>
+              )}
             </div>
-            <h2 className="text-2xl font-black">{item.title}</h2>
-            <p className="mt-4 leading-7 text-slate-400">{item.summary}</p>
-            {item.url && item.url !== "#" && (
-              <a href={item.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">
-                Read from {item.source}
-              </a>
-            )}
           </article>
         ))}
       </div>
