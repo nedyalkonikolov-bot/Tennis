@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
+  ExternalLink,
   Gauge,
   Home,
   Newspaper,
@@ -24,11 +25,17 @@ const pages = [
 
 const surfaces = ["All", "Hard", "Clay", "Grass"];
 const tours = ["ATP", "WTA"];
+const matchCategories = [
+  { id: "live", label: "Live" },
+  { id: "upcoming", label: "Upcoming" },
+];
 const newsCategories = ["All", "Setup", "News", "Tournament", "Player News", "Market", "Trend"];
+const defaultBetUrl = "https://www.cloudbet.com/en/sports/tennis";
 
 const initialLiveData = {
   generatedAt: null,
   source: { tennis: "fallback", odds: "fallback", news: "fallback" },
+  betUrl: defaultBetUrl,
   matches: fallbackMatches,
   players: fallbackPlayers,
   news: fallbackNews,
@@ -42,6 +49,16 @@ function getPrediction(match, modelRun = 0) {
   const value = confidence >= 70 ? "Strong" : confidence >= 63 ? "Positive" : "Lean";
 
   return { confidence, pick, value };
+}
+
+function getAnticipationScore(match) {
+  const recentMatches = (Number(match.recentA?.matches) || 0) + (Number(match.recentB?.matches) || 0);
+  const hasCloudbetOdds = match.oddsSource === "Cloudbet" && match.predictedWinnerOdds && match.predictedWinnerOdds !== "N/A";
+  const statusBoost = match.live ? 8 : 0;
+  const oddsBoost = hasCloudbetOdds ? 15 : 0;
+  const tourBoost = ["ATP", "WTA"].includes(match.tour) ? 4 : 0;
+
+  return (Number(match.confidence) || 0) + Math.min(recentMatches, 30) * 0.7 + oddsBoost + statusBoost + tourBoost;
 }
 
 function formatUpdatedAt(value) {
@@ -210,8 +227,8 @@ function HomePage({ setActivePage, liveData }) {
       <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-3 md:px-6">
         <button type="button" onClick={() => setActivePage("predictions")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <Target className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">Winner Predictions</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Each card shows the predicted winner, Cloudbet odds and both players' last-100-days form.</p>
+          <h3 className="text-xl font-bold">Live and Upcoming</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Prediction cards are grouped by status and sorted by the most anticipated matches first.</p>
         </button>
         <button type="button" onClick={() => setActivePage("stats")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <BarChart3 className="mb-4 text-lime-300" />
@@ -228,16 +245,43 @@ function HomePage({ setActivePage, liveData }) {
   );
 }
 
-function PredictionsPage({ matches }) {
+function OddsLink({ match, fallbackBetUrl }) {
+  const href = match.betUrl || fallbackBetUrl || defaultBetUrl;
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer sponsored"
+      className="group block bg-slate-900 p-4 ring-1 ring-lime-400/20 transition hover:bg-lime-400 hover:text-slate-950"
+    >
+      <span className="flex items-center justify-between gap-3 text-xs text-slate-500 group-hover:text-slate-800">
+        Cloudbet odds
+        <ExternalLink size={14} />
+      </span>
+      <span className="mt-1 block font-bold">{match.predictedWinnerOdds || match.odds || "N/A"}</span>
+      <span className="mt-1 block text-xs text-slate-500 group-hover:text-slate-800">{match.oddsSource || "Cloudbet"}</span>
+    </a>
+  );
+}
+
+function PredictionsPage({ matches, betUrl }) {
   const [surface, setSurface] = useState("All");
+  const [category, setCategory] = useState("live");
   const [modelRun, setModelRun] = useState(0);
+
+  const categoryCounts = useMemo(() => ({
+    live: matches.filter((match) => match.live).length,
+    upcoming: matches.filter((match) => !match.live).length,
+  }), [matches]);
 
   const filteredMatches = useMemo(() => {
     return matches
+      .filter((match) => (category === "live" ? match.live : !match.live))
       .filter((match) => surface === "All" || match.surface === surface)
-      .map((match) => ({ ...match, prediction: getPrediction(match, modelRun) }))
-      .sort((a, b) => b.prediction.confidence - a.prediction.confidence);
-  }, [matches, surface, modelRun]);
+      .map((match) => ({ ...match, prediction: getPrediction(match, modelRun), anticipation: getAnticipationScore(match) }))
+      .sort((a, b) => b.anticipation - a.anticipation || b.prediction.confidence - a.prediction.confidence);
+  }, [matches, category, surface, modelRun]);
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
@@ -245,14 +289,22 @@ function PredictionsPage({ matches }) {
         <div>
           <p className="text-sm font-semibold uppercase text-lime-300">Prediction board</p>
           <h1 className="mt-2 text-4xl font-black">Winner Predictions</h1>
-          <p className="mt-3 max-w-2xl text-slate-400">Winner calls are driven by API-Tennis last-100-days match records and enriched with Cloudbet winner odds when available.</p>
+          <p className="mt-3 max-w-2xl text-slate-400">Live and upcoming matches are separated, with the most anticipated predictions ranked first using form, confidence, status and available Cloudbet odds.</p>
         </div>
         <button type="button" onClick={() => setModelRun((value) => (value === 3 ? -2 : value + 1))} className="inline-flex w-fit items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">
           <Gauge size={18} /> Re-run Model
         </button>
       </div>
 
-      <div className="mt-8 flex gap-2 overflow-x-auto">
+      <div className="mt-8 flex flex-wrap gap-3">
+        {matchCategories.map((item) => (
+          <button key={item.id} type="button" onClick={() => setCategory(item.id)} className={`rounded-xl px-5 py-2 text-sm font-bold ${category === item.id ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
+            {item.label} ({categoryCounts[item.id] || 0})
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-5 flex gap-2 overflow-x-auto">
         {surfaces.map((item) => (
           <button key={item} type="button" onClick={() => setSurface(item)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${surface === item ? "bg-white text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
             {item}
@@ -270,13 +322,15 @@ function PredictionsPage({ matches }) {
               </div>
               <span className="rounded-full bg-lime-400/10 px-3 py-1 text-sm font-bold text-lime-300">{match.prediction.confidence}%</span>
             </div>
-            <p className="text-slate-300">Predicted winner: <span className="font-bold text-white">{match.prediction.pick}</span></p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-3 py-1 text-xs font-bold ${match.live ? "bg-red-500/15 text-red-200" : "bg-sky-400/10 text-sky-200"}`}>
+                {match.live ? "Live" : "Upcoming"}
+              </span>
+              <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">Anticipation {Math.round(match.anticipation)}</span>
+            </div>
+            <p className="mt-5 text-slate-300">Predicted winner: <span className="font-bold text-white">{match.prediction.pick}</span></p>
             <div className="mt-5 grid gap-4 sm:grid-cols-3">
-              <div className="bg-slate-900 p-4">
-                <p className="text-xs text-slate-500">Cloudbet odds</p>
-                <p className="mt-1 font-bold">{match.predictedWinnerOdds || match.odds || "N/A"}</p>
-                <p className="mt-1 text-xs text-slate-500">{match.oddsSource || "N/A"}</p>
-              </div>
+              <OddsLink match={match} fallbackBetUrl={betUrl} />
               <div className="bg-slate-900 p-4">
                 <p className="text-xs text-slate-500">{match.playerA} 100d</p>
                 <p className="mt-1 font-bold">{match.recentA?.wins || 0}-{match.recentA?.losses || 0}</p>
@@ -309,6 +363,12 @@ function PredictionsPage({ matches }) {
           </article>
         ))}
       </div>
+
+      {!filteredMatches.length && (
+        <div className="mt-8 border border-white/10 bg-white/[0.04] p-8 text-slate-400">
+          No {category} matches found for this surface right now.
+        </div>
+      )}
     </section>
   );
 }
@@ -464,6 +524,7 @@ export default function TennisTipzApp() {
       setLiveData({
         generatedAt: payload.generatedAt || null,
         source: payload.source || initialLiveData.source,
+        betUrl: payload.betUrl || defaultBetUrl,
         matches: payload.matches?.length ? payload.matches : fallbackMatches,
         players: payload.players?.length ? payload.players : fallbackPlayers,
         news: payload.news?.length ? payload.news : fallbackNews,
@@ -489,7 +550,7 @@ export default function TennisTipzApp() {
       <DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} />
       <main>
         {activePage === "home" && <HomePage setActivePage={setActivePage} liveData={liveData} />}
-        {activePage === "predictions" && <PredictionsPage matches={liveData.matches} />}
+        {activePage === "predictions" && <PredictionsPage matches={liveData.matches} betUrl={liveData.betUrl} />}
         {activePage === "stats" && <StatsPage players={liveData.players} />}
         {activePage === "news" && <NewsPage news={liveData.news} />}
       </main>
