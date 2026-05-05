@@ -367,7 +367,7 @@ function PredictionsPage({ matches, betUrl }) {
 
       {!filteredMatches.length && (
         <div className="mt-8 border border-white/10 bg-white/[0.04] p-8 text-slate-400">
-          No matches found for this surface right now.
+          No Cloudbet tennis betting matches found right now.
         </div>
       )}
     </section>
@@ -526,7 +526,7 @@ export default function TennisTipzApp() {
         generatedAt: payload.generatedAt || null,
         source: payload.source || initialLiveData.source,
         betUrl: payload.betUrl || defaultBetUrl,
-        matches: payload.matches?.length ? payload.matches : fallbackMatches,
+        matches: Array.isArray(payload.matches) ? payload.matches : fallbackMatches,
         players: payload.players?.length ? payload.players : fallbackPlayers,
         news: payload.news?.length ? payload.news : fallbackNews,
         errors: payload.errors || [],
