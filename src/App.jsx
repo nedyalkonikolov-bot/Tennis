@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
   Gauge,
   Home,
   Newspaper,
+  RefreshCw,
   Search,
   ShieldCheck,
   Target,
@@ -12,109 +13,7 @@ import {
   Trophy,
   Users,
 } from "lucide-react";
-
-const matches = [
-  {
-    id: 1,
-    tournament: "Madrid Masters",
-    startTime: "Today 14:30",
-    playerA: "Jannik Sinner",
-    playerB: "Carlos Alcaraz",
-    surface: "Clay",
-    market: "Over 22.5 Games",
-    formA: 88,
-    formB: 84,
-    serveHoldA: 91,
-    serveHoldB: 88,
-    returnEdge: 3,
-    h2hEdge: -2,
-    odds: "1.86",
-  },
-  {
-    id: 2,
-    tournament: "Rome WTA",
-    startTime: "Today 16:00",
-    playerA: "Iga Swiatek",
-    playerB: "Aryna Sabalenka",
-    surface: "Clay",
-    market: "Swiatek to Win",
-    formA: 92,
-    formB: 81,
-    serveHoldA: 82,
-    serveHoldB: 84,
-    returnEdge: 12,
-    h2hEdge: 7,
-    odds: "1.72",
-  },
-  {
-    id: 3,
-    tournament: "ATP 500 Barcelona",
-    startTime: "Tomorrow 11:00",
-    playerA: "Daniil Medvedev",
-    playerB: "Taylor Fritz",
-    surface: "Hard",
-    market: "Fritz +1.5 Sets",
-    formA: 74,
-    formB: 79,
-    serveHoldA: 84,
-    serveHoldB: 89,
-    returnEdge: -4,
-    h2hEdge: -1,
-    odds: "1.68",
-  },
-  {
-    id: 4,
-    tournament: "Queens Club",
-    startTime: "Tomorrow 15:30",
-    playerA: "Hubert Hurkacz",
-    playerB: "Alex de Minaur",
-    surface: "Grass",
-    market: "Hurkacz to Win",
-    formA: 78,
-    formB: 76,
-    serveHoldA: 93,
-    serveHoldB: 80,
-    returnEdge: -2,
-    h2hEdge: 4,
-    odds: "1.91",
-  },
-];
-
-const players = [
-  { name: "Jannik Sinner", tour: "ATP", rank: 1, form: 88, hold: 91, breakRate: 28, clay: 84, hard: 92, grass: 79, trend: "+6" },
-  { name: "Carlos Alcaraz", tour: "ATP", rank: 2, form: 84, hold: 88, breakRate: 31, clay: 91, hard: 86, grass: 83, trend: "+3" },
-  { name: "Iga Swiatek", tour: "WTA", rank: 1, form: 92, hold: 82, breakRate: 46, clay: 96, hard: 88, grass: 73, trend: "+8" },
-  { name: "Aryna Sabalenka", tour: "WTA", rank: 2, form: 81, hold: 84, breakRate: 35, clay: 83, hard: 90, grass: 78, trend: "-2" },
-  { name: "Taylor Fritz", tour: "ATP", rank: 12, form: 79, hold: 89, breakRate: 20, clay: 70, hard: 87, grass: 82, trend: "+5" },
-  { name: "Alex de Minaur", tour: "ATP", rank: 9, form: 76, hold: 80, breakRate: 27, clay: 73, hard: 82, grass: 80, trend: "+1" },
-];
-
-const news = [
-  {
-    title: "Madrid draw creates a loaded top half",
-    category: "Tournament",
-    time: "12 min ago",
-    summary: "Several elite returners land in the same section, which could push totals lower in early rounds and create upset value.",
-  },
-  {
-    title: "Sinner practice reports point to full workload",
-    category: "Player News",
-    time: "48 min ago",
-    summary: "The market has stabilized after a short injury scare, but live movement should still be watched before first serve.",
-  },
-  {
-    title: "Clay hold rates continue to dip this week",
-    category: "Market",
-    time: "2 hr ago",
-    summary: "Cooler conditions are slowing the court and making return games more valuable than raw serve rankings.",
-  },
-  {
-    title: "WTA favorites covering more often on slow courts",
-    category: "Trend",
-    time: "4 hr ago",
-    summary: "Top seeds with strong second-serve return numbers are separating earlier in sets across the current clay swing.",
-  },
-];
+import { fallbackMatches, fallbackNews, fallbackPlayers } from "./data/fallbackData";
 
 const pages = [
   { id: "home", label: "Home", icon: Home },
@@ -124,22 +23,62 @@ const pages = [
 ];
 
 const surfaces = ["All", "Hard", "Clay", "Grass"];
-const newsCategories = ["All", "Tournament", "Player News", "Market", "Trend"];
+const newsCategories = ["All", "Setup", "News", "Tournament", "Player News", "Market", "Trend"];
+
+const initialLiveData = {
+  generatedAt: null,
+  source: { tennis: "fallback", news: "fallback" },
+  matches: fallbackMatches,
+  players: fallbackPlayers,
+  news: fallbackNews,
+  errors: [],
+};
 
 function getPrediction(match, modelRun) {
-  const formEdge = match.formA - match.formB;
-  const serveProfile = (match.serveHoldA + match.serveHoldB) / 2;
-  const matchupScore = 56 + formEdge * 0.16 + serveProfile * 0.1 + match.returnEdge * 0.35 + match.h2hEdge * 0.25 + modelRun;
-  const confidence = Math.max(52, Math.min(78, Math.round(matchupScore)));
-  const value = confidence >= 68 ? "Strong" : confidence >= 62 ? "Positive" : "Lean";
+  const formEdge = (match.formA || 68) - (match.formB || 68);
+  const serveProfile = ((match.serveHoldA || 72) + (match.serveHoldB || 72)) / 2;
+  const matchupScore = 54 + formEdge * 0.18 + serveProfile * 0.12 + (match.returnEdge || 0) * 0.4 + (match.h2hEdge || 0) * 0.25 + modelRun;
+  const confidence = Math.max(51, Math.min(82, Math.round(matchupScore)));
+  const pick = confidence >= 66 ? match.market : "Value watch";
+  const value = confidence >= 70 ? "Strong" : confidence >= 63 ? "Positive" : "Lean";
 
-  return { confidence, value };
+  return { confidence, pick, value };
+}
+
+function formatUpdatedAt(value) {
+  if (!value) return "Using fallback data";
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function StatBar({ value }) {
+  const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
+
   return (
     <div className="h-2 w-full rounded-full bg-slate-800">
-      <div className="h-2 rounded-full bg-lime-400" style={{ width: `${value}%` }} />
+      <div className="h-2 rounded-full bg-lime-400" style={{ width: `${safeValue}%` }} />
+    </div>
+  );
+}
+
+function DataStatus({ liveData, loading, error, onRefresh }) {
+  return (
+    <div className="border-b border-white/10 bg-slate-900/60 px-5 py-3 text-sm text-slate-400 md:px-6">
+      <div className="mx-auto flex max-w-7xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="rounded-full bg-white/5 px-3 py-1">Tennis: {liveData.source.tennis}</span>
+          <span className="rounded-full bg-white/5 px-3 py-1">News: {liveData.source.news}</span>
+          <span>Updated {formatUpdatedAt(liveData.generatedAt)}</span>
+          {error && <span className="text-amber-300">{error}</span>}
+        </div>
+        <button type="button" onClick={onRefresh} className="inline-flex w-fit items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-white hover:bg-white/10">
+          <RefreshCw size={15} className={loading ? "animate-spin" : ""} /> Refresh live data
+        </button>
+      </div>
     </div>
   );
 }
@@ -172,7 +111,7 @@ function Header({ activePage, setActivePage }) {
           </span>
           <span>
             <span className="block text-xl font-bold tracking-tight">TennisTipz</span>
-            <span className="block text-xs text-slate-400">dynamic tennis intelligence</span>
+            <span className="block text-xs text-slate-400">live tennis intelligence</span>
           </span>
         </button>
         <nav className="flex gap-2 overflow-x-auto pb-1 md:pb-0">
@@ -185,8 +124,9 @@ function Header({ activePage, setActivePage }) {
   );
 }
 
-function HomePage({ setActivePage }) {
-  const featured = getPrediction(matches[0], 2);
+function HomePage({ setActivePage, liveData }) {
+  const featuredMatch = liveData.matches[0] || fallbackMatches[0];
+  const featured = getPrediction(featuredMatch, 2);
 
   return (
     <>
@@ -196,10 +136,10 @@ function HomePage({ setActivePage }) {
             <TrendingUp size={16} /> Live model board for ATP and WTA matches
           </div>
           <h1 className="max-w-3xl text-4xl font-black leading-tight tracking-tight md:text-6xl">
-            Dynamic tennis predictions, stats, and market news.
+            Live tennis predictions, stats, and market news.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-            TennisTipz now organizes match projections, player performance signals, and betting-relevant news into fast, focused pages.
+            TennisTipz now pulls match data, player ranking signals, and tennis headlines through secure Cloudflare endpoints.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button type="button" onClick={() => setActivePage("predictions")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 shadow-xl shadow-lime-400/20 hover:bg-lime-300">
@@ -222,23 +162,23 @@ function HomePage({ setActivePage }) {
               <div className="rounded-full bg-lime-400/10 px-3 py-1 text-sm font-bold text-lime-300">{featured.confidence}%</div>
             </div>
             <div className="bg-slate-800 p-5">
-              <p className="text-lg font-bold">{matches[0].playerA} vs {matches[0].playerB}</p>
-              <p className="mt-2 text-slate-300">Pick: <span className="font-semibold text-white">{matches[0].market}</span></p>
+              <p className="text-lg font-bold">{featuredMatch.playerA} vs {featuredMatch.playerB}</p>
+              <p className="mt-2 text-slate-300">Pick: <span className="font-semibold text-white">{featured.pick}</span></p>
               <p className="mt-4 text-sm leading-6 text-slate-400">
-                Serve hold strength, recent form and head-to-head pressure create a projected {featured.value.toLowerCase()} value angle.
+                {featuredMatch.tournament} - {featuredMatch.status}. The model grades this as a {featured.value.toLowerCase()} setup from current match inputs.
               </p>
             </div>
             <div className="mt-5 grid grid-cols-3 gap-3 text-center">
               <div className="bg-white/5 p-4">
-                <p className="text-2xl font-black">{matches.length}</p>
+                <p className="text-2xl font-black">{liveData.matches.length}</p>
                 <p className="text-xs text-slate-400">Matches</p>
               </div>
               <div className="bg-white/5 p-4">
-                <p className="text-2xl font-black">{players.length}</p>
+                <p className="text-2xl font-black">{liveData.players.length}</p>
                 <p className="text-xs text-slate-400">Players</p>
               </div>
               <div className="bg-white/5 p-4">
-                <p className="text-2xl font-black">{news.length}</p>
+                <p className="text-2xl font-black">{liveData.news.length}</p>
                 <p className="text-xs text-slate-400">Updates</p>
               </div>
             </div>
@@ -249,8 +189,8 @@ function HomePage({ setActivePage }) {
       <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-3 md:px-6">
         <button type="button" onClick={() => setActivePage("predictions")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <Target className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">Dynamic Predictions</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Filter by surface and refresh the model run to see confidence scores recalculate from match inputs.</p>
+          <h3 className="text-xl font-bold">Live Match Predictions</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Upcoming and live matches become confidence-rated cards from the tennis data feed.</p>
         </button>
         <button type="button" onClick={() => setActivePage("stats")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <BarChart3 className="mb-4 text-lime-300" />
@@ -259,15 +199,15 @@ function HomePage({ setActivePage }) {
         </button>
         <button type="button" onClick={() => setActivePage("news")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <Newspaper className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">News Pages</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Track tournament notes, player updates, market movement and trend stories in one feed.</p>
+          <h3 className="text-xl font-bold">News Feed</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Track player availability, tournament notes and market-relevant tennis headlines.</p>
         </button>
       </section>
     </>
   );
 }
 
-function PredictionsPage() {
+function PredictionsPage({ matches }) {
   const [surface, setSurface] = useState("All");
   const [modelRun, setModelRun] = useState(1);
 
@@ -276,18 +216,18 @@ function PredictionsPage() {
       .filter((match) => surface === "All" || match.surface === surface)
       .map((match) => ({ ...match, prediction: getPrediction(match, modelRun) }))
       .sort((a, b) => b.prediction.confidence - a.prediction.confidence);
-  }, [surface, modelRun]);
+  }, [matches, surface, modelRun]);
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
       <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-sm font-semibold uppercase text-lime-300">Prediction board</p>
-          <h1 className="mt-2 text-4xl font-black">Dynamic Predictions</h1>
-          <p className="mt-3 max-w-2xl text-slate-400">Confidence is recalculated from form, serve hold, return edge, head-to-head pressure and the current model run.</p>
+          <h1 className="mt-2 text-4xl font-black">Live Match Predictions</h1>
+          <p className="mt-3 max-w-2xl text-slate-400">Confidence is recalculated from live fixture inputs, form proxies, serve hold profile and matchup edge.</p>
         </div>
         <button type="button" onClick={() => setModelRun((value) => (value === 4 ? -2 : value + 1))} className="inline-flex w-fit items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">
-          <Gauge size={18} /> Refresh Model
+          <Gauge size={18} /> Re-run Model
         </button>
       </div>
 
@@ -309,23 +249,23 @@ function PredictionsPage() {
               </div>
               <span className="rounded-full bg-lime-400/10 px-3 py-1 text-sm font-bold text-lime-300">{match.prediction.confidence}%</span>
             </div>
-            <p className="text-slate-300">Model pick: <span className="font-bold text-white">{match.market}</span></p>
+            <p className="text-slate-300">Model pick: <span className="font-bold text-white">{match.prediction.pick}</span></p>
             <div className="mt-5 grid gap-4 sm:grid-cols-3">
               <div className="bg-slate-900 p-4">
                 <p className="text-xs text-slate-500">Surface</p>
                 <p className="mt-1 font-bold">{match.surface}</p>
               </div>
               <div className="bg-slate-900 p-4">
-                <p className="text-xs text-slate-500">Value</p>
-                <p className="mt-1 font-bold">{match.prediction.value}</p>
+                <p className="text-xs text-slate-500">Status</p>
+                <p className="mt-1 font-bold">{match.live ? "Live" : match.status}</p>
               </div>
               <div className="bg-slate-900 p-4">
-                <p className="text-xs text-slate-500">Odds</p>
-                <p className="mt-1 font-bold">{match.odds}</p>
+                <p className="text-xs text-slate-500">Score/Odds</p>
+                <p className="mt-1 font-bold">{match.score || match.odds}</p>
               </div>
             </div>
             <div className="mt-5 space-y-3 text-sm text-slate-300">
-              <p>Form edge: {match.formA - match.formB > 0 ? "+" : ""}{match.formA - match.formB}</p>
+              <p>Form edge: {(match.formA || 0) - (match.formB || 0) > 0 ? "+" : ""}{(match.formA || 0) - (match.formB || 0)}</p>
               <StatBar value={match.prediction.confidence} />
             </div>
           </article>
@@ -335,7 +275,7 @@ function PredictionsPage() {
   );
 }
 
-function StatsPage() {
+function StatsPage({ players }) {
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState("form");
 
@@ -343,14 +283,14 @@ function StatsPage() {
     return players
       .filter((player) => player.name.toLowerCase().includes(query.toLowerCase()) || player.tour.toLowerCase().includes(query.toLowerCase()))
       .sort((a, b) => (sortKey === "rank" ? a.rank - b.rank : b[sortKey] - a[sortKey]));
-  }, [query, sortKey]);
+  }, [players, query, sortKey]);
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
       <div>
         <p className="text-sm font-semibold uppercase text-lime-300">Player database</p>
         <h1 className="mt-2 text-4xl font-black">Player Stats</h1>
-        <p className="mt-3 max-w-2xl text-slate-400">Compare form, serve reliability, return pressure and surface ratings for betting decisions.</p>
+        <p className="mt-3 max-w-2xl text-slate-400">Compare live ranking data with generated form, serve, return and surface ratings.</p>
       </div>
 
       <div className="mt-8 grid gap-3 md:grid-cols-[1fr_auto]">
@@ -374,14 +314,14 @@ function StatsPage() {
           <span>Player</span><span>Rank</span><span>Form</span><span>Hold</span><span>Break</span><span>Clay</span><span>Hard</span><span>Grass</span>
         </div>
         {filteredPlayers.map((player) => (
-          <div key={player.name} className="grid gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 md:grid-cols-[1.4fr_0.6fr_repeat(6,0.7fr)] md:items-center">
+          <div key={player.id || player.name} className="grid gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 md:grid-cols-[1.4fr_0.6fr_repeat(6,0.7fr)] md:items-center">
             <div>
               <p className="font-bold">{player.name}</p>
               <p className="text-sm text-slate-500">{player.tour} trend {player.trend}</p>
             </div>
             <p className="text-sm text-slate-300">#{player.rank}</p>
             {[player.form, player.hold, player.breakRate, player.clay, player.hard, player.grass].map((value, index) => (
-              <div key={`${player.name}-${index}`}>
+              <div key={`${player.id || player.name}-${index}`}>
                 <p className="mb-2 text-sm font-bold">{value}</p>
                 <StatBar value={value} />
               </div>
@@ -393,10 +333,10 @@ function StatsPage() {
   );
 }
 
-function NewsPage() {
+function NewsPage({ news }) {
   const [category, setCategory] = useState("All");
 
-  const filteredNews = useMemo(() => news.filter((item) => category === "All" || item.category === category), [category]);
+  const filteredNews = useMemo(() => news.filter((item) => category === "All" || item.category === category), [news, category]);
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
@@ -419,13 +359,18 @@ function NewsPage() {
 
       <div className="mt-8 grid gap-5 md:grid-cols-2">
         {filteredNews.map((item) => (
-          <article key={item.title} className="border border-white/10 bg-white/[0.04] p-6 hover:border-lime-400/40">
+          <article key={item.id || item.title} className="border border-white/10 bg-white/[0.04] p-6 hover:border-lime-400/40">
             <div className="mb-4 flex items-center justify-between gap-3 text-sm">
               <span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category}</span>
               <span className="text-slate-500">{item.time}</span>
             </div>
             <h2 className="text-2xl font-black">{item.title}</h2>
             <p className="mt-4 leading-7 text-slate-400">{item.summary}</p>
+            {item.url && item.url !== "#" && (
+              <a href={item.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">
+                Read from {item.source}
+              </a>
+            )}
           </article>
         ))}
       </div>
@@ -450,15 +395,50 @@ function ResponsibleFooter() {
 
 export default function TennisTipzApp() {
   const [activePage, setActivePage] = useState("home");
+  const [liveData, setLiveData] = useState(initialLiveData);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  async function loadLiveData() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(`/api/live-data?ts=${Date.now()}`);
+      if (!response.ok) throw new Error(`Live data returned ${response.status}`);
+      const payload = await response.json();
+
+      setLiveData({
+        generatedAt: payload.generatedAt || null,
+        source: payload.source || initialLiveData.source,
+        matches: payload.matches?.length ? payload.matches : fallbackMatches,
+        players: payload.players?.length ? payload.players : fallbackPlayers,
+        news: payload.news?.length ? payload.news : fallbackNews,
+        errors: payload.errors || [],
+      });
+
+      if (payload.errors?.length) setError("Some live feeds used fallback data.");
+    } catch (loadError) {
+      setLiveData(initialLiveData);
+      setError(loadError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadLiveData();
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       <Header activePage={activePage} setActivePage={setActivePage} />
+      <DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} />
       <main>
-        {activePage === "home" && <HomePage setActivePage={setActivePage} />}
-        {activePage === "predictions" && <PredictionsPage />}
-        {activePage === "stats" && <StatsPage />}
-        {activePage === "news" && <NewsPage />}
+        {activePage === "home" && <HomePage setActivePage={setActivePage} liveData={liveData} />}
+        {activePage === "predictions" && <PredictionsPage matches={liveData.matches} />}
+        {activePage === "stats" && <StatsPage players={liveData.players} />}
+        {activePage === "news" && <NewsPage news={liveData.news} />}
       </main>
       <ResponsibleFooter />
     </div>
