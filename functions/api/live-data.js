@@ -36,12 +36,6 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
-function addDays(date, days) {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
-
 function asNumber(value, fallback = 0) {
   const number = Number.parseInt(value, 10);
   return Number.isFinite(number) ? number : fallback;
@@ -54,6 +48,12 @@ function asFloat(value, fallback = null) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
 }
 
 function decodeEntities(value = "") {
@@ -126,16 +126,11 @@ function getRssImageUrl(item) {
     item.match(/<enclosure[^>]+>/i)?.[0],
     item.match(/<image[^>]+>/i)?.[0],
   ];
-
   for (const candidate of candidates) {
-    const url = normalizeImageUrl(
-      getAttributeValue(candidate, "url") || getAttributeValue(candidate, "href") || getAttributeValue(candidate, "src"),
-    );
+    const url = normalizeImageUrl(getAttributeValue(candidate, "url") || getAttributeValue(candidate, "href") || getAttributeValue(candidate, "src"));
     if (url) return url;
   }
-
-  const description = getTagRawValue(item, "description");
-  const inlineImage = description.match(/<img[^>]+src=(?:["']([^"']+)["']|([^\s>]+))/i);
+  const inlineImage = getTagRawValue(item, "description").match(/<img[^>]+src=(?:["']([^"']+)["']|([^\s>]+))/i);
   return normalizeImageUrl(inlineImage?.[1] || inlineImage?.[2] || "");
 }
 
@@ -164,30 +159,8 @@ async function fetchArticleImageUrl(articleUrl) {
   }
 }
 
-function inferSurface(event) {
-  const text = `${event.tournament_name || ""} ${event.event_type_type || ""} ${event.competition?.name || ""} ${event.name || ""}`.toLowerCase();
-  if (text.includes("grass") || text.includes("queens") || text.includes("halle") || text.includes("wimbledon")) return "Grass";
-  if (text.includes("clay") || text.includes("roland") || text.includes("madrid") || text.includes("rome") || text.includes("monte")) return "Clay";
-  return "Hard";
-}
-
-function inferNewsCategory(title = "") {
-  const text = title.toLowerCase();
-  if (text.includes("injur") || text.includes("withdraw") || text.includes("return")) return "Player News";
-  if (text.includes("rank") || text.includes("stat")) return "Trend";
-  if (text.includes("draw") || text.includes("schedule") || text.includes("open") || text.includes("masters")) return "Tournament";
-  return "News";
-}
-
 function getCloudbetCompetitionText(competition = {}) {
-  return [
-    competition.name,
-    competition.key,
-    competition.category?.name,
-    competition.category?.key,
-    competition.group,
-    competition.path,
-  ]
+  return [competition.name, competition.key, competition.category?.name, competition.category?.key, competition.group, competition.path]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -195,8 +168,7 @@ function getCloudbetCompetitionText(competition = {}) {
 
 function getCloudbetTourFromText(value = "") {
   const text = String(value).toLowerCase();
-  const blocked = /\b(itf|utr|challenger|exhibition|boys|girls|junior|juniors|college|davis|billie|hopman)\b/.test(text);
-  if (blocked) return "";
+  if (/\b(itf|utr|challenger|exhibition|boys|girls|junior|juniors|college|davis|billie|hopman)\b/.test(text)) return "";
   if (/\bwta\b|women's tennis association/.test(text)) return "WTA";
   if (/\batp\b|association of tennis professionals/.test(text)) return "ATP";
   return "";
@@ -210,106 +182,19 @@ function isAtpOrWtaCompetition(competition = {}) {
   return Boolean(getCloudbetTour(competition));
 }
 
-function getMatchWinner(event, playerKey) {
-  if (!event.event_winner || event.event_winner === "-") return false;
-  if (event.event_winner === "First Player") return String(event.first_player_key) === String(playerKey);
-  if (event.event_winner === "Second Player") return String(event.second_player_key) === String(playerKey);
-  return false;
+function inferSurface(event) {
+  const text = `${event.tournament_name || ""} ${event.event_type_type || ""} ${event.competition?.name || ""} ${event.name || ""}`.toLowerCase();
+  if (text.includes("grass") || text.includes("queens") || text.includes("halle") || text.includes("wimbledon")) return "Grass";
+  if (text.includes("clay") || text.includes("roland") || text.includes("madrid") || text.includes("rome") || text.includes("monte")) return "Clay";
+  return "Hard";
 }
 
-function getRecentForm(events = [], playerKey, days = 100) {
-  const cutoff = addDays(new Date(), -days);
-  const recent = events.filter((event) => {
-    const date = new Date(event.event_date);
-    return event.event_status === "Finished" && !Number.isNaN(date.getTime()) && date >= cutoff;
-  });
-  const wins = recent.filter((event) => getMatchWinner(event, playerKey)).length;
-  const losses = Math.max(0, recent.length - wins);
-  const winRate = recent.length ? Math.round((wins / recent.length) * 100) : 50;
-  return { wins, losses, matches: recent.length, winRate };
-}
-
-function getImpliedProbability(odds) {
-  const homeOdds = asFloat(odds?.home);
-  const awayOdds = asFloat(odds?.away);
-  if (!homeOdds || !awayOdds) return { home: 50, away: 50, edge: 0 };
-  const homeRaw = 1 / homeOdds;
-  const awayRaw = 1 / awayOdds;
-  const total = homeRaw + awayRaw;
-  const home = Math.round((homeRaw / total) * 1000) / 10;
-  const away = Math.round((awayRaw / total) * 1000) / 10;
-  return { home, away, edge: home - away };
-}
-
-function getSurfaceRating(profile, surface) {
-  if (!profile) return 50;
-  const key = surface?.toLowerCase?.() || "hard";
-  return asNumber(profile[key], profile.form || 50);
-}
-
-function getTrendScore(profile) {
-  if (!profile) return 0;
-  if (profile.movement === "up") return 2;
-  if (profile.movement === "down") return -2;
-  const trend = asNumber(profile.trend, 0);
-  return clamp(trend, -3, 3);
-}
-
-function getRankEdge(firstProfile, secondProfile) {
-  const firstRank = firstProfile?.rank && firstProfile.rank < 999 ? firstProfile.rank : null;
-  const secondRank = secondProfile?.rank && secondProfile.rank < 999 ? secondProfile.rank : null;
-  if (!firstRank || !secondRank) return 0;
-  return clamp((secondRank - firstRank) * 0.18, -12, 12);
-}
-
-function getPointsEdge(firstProfile, secondProfile) {
-  const firstPoints = asNumber(firstProfile?.points, 0);
-  const secondPoints = asNumber(secondProfile?.points, 0);
-  if (!firstPoints || !secondPoints) return 0;
-  return clamp(((firstPoints - secondPoints) / Math.max(firstPoints, secondPoints)) * 10, -6, 6);
-}
-
-function makePredictionFromSignals(event, firstRecent, secondRecent, cloudbetOdds, firstProfile, secondProfile) {
-  const surface = inferSurface(event);
-  const marketProbability = getImpliedProbability(cloudbetOdds);
-  const formEdge = ((firstRecent.winRate || 50) - (secondRecent.winRate || 50)) * 0.34;
-  const volumeEdge = clamp(((firstRecent.matches || 0) - (secondRecent.matches || 0)) * 0.22, -4, 4);
-  const rankEdge = getRankEdge(firstProfile, secondProfile);
-  const pointsEdge = getPointsEdge(firstProfile, secondProfile);
-  const marketEdge = marketProbability.edge * 0.42;
-  const surfaceEdge = (getSurfaceRating(firstProfile, surface) - getSurfaceRating(secondProfile, surface)) * 0.16;
-  const trendEdge = getTrendScore(firstProfile) - getTrendScore(secondProfile);
-  const liveAdjustment = isLiveEvent(event) ? 1.5 : 0;
-  const modelEdge = formEdge + volumeEdge + rankEdge + pointsEdge + marketEdge + surfaceEdge + trendEdge + liveAdjustment;
-  const predictedSide = modelEdge >= 0 ? "home" : "away";
-  const predictedWinner = predictedSide === "home" ? event.event_first_player : event.event_second_player;
-  const predictedWinnerOdds = predictedSide === "home" ? cloudbetOdds?.home : cloudbetOdds?.away;
-  const dataPoints = [
-    firstRecent.matches || secondRecent.matches,
-    firstProfile?.rank && secondProfile?.rank,
-    firstProfile?.points && secondProfile?.points,
-    cloudbetOdds?.home && cloudbetOdds?.away,
-    surface !== "Hard" || firstProfile || secondProfile,
-  ].filter(Boolean).length;
-  const confidence = clamp(Math.round(54 + Math.abs(modelEdge) * 0.78 + dataPoints * 1.4), 52, 86);
-
-  return {
-    predictedWinner,
-    predictedSide,
-    confidence,
-    predictedWinnerOdds: predictedWinnerOdds || "N/A",
-    modelEdge: Math.round(modelEdge * 10) / 10,
-    factors: {
-      marketProbability,
-      formEdge: Math.round(formEdge * 10) / 10,
-      rankEdge: Math.round(rankEdge * 10) / 10,
-      pointsEdge: Math.round(pointsEdge * 10) / 10,
-      surfaceEdge: Math.round(surfaceEdge * 10) / 10,
-      trendEdge: Math.round(trendEdge * 10) / 10,
-      volumeEdge: Math.round(volumeEdge * 10) / 10,
-      dataPoints,
-    },
-  };
+function inferNewsCategory(title = "") {
+  const text = title.toLowerCase();
+  if (text.includes("injur") || text.includes("withdraw") || text.includes("return")) return "Player News";
+  if (text.includes("rank") || text.includes("stat")) return "Trend";
+  if (text.includes("draw") || text.includes("schedule") || text.includes("open") || text.includes("masters")) return "Tournament";
+  return "News";
 }
 
 function eventStatus(event) {
@@ -338,24 +223,115 @@ function isUpcomingEvent(event) {
   return status.includes("scheduled") || status.includes("not started") || status.includes("trading");
 }
 
+function getMatchWinner(event, playerKey) {
+  if (!event.event_winner || event.event_winner === "-") return false;
+  if (event.event_winner === "First Player") return String(event.first_player_key) === String(playerKey);
+  if (event.event_winner === "Second Player") return String(event.second_player_key) === String(playerKey);
+  return false;
+}
+
+function getRecentForm(events = [], playerKey, days = 100) {
+  const cutoff = addDays(new Date(), -days);
+  const recent = events.filter((event) => {
+    const date = new Date(event.event_date);
+    return event.event_status === "Finished" && !Number.isNaN(date.getTime()) && date >= cutoff;
+  });
+  const wins = recent.filter((event) => getMatchWinner(event, playerKey)).length;
+  const losses = Math.max(0, recent.length - wins);
+  return { wins, losses, matches: recent.length, winRate: recent.length ? Math.round((wins / recent.length) * 100) : 50 };
+}
+
+function getImpliedProbability(odds) {
+  const homeOdds = asFloat(odds?.home);
+  const awayOdds = asFloat(odds?.away);
+  if (!homeOdds || !awayOdds) return { home: 50, away: 50, edge: 0 };
+  const homeRaw = 1 / homeOdds;
+  const awayRaw = 1 / awayOdds;
+  const total = homeRaw + awayRaw;
+  const home = Math.round((homeRaw / total) * 1000) / 10;
+  const away = Math.round((awayRaw / total) * 1000) / 10;
+  return { home, away, edge: home - away };
+}
+
+function getSurfaceRating(profile, surface) {
+  if (!profile) return 50;
+  const key = surface?.toLowerCase?.() || "hard";
+  return asNumber(profile[key], profile.form || 50);
+}
+
+function getTrendScore(profile) {
+  if (!profile) return 0;
+  if (profile.movement === "up") return 2;
+  if (profile.movement === "down") return -2;
+  return clamp(asNumber(profile.trend, 0), -3, 3);
+}
+
+function getRankEdge(firstProfile, secondProfile) {
+  const firstRank = firstProfile?.rank && firstProfile.rank < 999 ? firstProfile.rank : null;
+  const secondRank = secondProfile?.rank && secondProfile.rank < 999 ? secondProfile.rank : null;
+  if (!firstRank || !secondRank) return 0;
+  return clamp((secondRank - firstRank) * 0.18, -12, 12);
+}
+
+function getPointsEdge(firstProfile, secondProfile) {
+  const firstPoints = asNumber(firstProfile?.points, 0);
+  const secondPoints = asNumber(secondProfile?.points, 0);
+  if (!firstPoints || !secondPoints) return 0;
+  return clamp(((firstPoints - secondPoints) / Math.max(firstPoints, secondPoints)) * 10, -6, 6);
+}
+
+function makePredictionFromSignals(event, firstRecent, secondRecent, odds, firstProfile, secondProfile) {
+  const surface = inferSurface(event);
+  const marketProbability = getImpliedProbability(odds);
+  const formEdge = ((firstRecent.winRate || 50) - (secondRecent.winRate || 50)) * 0.34;
+  const volumeEdge = clamp(((firstRecent.matches || 0) - (secondRecent.matches || 0)) * 0.22, -4, 4);
+  const rankEdge = getRankEdge(firstProfile, secondProfile);
+  const pointsEdge = getPointsEdge(firstProfile, secondProfile);
+  const marketEdge = marketProbability.edge * 0.42;
+  const surfaceEdge = (getSurfaceRating(firstProfile, surface) - getSurfaceRating(secondProfile, surface)) * 0.16;
+  const trendEdge = getTrendScore(firstProfile) - getTrendScore(secondProfile);
+  const liveAdjustment = isLiveEvent(event) ? 1.5 : 0;
+  const modelEdge = formEdge + volumeEdge + rankEdge + pointsEdge + marketEdge + surfaceEdge + trendEdge + liveAdjustment;
+  const predictedSide = modelEdge >= 0 ? "home" : "away";
+  const predictedWinner = predictedSide === "home" ? event.event_first_player : event.event_second_player;
+  const predictedWinnerOdds = predictedSide === "home" ? odds?.home : odds?.away;
+  const dataPoints = [firstRecent.matches || secondRecent.matches, firstProfile?.rank && secondProfile?.rank, firstProfile?.points && secondProfile?.points, odds?.home && odds?.away, surface !== "Hard" || firstProfile || secondProfile].filter(Boolean).length;
+  const confidence = clamp(Math.round(54 + Math.abs(modelEdge) * 0.78 + dataPoints * 1.4), 52, 86);
+
+  return {
+    predictedWinner,
+    predictedSide,
+    confidence,
+    predictedWinnerOdds: predictedWinnerOdds || "N/A",
+    modelEdge: Math.round(modelEdge * 10) / 10,
+    factors: {
+      marketProbability,
+      formEdge: Math.round(formEdge * 10) / 10,
+      rankEdge: Math.round(rankEdge * 10) / 10,
+      pointsEdge: Math.round(pointsEdge * 10) / 10,
+      surfaceEdge: Math.round(surfaceEdge * 10) / 10,
+      trendEdge: Math.round(trendEdge * 10) / 10,
+      volumeEdge: Math.round(volumeEdge * 10) / 10,
+      dataPoints,
+    },
+  };
+}
+
 function normalizeCloudbetMatch(event, recentForms = {}, betUrl = DEFAULT_CLOUDBET_URL) {
-  const odds = event.cloudbetOdds;
   const playerA = event.event_first_player;
   const playerB = event.event_second_player;
   const recentA = recentForms.first || DEFAULT_FORM;
   const recentB = recentForms.second || DEFAULT_FORM;
   const profileA = event.profiles?.first || null;
   const profileB = event.profiles?.second || null;
-  const prediction = makePredictionFromSignals(event, recentA, recentB, odds, profileA, profileB);
+  const prediction = makePredictionFromSignals(event, recentA, recentB, event.cloudbetOdds, profileA, profileB);
   const startDate = event.startTime || event.cutoffTime || "";
-  const formattedStart = startDate
-    ? new Date(startDate).toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-    : "Available now";
+  const startTime = startDate ? new Date(startDate).toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Available now";
 
   return {
     id: String(event.event_key),
     tournament: event.tournament_name || "Cloudbet Tennis",
-    startTime: formattedStart,
+    startTime,
     playerA,
     playerB,
     surface: inferSurface(event),
@@ -374,7 +350,7 @@ function normalizeCloudbetMatch(event, recentForms = {}, betUrl = DEFAULT_CLOUDB
     h2hEdge: 0,
     odds: prediction.predictedWinnerOdds,
     oddsSource: "Cloudbet",
-    cloudbetOdds: odds,
+    cloudbetOdds: event.cloudbetOdds,
     predictedWinner: prediction.predictedWinner,
     predictedSide: prediction.predictedSide,
     predictedWinnerOdds: prediction.predictedWinnerOdds,
@@ -421,9 +397,7 @@ function normalizeRssItem(item, source, index) {
   const summary = getTagValue(item, "description") || "Read the latest tennis update.";
   const imageUrl = getRssImageUrl(item);
   const published = new Date(getTagValue(item, "pubDate") || getTagValue(item, "published"));
-  const time = Number.isNaN(published.getTime())
-    ? "Latest"
-    : published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const time = Number.isNaN(published.getTime()) ? "Latest" : published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   return { id: url || `${source}-${index}`, title: title || "Tennis update", category: inferNewsCategory(title), time, summary, url: url || "#", imageUrl, source };
 }
 
@@ -549,11 +523,14 @@ async function getCloudbetTennisEvents(env) {
     .sort((a, b) => (b.eventCount || 0) - (a.eventCount || 0))
     .slice(0, CLOUDBET_COMPETITION_LIMIT);
   const competitionPayloads = await Promise.all(
-    competitions.map((competition) => fetchCloudbet(env, `/competitions/${competition.key}?markets=tennis.winner`).catch(() => null)),
+    competitions.map(async (competition) => ({
+      competition,
+      payload: await fetchCloudbet(env, `/competitions/${competition.key}?markets=tennis.winner`).catch(() => null),
+    })),
   );
   return dedupeEvents(
     competitionPayloads
-      .flatMap((payload) => payload?.events || [])
+      .flatMap(({ competition, payload }) => (payload?.events || []).map((event) => ({ ...event, competition: event.competition || competition })))
       .map(normalizeCloudbetEvent)
       .filter(Boolean)
       .filter((event) => isLiveEvent(event) || isUpcomingEvent(event))
