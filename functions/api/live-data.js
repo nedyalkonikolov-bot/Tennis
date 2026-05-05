@@ -39,6 +39,7 @@ const fallbackNews = [
     time: "Now",
     summary: "Redeploy Cloudflare Pages to replace this fallback with live tennis headlines from free RSS feeds.",
     url: "#",
+    imageUrl: "",
     source: "TennisTipz",
   },
 ];
@@ -89,9 +90,38 @@ function cleanText(value = "") {
     .trim();
 }
 
-function getTagValue(item, tag) {
+function getTagRawValue(item, tag) {
   const match = item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
-  return cleanText(match?.[1] || "");
+  return decodeEntities(match?.[1] || "");
+}
+
+function getTagValue(item, tag) {
+  return cleanText(getTagRawValue(item, tag));
+}
+
+function getAttributeValue(markup = "", attribute) {
+  const match = markup.match(new RegExp(`${attribute}=["']([^"']+)["']`, "i"));
+  return decodeEntities(match?.[1] || "").trim();
+}
+
+function getRssImageUrl(item) {
+  const candidates = [
+    item.match(/<media:content[^>]+>/i)?.[0],
+    item.match(/<media:thumbnail[^>]+>/i)?.[0],
+    item.match(/<enclosure[^>]+>/i)?.[0],
+    item.match(/<image[^>]+>/i)?.[0],
+  ];
+
+  for (const candidate of candidates) {
+    const url = getAttributeValue(candidate, "url") || getAttributeValue(candidate, "href") || getAttributeValue(candidate, "src");
+    if (url && /^https?:\/\//i.test(url)) return url;
+  }
+
+  const description = getTagRawValue(item, "description");
+  const inlineImage = description.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1];
+  const decodedInlineImage = decodeEntities(inlineImage || "").trim();
+
+  return /^https?:\/\//i.test(decodedInlineImage) ? decodedInlineImage : "";
 }
 
 function inferSurface(event) {
@@ -167,6 +197,7 @@ function normalizeRssItem(item, source, index) {
   const title = getTagValue(item, "title");
   const url = getTagValue(item, "link") || getTagValue(item, "guid");
   const summary = getTagValue(item, "description") || "Read the latest tennis update.";
+  const imageUrl = getRssImageUrl(item);
   const published = new Date(getTagValue(item, "pubDate") || getTagValue(item, "published"));
   const time = Number.isNaN(published.getTime())
     ? "Latest"
@@ -179,6 +210,7 @@ function normalizeRssItem(item, source, index) {
     time,
     summary,
     url: url || "#",
+    imageUrl,
     source,
   };
 }
