@@ -162,8 +162,8 @@ function Header({ activePage, setActivePage }) {
 }
 
 function HomePage({ setActivePage, liveData }) {
-  const featuredMatch = liveData.matches[0] || fallbackMatches[0];
-  const featured = getPrediction(featuredMatch, 0);
+  const liveMatches = liveData.matches.filter((match) => match.live).length;
+  const upcomingMatches = liveData.matches.length - liveMatches;
 
   return (
     <>
@@ -191,34 +191,30 @@ function HomePage({ setActivePage, liveData }) {
 
         <div className="border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/30">
           <div className="bg-slate-900 p-5">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-400">Featured Prediction</p>
-                <h2 className="text-2xl font-bold">Match of the Day</h2>
-              </div>
-              <div className="rounded-full bg-lime-400/10 px-3 py-1 text-sm font-bold text-lime-300">{featured.confidence}%</div>
+            <div className="mb-5">
+              <p className="text-sm text-slate-400">Live data snapshot</p>
+              <h2 className="text-2xl font-bold">Today on TennisTipz</h2>
             </div>
-            <div className="bg-slate-800 p-5">
-              <p className="text-lg font-bold">{featuredMatch.playerA} vs {featuredMatch.playerB}</p>
-              <p className="mt-2 text-slate-300">Winner: <span className="font-semibold text-white">{featured.pick}</span></p>
-              <p className="mt-2 text-slate-300">Odds: <span className="font-semibold text-white">{featuredMatch.predictedWinnerOdds || featuredMatch.odds}</span></p>
-              <p className="mt-4 text-sm leading-6 text-slate-400">
-                Model based on last-100-days results where available. Odds source: {featuredMatch.oddsSource || "N/A"}.
-              </p>
+            <div className="grid gap-3 text-center sm:grid-cols-2">
+              <div className="bg-white/5 p-5">
+                <p className="text-3xl font-black">{liveMatches}</p>
+                <p className="text-xs text-slate-400">Live matches</p>
+              </div>
+              <div className="bg-white/5 p-5">
+                <p className="text-3xl font-black">{upcomingMatches}</p>
+                <p className="text-xs text-slate-400">Upcoming matches</p>
+              </div>
+              <div className="bg-white/5 p-5">
+                <p className="text-3xl font-black">{liveData.players.length}</p>
+                <p className="text-xs text-slate-400">ATP/WTA players</p>
+              </div>
+              <div className="bg-white/5 p-5">
+                <p className="text-3xl font-black">{liveData.news.length}</p>
+                <p className="text-xs text-slate-400">News updates</p>
+              </div>
             </div>
-            <div className="mt-5 grid grid-cols-3 gap-3 text-center">
-              <div className="bg-white/5 p-4">
-                <p className="text-2xl font-black">{liveData.matches.length}</p>
-                <p className="text-xs text-slate-400">Matches</p>
-              </div>
-              <div className="bg-white/5 p-4">
-                <p className="text-2xl font-black">{liveData.players.length}</p>
-                <p className="text-xs text-slate-400">Players</p>
-              </div>
-              <div className="bg-white/5 p-4">
-                <p className="text-2xl font-black">{liveData.news.length}</p>
-                <p className="text-xs text-slate-400">Updates</p>
-              </div>
+            <div className="mt-5 bg-slate-800 p-5 text-sm leading-6 text-slate-400">
+              Predictions are available on the dedicated board, grouped into live and upcoming matches from Cloudbet betting markets.
             </div>
           </div>
         </div>
