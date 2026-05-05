@@ -298,7 +298,7 @@ export async function onRequestGet({ env }) {
   if (!diagnostics.hasCloudbetAffiliateUrl) errors.push("missing CLOUDBET_AFFILIATE_URL Cloudflare variable for affiliate click-throughs");
 
   const hasLiveTennis = Boolean(env.API_TENNIS_KEY && players.length);
-  const hasCloudbetMatches = Boolean(matches.length);
+  const hasCloudbetConnection = diagnostics.hasCloudbetApiKey && !errors.some((error) => error.startsWith("cloudbet predictions:"));
   const hasLiveNews = Boolean(news.length);
-  return jsonResponse({ generatedAt: new Date().toISOString(), source: { tennis: hasLiveTennis ? "API-Tennis" : "fallback", odds: hasCloudbetMatches ? "Cloudbet" : "fallback", news: hasLiveNews ? "Tennis.com" : "fallback" }, betUrl, matches, players: players.length ? players : fallbackPlayers, news: news.length ? news : fallbackNews, errors, diagnostics });
+  return jsonResponse({ generatedAt: new Date().toISOString(), source: { tennis: hasLiveTennis ? "API-Tennis" : "fallback", odds: hasCloudbetConnection ? "Cloudbet" : "fallback", news: hasLiveNews ? "Tennis.com" : "fallback" }, betUrl, matches, players: players.length ? players : fallbackPlayers, news: news.length ? news : fallbackNews, errors, diagnostics });
 }
