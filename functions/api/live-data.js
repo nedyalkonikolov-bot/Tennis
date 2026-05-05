@@ -1,7 +1,6 @@
 const TENNIS_API_BASE = "https://api.api-tennis.com/tennis/";
 const RSS_NEWS_FEEDS = [
   { source: "Tennis.com", url: "https://www.tennis.com/roots/rss-feeds/news/" },
-  { source: "Google News", url: "https://news.google.com/rss/search?q=tennis%20ATP%20WTA&hl=en-US&gl=US&ceid=US:en" },
 ];
 
 const fallbackMatches = [
@@ -85,7 +84,7 @@ function cleanText(value = "") {
   return decodeEntities(value)
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+\|\s*[^|<>]+$/g, "")
-    .replace(/\s+[-–]\s+(Google News|ATP Tour|WTA Tennis|Tennis\.com)$/i, "")
+    .replace(/\s+[-–]\s+(ATP Tour|WTA Tennis|Tennis\.com)$/i, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -100,8 +99,8 @@ function getTagValue(item, tag) {
 }
 
 function getAttributeValue(markup = "", attribute) {
-  const match = markup.match(new RegExp(`${attribute}=["']([^"']+)["']`, "i"));
-  return decodeEntities(match?.[1] || "").trim();
+  const match = markup.match(new RegExp(`${attribute}=(?:["']([^"']+)["']|([^\\s>]+))`, "i"));
+  return decodeEntities(match?.[1] || match?.[2] || "").trim();
 }
 
 function getRssImageUrl(item) {
@@ -122,6 +121,33 @@ function getRssImageUrl(item) {
   const decodedInlineImage = decodeEntities(inlineImage || "").trim();
 
   return /^https?:\/\//i.test(decodedInlineImage) ? decodedInlineImage : "";
+}
+
+function getMetaImageUrl(html = "") {
+  const metaTags = html.match(/<meta[^>]+>/gi) || [];
+
+  for (const tag of metaTags) {
+    const property = getAttributeValue(tag, "property") || getAttributeValue(tag, "name");
+    if (!["og:image", "twitter:image", "twitter:image:src"].includes(property)) continue;
+
+    const content = getAttributeValue(tag, "content");
+    if (content && /^https?:\/\//i.test(content)) return content;
+  }
+
+  return "";
+}
+
+async function fetchArticleImageUrl(articleUrl) {
+  if (!articleUrl || !articleUrl.includes("tennis.com/")) return "";
+
+  try {
+    const response = await fetch(articleUrl, { headers: { accept: "text/html" } });
+    if (!response.ok) return "";
+    const html = await response.text();
+    return getMetaImageUrl(html);
+  } catch {
+    return "";
+  }
 }
 
 function inferSurface(event) {
@@ -280,8 +306,14 @@ async function getNews() {
     }),
   );
 
-  const articles = feedResults.flat();
-  return Array.from(new Map(articles.map((article) => [article.url, article])).values()).slice(0, 12);
+  const articles = Array.from(new Map(feedResults.flat().map((article) => [article.url, article])).values()).slice(0, 12);
+
+  return Promise.all(
+    articles.map(async (article) => ({
+      ...article,
+      imageUrl: article.imageUrl || (await fetchArticleImageUrl(article.url)),
+    })),
+  );
 }
 
 export async function onRequestGet({ env }) {
@@ -291,7 +323,7 @@ export async function onRequestGet({ env }) {
     matchCount: 0,
     playerCount: 0,
     newsCount: 0,
-    newsProvider: "RSS",
+    newsProvider: "Tennis.com RSS",
   };
   let matches = [];
   let players = [];
@@ -327,7 +359,7 @@ export async function onRequestGet({ env }) {
     generatedAt: new Date().toISOString(),
     source: {
       tennis: hasLiveTennis ? "API-Tennis" : "fallback",
-      news: hasLiveNews ? "RSS" : "fallback",
+      news: hasLiveNews ? "Tennis.com" : "fallback",
     },
     matches: matches.length ? matches : fallbackMatches,
     players: players.length ? players : fallbackPlayers,
