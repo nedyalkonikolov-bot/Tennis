@@ -68,23 +68,30 @@ function asNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function decodeXml(value = "") {
+function decodeEntities(value = "") {
   return value
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/<[^>]+>/g, "")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
+    .replace(/&gt;/g, ">");
+}
+
+function cleanText(value = "") {
+  return decodeEntities(value)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+\|\s*[^|<>]+$/g, "")
+    .replace(/\s+[-–]\s+(Google News|ATP Tour|WTA Tennis|Tennis\.com)$/i, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function getTagValue(item, tag) {
   const match = item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
-  return decodeXml(match?.[1] || "");
+  return cleanText(match?.[1] || "");
 }
 
 function inferSurface(event) {
