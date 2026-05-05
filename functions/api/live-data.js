@@ -241,10 +241,13 @@ function makePredictionFromForm(event, firstRecent, secondRecent, cloudbetOdds) 
   return { predictedWinner, predictedSide, confidence, predictedWinnerOdds: predictedWinnerOdds || "N/A" };
 }
 
+function isLiveEvent(event) {
+  return event.event_live === "1" || event.event_status?.toLowerCase?.().includes("set");
+}
+
 function normalizeFixture(event, recentForms = {}, cloudbetOdds = null, betUrl = DEFAULT_CLOUDBET_URL) {
   const playerA = event.event_first_player || "Player A";
   const playerB = event.event_second_player || "Player B";
-  const isLive = event.event_live === "1" || event.event_status?.toLowerCase?.().includes("set");
   const recentA = recentForms.first || { wins: 0, losses: 0, matches: 0, winRate: 50 };
   const recentB = recentForms.second || { wins: 0, losses: 0, matches: 0, winRate: 50 };
   const prediction = makePredictionFromForm(event, recentA, recentB, cloudbetOdds);
@@ -274,7 +277,7 @@ function normalizeFixture(event, recentForms = {}, cloudbetOdds = null, betUrl =
     confidence: prediction.confidence,
     status: event.event_status || "Scheduled",
     score: event.event_final_result || event.event_game_result || "",
-    live: isLive,
+    live: isLiveEvent(event),
     tour: inferTour(event.event_type_type),
     betUrl,
   };
@@ -441,19 +444,35 @@ async function getRecentFormsForMatches(env, matches) {
   );
 }
 
+function isSinglesMatch(event) {
+  return !String(event.event_first_player || "").includes("/") && !String(event.event_second_player || "").includes("/");
+}
+
+function dedupeEvents(events) {
+  return Array.from(new Map(events.map((event) => [event.event_key || JSON.stringify(event), event])).values());
+}
+
+function sortUpcomingEvents(a, b) {
+  return `${a.event_date || ""} ${a.event_time || ""}`.localeCompare(`${b.event_date || ""} ${b.event_time || ""}`);
+}
+
 async function getMatches(env, betUrl) {
   const today = new Date();
   const date_start = formatDate(today);
-  const date_stop = formatDate(addDays(today, 2));
+  const date_stop = formatDate(addDays(today, 4));
 
   const [liveScores, fixtures] = await Promise.all([
     fetchApiTennis(env, "get_livescore", { timezone: "Europe/Sofia" }),
     fetchApiTennis(env, "get_fixtures", { date_start, date_stop, timezone: "Europe/Sofia" }),
   ]);
 
-  const events = [...(liveScores || []), ...(fixtures || [])]
-    .filter((event) => !String(event.event_first_player || "").includes("/") && !String(event.event_second_player || "").includes("/"));
-  const uniqueEvents = Array.from(new Map(events.map((event) => [event.event_key || JSON.stringify(event), event])).values()).slice(0, 10);
+  const liveEvents = dedupeEvents((liveScores || []).filter(isSinglesMatch)).slice(0, 8);
+  const liveIds = new Set(liveEvents.map((event) => String(event.event_key || "")));
+  const upcomingEvents = dedupeEvents((fixtures || []).filter(isSinglesMatch))
+    .filter((event) => !isLiveEvent(event) && !liveIds.has(String(event.event_key || "")))
+    .sort(sortUpcomingEvents)
+    .slice(0, 12);
+  const uniqueEvents = [...liveEvents, ...upcomingEvents];
 
   const [recentForms, cloudbetOdds] = await Promise.all([
     getRecentFormsForMatches(env, uniqueEvents),
@@ -505,6 +524,8 @@ export async function onRequestGet({ env }) {
     hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY),
     hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL),
     matchCount: 0,
+    liveMatchCount: 0,
+    upcomingMatchCount: 0,
     playerCount: 0,
     newsCount: 0,
     newsProvider: "Tennis.com RSS",
@@ -518,6 +539,8 @@ export async function onRequestGet({ env }) {
   try {
     matches = await getMatches(env, betUrl);
     diagnostics.matchCount = matches.length;
+    diagnostics.liveMatchCount = matches.filter((match) => match.live).length;
+    diagnostics.upcomingMatchCount = matches.filter((match) => !match.live).length;
   } catch (error) {
     errors.push(`tennis matches: ${error.message}`);
   }
