@@ -23,23 +23,22 @@ const pages = [
 ];
 
 const surfaces = ["All", "Hard", "Clay", "Grass"];
+const tours = ["ATP", "WTA"];
 const newsCategories = ["All", "Setup", "News", "Tournament", "Player News", "Market", "Trend"];
 
 const initialLiveData = {
   generatedAt: null,
-  source: { tennis: "fallback", news: "fallback" },
+  source: { tennis: "fallback", odds: "fallback", news: "fallback" },
   matches: fallbackMatches,
   players: fallbackPlayers,
   news: fallbackNews,
   errors: [],
 };
 
-function getPrediction(match, modelRun) {
-  const formEdge = (match.formA || 68) - (match.formB || 68);
-  const serveProfile = ((match.serveHoldA || 72) + (match.serveHoldB || 72)) / 2;
-  const matchupScore = 54 + formEdge * 0.18 + serveProfile * 0.12 + (match.returnEdge || 0) * 0.4 + (match.h2hEdge || 0) * 0.25 + modelRun;
-  const confidence = Math.max(51, Math.min(82, Math.round(matchupScore)));
-  const pick = confidence >= 66 ? match.market : "Value watch";
+function getPrediction(match, modelRun = 0) {
+  const baseConfidence = Number(match.confidence) || 55;
+  const confidence = Math.max(51, Math.min(84, Math.round(baseConfidence + modelRun)));
+  const pick = match.predictedWinner || match.market || "Value watch";
   const value = confidence >= 70 ? "Strong" : confidence >= 63 ? "Positive" : "Lean";
 
   return { confidence, pick, value };
@@ -91,6 +90,7 @@ function DataStatus({ liveData, loading, error, onRefresh }) {
       <div className="mx-auto flex max-w-7xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-wrap items-center gap-3">
           <span className="rounded-full bg-white/5 px-3 py-1">Tennis: {liveData.source.tennis}</span>
+          <span className="rounded-full bg-white/5 px-3 py-1">Odds: {liveData.source.odds || "fallback"}</span>
           <span className="rounded-full bg-white/5 px-3 py-1">News: {liveData.source.news}</span>
           <span>Updated {formatUpdatedAt(liveData.generatedAt)}</span>
           {error && <span className="text-amber-300">{error}</span>}
@@ -146,20 +146,20 @@ function Header({ activePage, setActivePage }) {
 
 function HomePage({ setActivePage, liveData }) {
   const featuredMatch = liveData.matches[0] || fallbackMatches[0];
-  const featured = getPrediction(featuredMatch, 2);
+  const featured = getPrediction(featuredMatch, 0);
 
   return (
     <>
       <section className="mx-auto grid max-w-7xl gap-10 px-5 py-14 md:grid-cols-[1.05fr_0.95fr] md:px-6 md:py-20">
         <div className="flex flex-col justify-center">
           <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-lime-400/30 bg-lime-400/10 px-4 py-2 text-sm text-lime-300">
-            <TrendingUp size={16} /> Live model board for ATP and WTA matches
+            <TrendingUp size={16} /> Cloudbet odds plus last-100-days form
           </div>
           <h1 className="max-w-3xl text-4xl font-black leading-tight tracking-tight md:text-6xl">
             Live tennis predictions, stats, and market news.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-            TennisTipz now pulls match data, player ranking signals, and tennis headlines through secure Cloudflare endpoints.
+            TennisTipz combines live fixtures, 100-day player form, top-150 ATP/WTA rankings, Cloudbet prices and Tennis.com headlines.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button type="button" onClick={() => setActivePage("predictions")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 shadow-xl shadow-lime-400/20 hover:bg-lime-300">
@@ -183,9 +183,10 @@ function HomePage({ setActivePage, liveData }) {
             </div>
             <div className="bg-slate-800 p-5">
               <p className="text-lg font-bold">{featuredMatch.playerA} vs {featuredMatch.playerB}</p>
-              <p className="mt-2 text-slate-300">Pick: <span className="font-semibold text-white">{featured.pick}</span></p>
+              <p className="mt-2 text-slate-300">Winner: <span className="font-semibold text-white">{featured.pick}</span></p>
+              <p className="mt-2 text-slate-300">Odds: <span className="font-semibold text-white">{featuredMatch.predictedWinnerOdds || featuredMatch.odds}</span></p>
               <p className="mt-4 text-sm leading-6 text-slate-400">
-                {featuredMatch.tournament} - {featuredMatch.status}. The model grades this as a {featured.value.toLowerCase()} setup from current match inputs.
+                Model based on last-100-days results where available. Odds source: {featuredMatch.oddsSource || "N/A"}.
               </p>
             </div>
             <div className="mt-5 grid grid-cols-3 gap-3 text-center">
@@ -209,13 +210,13 @@ function HomePage({ setActivePage, liveData }) {
       <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-3 md:px-6">
         <button type="button" onClick={() => setActivePage("predictions")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <Target className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">Live Match Predictions</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Upcoming and live matches become confidence-rated cards from the tennis data feed.</p>
+          <h3 className="text-xl font-bold">Winner Predictions</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Each card shows the predicted winner, Cloudbet odds and both players' last-100-days form.</p>
         </button>
         <button type="button" onClick={() => setActivePage("stats")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <BarChart3 className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">Player Stats</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Search, sort and compare ranking, form, hold rate, break rate and surface strength.</p>
+          <h3 className="text-xl font-bold">Top 150 ATP/WTA</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Separate rankings tables for ATP and WTA with points, movement and rating signals.</p>
         </button>
         <button type="button" onClick={() => setActivePage("news")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <Newspaper className="mb-4 text-lime-300" />
@@ -229,7 +230,7 @@ function HomePage({ setActivePage, liveData }) {
 
 function PredictionsPage({ matches }) {
   const [surface, setSurface] = useState("All");
-  const [modelRun, setModelRun] = useState(1);
+  const [modelRun, setModelRun] = useState(0);
 
   const filteredMatches = useMemo(() => {
     return matches
@@ -243,10 +244,10 @@ function PredictionsPage({ matches }) {
       <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-sm font-semibold uppercase text-lime-300">Prediction board</p>
-          <h1 className="mt-2 text-4xl font-black">Live Match Predictions</h1>
-          <p className="mt-3 max-w-2xl text-slate-400">Confidence is recalculated from live fixture inputs, form proxies, serve hold profile and matchup edge.</p>
+          <h1 className="mt-2 text-4xl font-black">Winner Predictions</h1>
+          <p className="mt-3 max-w-2xl text-slate-400">Winner calls are driven by API-Tennis last-100-days match records and enriched with Cloudbet winner odds when available.</p>
         </div>
-        <button type="button" onClick={() => setModelRun((value) => (value === 4 ? -2 : value + 1))} className="inline-flex w-fit items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">
+        <button type="button" onClick={() => setModelRun((value) => (value === 3 ? -2 : value + 1))} className="inline-flex w-fit items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">
           <Gauge size={18} /> Re-run Model
         </button>
       </div>
@@ -269,7 +270,24 @@ function PredictionsPage({ matches }) {
               </div>
               <span className="rounded-full bg-lime-400/10 px-3 py-1 text-sm font-bold text-lime-300">{match.prediction.confidence}%</span>
             </div>
-            <p className="text-slate-300">Model pick: <span className="font-bold text-white">{match.prediction.pick}</span></p>
+            <p className="text-slate-300">Predicted winner: <span className="font-bold text-white">{match.prediction.pick}</span></p>
+            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+              <div className="bg-slate-900 p-4">
+                <p className="text-xs text-slate-500">Cloudbet odds</p>
+                <p className="mt-1 font-bold">{match.predictedWinnerOdds || match.odds || "N/A"}</p>
+                <p className="mt-1 text-xs text-slate-500">{match.oddsSource || "N/A"}</p>
+              </div>
+              <div className="bg-slate-900 p-4">
+                <p className="text-xs text-slate-500">{match.playerA} 100d</p>
+                <p className="mt-1 font-bold">{match.recentA?.wins || 0}-{match.recentA?.losses || 0}</p>
+                <p className="mt-1 text-xs text-slate-500">{match.recentA?.winRate || 50}% win rate</p>
+              </div>
+              <div className="bg-slate-900 p-4">
+                <p className="text-xs text-slate-500">{match.playerB} 100d</p>
+                <p className="mt-1 font-bold">{match.recentB?.wins || 0}-{match.recentB?.losses || 0}</p>
+                <p className="mt-1 text-xs text-slate-500">{match.recentB?.winRate || 50}% win rate</p>
+              </div>
+            </div>
             <div className="mt-5 grid gap-4 sm:grid-cols-3">
               <div className="bg-slate-900 p-4">
                 <p className="text-xs text-slate-500">Surface</p>
@@ -280,12 +298,12 @@ function PredictionsPage({ matches }) {
                 <p className="mt-1 font-bold">{match.live ? "Live" : match.status}</p>
               </div>
               <div className="bg-slate-900 p-4">
-                <p className="text-xs text-slate-500">Score/Odds</p>
-                <p className="mt-1 font-bold">{match.score || match.odds}</p>
+                <p className="text-xs text-slate-500">Score</p>
+                <p className="mt-1 font-bold">{match.score || "Pre-match"}</p>
               </div>
             </div>
             <div className="mt-5 space-y-3 text-sm text-slate-300">
-              <p>Form edge: {(match.formA || 0) - (match.formB || 0) > 0 ? "+" : ""}{(match.formA || 0) - (match.formB || 0)}</p>
+              <p>100-day form edge: {(match.formA || 0) - (match.formB || 0) > 0 ? "+" : ""}{(match.formA || 0) - (match.formB || 0)}</p>
               <StatBar value={match.prediction.confidence} />
             </div>
           </article>
@@ -297,30 +315,41 @@ function PredictionsPage({ matches }) {
 
 function StatsPage({ players }) {
   const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState("form");
+  const [sortKey, setSortKey] = useState("rank");
+  const [activeTour, setActiveTour] = useState("ATP");
 
   const filteredPlayers = useMemo(() => {
     return players
-      .filter((player) => player.name.toLowerCase().includes(query.toLowerCase()) || player.tour.toLowerCase().includes(query.toLowerCase()))
+      .filter((player) => (player.sex || player.tour) === activeTour)
+      .filter((player) => player.name.toLowerCase().includes(query.toLowerCase()) || player.country?.toLowerCase?.().includes(query.toLowerCase()))
       .sort((a, b) => (sortKey === "rank" ? a.rank - b.rank : b[sortKey] - a[sortKey]));
-  }, [players, query, sortKey]);
+  }, [players, activeTour, query, sortKey]);
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
       <div>
         <p className="text-sm font-semibold uppercase text-lime-300">Player database</p>
         <h1 className="mt-2 text-4xl font-black">Player Stats</h1>
-        <p className="mt-3 max-w-2xl text-slate-400">Compare live ranking data with generated form, serve, return and surface ratings.</p>
+        <p className="mt-3 max-w-2xl text-slate-400">Top 150 ATP and top 150 WTA players, split by tour with ranking points and rating signals.</p>
       </div>
 
-      <div className="mt-8 grid gap-3 md:grid-cols-[1fr_auto]">
+      <div className="mt-8 flex gap-2 overflow-x-auto">
+        {tours.map((tour) => (
+          <button key={tour} type="button" onClick={() => setActiveTour(tour)} className={`rounded-xl px-5 py-2 text-sm font-bold ${activeTour === tour ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
+            {tour} Top 150
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]">
         <label className="flex items-center gap-3 bg-white/[0.04] px-4 py-3 ring-1 ring-white/10">
           <Search size={18} className="text-slate-500" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search player or tour" className="w-full bg-transparent text-white outline-none placeholder:text-slate-500" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search player or country" className="w-full bg-transparent text-white outline-none placeholder:text-slate-500" />
         </label>
         <select value={sortKey} onChange={(event) => setSortKey(event.target.value)} className="bg-slate-900 px-4 py-3 text-white ring-1 ring-white/10">
-          <option value="form">Sort by form</option>
           <option value="rank">Sort by rank</option>
+          <option value="points">Sort by points</option>
+          <option value="form">Sort by form</option>
           <option value="hold">Sort by hold rate</option>
           <option value="breakRate">Sort by break rate</option>
           <option value="clay">Sort by clay</option>
@@ -330,16 +359,17 @@ function StatsPage({ players }) {
       </div>
 
       <div className="mt-8 overflow-hidden border border-white/10">
-        <div className="hidden grid-cols-[1.4fr_0.6fr_repeat(6,0.7fr)] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid">
-          <span>Player</span><span>Rank</span><span>Form</span><span>Hold</span><span>Break</span><span>Clay</span><span>Hard</span><span>Grass</span>
+        <div className="hidden grid-cols-[1.2fr_0.5fr_0.7fr_repeat(6,0.7fr)] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid">
+          <span>Player</span><span>Rank</span><span>Points</span><span>Form</span><span>Hold</span><span>Break</span><span>Clay</span><span>Hard</span><span>Grass</span>
         </div>
         {filteredPlayers.map((player) => (
-          <div key={player.id || player.name} className="grid gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 md:grid-cols-[1.4fr_0.6fr_repeat(6,0.7fr)] md:items-center">
+          <div key={player.id || player.name} className="grid gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 md:grid-cols-[1.2fr_0.5fr_0.7fr_repeat(6,0.7fr)] md:items-center">
             <div>
               <p className="font-bold">{player.name}</p>
-              <p className="text-sm text-slate-500">{player.tour} trend {player.trend}</p>
+              <p className="text-sm text-slate-500">{player.country || activeTour} movement {player.movement || player.trend}</p>
             </div>
             <p className="text-sm text-slate-300">#{player.rank}</p>
+            <p className="text-sm text-slate-300">{player.points || 0}</p>
             {[player.form, player.hold, player.breakRate, player.clay, player.hard, player.grass].map((value, index) => (
               <div key={`${player.id || player.name}-${index}`}>
                 <p className="mb-2 text-sm font-bold">{value}</p>
