@@ -1,10 +1,9 @@
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
   Gauge,
   Home,
-  LineChart,
   Newspaper,
   Search,
   ShieldCheck,
@@ -343,7 +342,7 @@ function StatsPage() {
   const filteredPlayers = useMemo(() => {
     return players
       .filter((player) => player.name.toLowerCase().includes(query.toLowerCase()) || player.tour.toLowerCase().includes(query.toLowerCase()))
-      .sort((a, b) => b[sortKey] - a[sortKey]);
+      .sort((a, b) => (sortKey === "rank" ? a.rank - b.rank : b[sortKey] - a[sortKey]));
   }, [query, sortKey]);
 
   return (
