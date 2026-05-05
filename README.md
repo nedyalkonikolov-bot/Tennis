@@ -8,20 +8,24 @@ The frontend calls `GET /api/live-data`. On Cloudflare Pages this is handled by 
 
 ### Providers
 
-- Match predictions and player stats: API-Tennis
-- News: free RSS feeds from Tennis.com and Google News search
+- Match predictions: API-Tennis recent match data from the last 100 days, enriched with Cloudbet winner odds when available
+- Player stats: API-Tennis top 150 ATP and top 150 WTA standings, split by tour
+- News: free RSS feed from Tennis.com
 
 The site falls back to demo data if a provider is missing, rate-limited, or temporarily unavailable.
 
 ### Cloudflare Pages Secrets
 
-In Cloudflare, open the Pages project and add this encrypted secret under **Settings > Variables and Secrets**:
+In Cloudflare, open the Pages project and add these encrypted secrets under **Settings > Variables and Secrets**:
 
 ```text
 API_TENNIS_KEY=your_api_tennis_key
+CLOUDBET_API_KEY=your_cloudbet_api_key
 ```
 
-No news API key is required. Redeploy after adding or changing secrets. The status bar on the site will show whether tennis and news data are coming from live providers or fallback data.
+No news API key is required. Redeploy after adding or changing secrets. The status bar on the site will show whether tennis, odds, and news data are coming from live providers or fallback data.
+
+For Cloudbet, use a Feed/Affiliate API key if you only need odds display. Keep the key server-side only; the Cloudflare Function calls Cloudbet from `/api/live-data`, so the React frontend never receives the secret.
 
 ## Development
 
@@ -34,6 +38,7 @@ For local testing of the Cloudflare Function, run the app through Wrangler Pages
 
 ```text
 API_TENNIS_KEY=your_api_tennis_key
+CLOUDBET_API_KEY=your_cloudbet_api_key
 ```
 
 `.dev.vars` and `.env` files are ignored by git.
