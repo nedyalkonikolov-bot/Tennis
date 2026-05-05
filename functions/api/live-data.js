@@ -344,7 +344,7 @@ async function fetchApiTennis(env, method, params = {}) {
 
   const payload = await response.json();
   if (payload.success === 0) throw new Error(payload.error || `${method} returned no success flag`);
-  return Array.isArray(payload.result) ? payload.result : [];
+  return payload.result ?? [];
 }
 
 async function fetchCloudbet(env, path) {
@@ -418,11 +418,10 @@ async function getRecentFormsForMatches(env, matches) {
   return Promise.all(
     matches.map(async (match) => {
       try {
-        const h2h = await fetchApiTennis(env, "get_H2H", {
+        const result = await fetchApiTennis(env, "get_H2H", {
           first_player_key: match.first_player_key,
           second_player_key: match.second_player_key,
         });
-        const result = h2h?.[0] || h2h || {};
         return {
           first: getRecentForm(result.firstPlayerResults || [], match.first_player_key, 100),
           second: getRecentForm(result.secondPlayerResults || [], match.second_player_key, 100),
