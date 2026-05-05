@@ -267,21 +267,22 @@ function OddsLink({ match, fallbackBetUrl }) {
 
 function PredictionsPage({ matches, betUrl }) {
   const [surface, setSurface] = useState("All");
-  const [category, setCategory] = useState("live");
+  const [category, setCategory] = useState("upcoming");
   const [modelRun, setModelRun] = useState(0);
 
   const categoryCounts = useMemo(() => ({
     live: matches.filter((match) => match.live).length,
     upcoming: matches.filter((match) => !match.live).length,
   }), [matches]);
+  const effectiveCategory = categoryCounts[category] ? category : categoryCounts.upcoming ? "upcoming" : "live";
 
   const filteredMatches = useMemo(() => {
     return matches
-      .filter((match) => (category === "live" ? match.live : !match.live))
+      .filter((match) => (effectiveCategory === "live" ? match.live : !match.live))
       .filter((match) => surface === "All" || match.surface === surface)
       .map((match) => ({ ...match, prediction: getPrediction(match, modelRun), anticipation: getAnticipationScore(match) }))
       .sort((a, b) => b.anticipation - a.anticipation || b.prediction.confidence - a.prediction.confidence);
-  }, [matches, category, surface, modelRun]);
+  }, [matches, effectiveCategory, surface, modelRun]);
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
@@ -298,7 +299,7 @@ function PredictionsPage({ matches, betUrl }) {
 
       <div className="mt-8 flex flex-wrap gap-3">
         {matchCategories.map((item) => (
-          <button key={item.id} type="button" onClick={() => setCategory(item.id)} className={`rounded-xl px-5 py-2 text-sm font-bold ${category === item.id ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
+          <button key={item.id} type="button" onClick={() => setCategory(item.id)} className={`rounded-xl px-5 py-2 text-sm font-bold ${effectiveCategory === item.id ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
             {item.label} ({categoryCounts[item.id] || 0})
           </button>
         ))}
@@ -366,7 +367,7 @@ function PredictionsPage({ matches, betUrl }) {
 
       {!filteredMatches.length && (
         <div className="mt-8 border border-white/10 bg-white/[0.04] p-8 text-slate-400">
-          No {category} matches found for this surface right now.
+          No matches found for this surface right now.
         </div>
       )}
     </section>
