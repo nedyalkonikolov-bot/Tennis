@@ -9,20 +9,19 @@ The frontend calls `GET /api/live-data`. On Cloudflare Pages this is handled by 
 ### Providers
 
 - Match predictions and player stats: API-Tennis
-- News: NewsAPI
+- News: free RSS feeds from Tennis.com and Google News search
 
-The site falls back to demo data if either provider is missing, rate-limited, or temporarily unavailable.
+The site falls back to demo data if a provider is missing, rate-limited, or temporarily unavailable.
 
 ### Cloudflare Pages Secrets
 
-In Cloudflare, open the Pages project and add encrypted secrets under **Settings > Variables and Secrets**:
+In Cloudflare, open the Pages project and add this encrypted secret under **Settings > Variables and Secrets**:
 
 ```text
 API_TENNIS_KEY=your_api_tennis_key
-NEWS_API_KEY=your_newsapi_key
 ```
 
-Redeploy after adding the secrets. The status bar on the site will show whether tennis and news data are coming from live providers or fallback data.
+No news API key is required. Redeploy after adding or changing secrets. The status bar on the site will show whether tennis and news data are coming from live providers or fallback data.
 
 ## Development
 
@@ -35,7 +34,6 @@ For local testing of the Cloudflare Function, run the app through Wrangler Pages
 
 ```text
 API_TENNIS_KEY=your_api_tennis_key
-NEWS_API_KEY=your_newsapi_key
 ```
 
 `.dev.vars` and `.env` files are ignored by git.
