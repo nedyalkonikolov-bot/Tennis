@@ -112,6 +112,26 @@ section:not(.hero) {
   font-size: 0.95rem;
 }
 
+.book-quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.book-quick-links a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  border-radius: 8px;
+  padding: 0 18px;
+  background: #bef264;
+  color: #111827;
+  font-weight: 900;
+  text-decoration: none;
+}
+
 .book-grid {
   display: grid;
   gap: 24px;
@@ -186,6 +206,26 @@ section:not(.hero) {
   color: #bef264;
 }
 
+.visible-referral {
+  max-width: 100%;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(190, 242, 100, 0.08);
+  color: #e5f7bc;
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+
+.visible-referral a {
+  color: #bef264;
+  font-weight: 900;
+}
+
+.book-cta-bcgame {
+  background: #fbbf24;
+}
+
 @media (max-width: 640px) {
   .seo-page { width: min(100% - 24px, 1040px); }
   nav a:first-child { width: 100%; }
@@ -193,4 +233,5 @@ section:not(.hero) {
   h1 { font-size: 2.55rem; line-height: 1; }
   .book-banner { min-height: 140px; padding: 18px; }
   .book-body { padding: 18px; }
+  .book-quick-links a { width: 100%; }
 }
