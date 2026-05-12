@@ -79,7 +79,7 @@ async function fetchArticleImageUrl(articleUrl) {
 }
 
 function getCloudbetCompetitionText(competition = {}) { return [competition.name, competition.key, competition.category?.name, competition.category?.key, competition.group, competition.path].filter(Boolean).join(" "); }
-function getCloudbetEventText(event = {}) { return [event.name, event.key, event.id, event.home?.name, event.away?.name, getCloudbetCompetitionText(event.competition || {})].filter(Boolean).join(" "); }
+function getCloudbetEventText(event = {}) { return [event.name, event.key, event.id, event.home?.name, event.away?.name, event.tournament_name, event.event_type_type, getCloudbetCompetitionText(event.competition || {})].filter(Boolean).join(" "); }
 function isBlockedCloudbetMarket(event = {}) { return BLOCKED_CLOUDBET_MARKET_RE.test(getCloudbetEventText(event)); }
 function getCloudbetTourFromText(value = "") {
   const text = String(value).toLowerCase();
@@ -251,11 +251,17 @@ function enrichCloudbetEventsWithProfiles(events, players = []) {
     let second = findPlayerProfile(players, event.event_second_player, event.tour || first?.tour || "");
     if (!first && second) first = findPlayerProfile(players, event.event_first_player, second.tour);
     if (first && second && first.tour !== second.tour) { first = null; second = null; }
-    const tour = event.tour || "";
+    const profileTour = first && second && first.tour === second.tour ? first.tour : first?.tour || second?.tour || "";
+    const eventTextTour = getCloudbetTourFromText(getCloudbetEventText(event));
+    const tour = event.tour || eventTextTour || profileTour;
     return { ...event, tour, first_player_key: first?.playerKey || "", second_player_key: second?.playerKey || "", profiles: { first, second } };
   });
 }
 function isAtpOrWtaProfileMatch(event) {
+  if (isBlockedCloudbetMarket(event) || getCloudbetTourFromText(getCloudbetEventText(event)) === "") {
+    const text = getCloudbetEventText(event).toLowerCase();
+    if (/\b(itf|utr|challenger|exhibition|boys|girls|junior|juniors|college|davis|billie|hopman)\b/.test(text)) return false;
+  }
   if (!["ATP", "WTA"].includes(event.tour)) return false;
   if (event.profiles?.first && event.profiles?.second) return event.profiles.first.tour === event.tour && event.profiles.second.tour === event.tour;
   return event.profiles?.first?.tour === event.tour || event.profiles?.second?.tour === event.tour;
@@ -331,7 +337,7 @@ async function getNews() {
 export async function onRequestGet({ env }) {
   const betUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_CLOUDBET_URL).trim();
   const errors = [];
-  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasPlayerCache: Boolean(getPlayerCache(env)), cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT, cloudbetCompetitionScope: "Cloudbet tennis markets filtered to ATP/WTA competitions; ITF, Challenger, simulated and virtual markets excluded", blockedCloudbetMarkets: "Simulated Reality League, SRL, virtual, simulation", newsArticleLimit: NEWS_ARTICLE_LIMIT, newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT, h2hLookupLimit: H2H_LOOKUP_LIMIT, matchCount: 0, liveMatchCount: 0, upcomingMatchCount: 0, playerCount: 0, predictionPlayerPool: 0, newsCount: 0, newsWithImagesCount: 0, newsProvider: "Tennis.com RSS", playerStats: "Top 500 ATP + Top 500 WTA", playerStatsStorage: "Cloudflare KV TENNIS_PLAYERS_CACHE when configured, API-Tennis fallback otherwise", predictionSource: "Cloudbet ATP/WTA tennis.winner markets + ranking profile filter + API-Tennis form/rank signals", predictionVariables: "Cloudbet implied probability, 100-day form, sample size, ranking, points, surface rating, trend, live status", predictionWindow: "Last 100 days where API-Tennis player keys match" };
+  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasPlayerCache: Boolean(getPlayerCache(env)), cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT, cloudbetCompetitionScope: "Cloudbet tennis markets filtered to ATP/WTA profile matches; ITF, Challenger, simulated and virtual markets excluded", blockedCloudbetMarkets: "Simulated Reality League, SRL, virtual, simulation", newsArticleLimit: NEWS_ARTICLE_LIMIT, newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT, h2hLookupLimit: H2H_LOOKUP_LIMIT, matchCount: 0, liveMatchCount: 0, upcomingMatchCount: 0, playerCount: 0, predictionPlayerPool: 0, newsCount: 0, newsWithImagesCount: 0, newsProvider: "Tennis.com RSS", playerStats: "Top 500 ATP + Top 500 WTA", playerStatsStorage: "Cloudflare KV TENNIS_PLAYERS_CACHE when configured, API-Tennis fallback otherwise", predictionSource: "Cloudbet tennis.winner markets + ATP/WTA profile inference + API-Tennis form/rank signals", predictionVariables: "Cloudbet implied probability, 100-day form, sample size, ranking, points, surface rating, trend, live status", predictionWindow: "Last 100 days where API-Tennis player keys match" };
   let matches = [];
   let players = [];
   let predictionPlayers = [];
