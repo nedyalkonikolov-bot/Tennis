@@ -16,12 +16,42 @@ import {
 } from "lucide-react";
 import { fallbackMatches, fallbackNews, fallbackPlayers } from "./data/fallbackData";
 
+const siteUrl = "https://www.tennistipz.win";
+const defaultBetUrl = "https://www.cloudbet.com/en/sports/tennis";
+
 const pages = [
-  { id: "home", label: "Home", icon: Home },
-  { id: "predictions", label: "Predictions", icon: Target },
-  { id: "stats", label: "Player Stats", icon: Users },
-  { id: "news", label: "News", icon: Newspaper },
+  { id: "home", label: "Home", path: "/", icon: Home },
+  { id: "predictions", label: "Predictions", path: "/tennis-predictions/", icon: Target },
+  { id: "stats", label: "Player Stats", path: "/player-stats/", icon: Users },
+  { id: "news", label: "News", path: "/tennis-news/", icon: Newspaper },
 ];
+
+const pageMeta = {
+  home: {
+    title: "TennisTipz | Crypto Tennis Betting Tips, Predictions & Player Stats",
+    description:
+      "TennisTipz delivers live tennis predictions, crypto tennis betting insights, Cloudbet odds, ATP and WTA player stats, tennis tips, and market news for responsible bettors.",
+    canonical: "/",
+  },
+  predictions: {
+    title: "Tennis Betting Predictions | Cloudbet Odds & Crypto Tennis Tips",
+    description:
+      "Live and upcoming tennis betting predictions with Cloudbet odds, ATP and WTA market context, player form signals, and crypto tennis betting tips.",
+    canonical: "/tennis-predictions/",
+  },
+  stats: {
+    title: "ATP & WTA Player Stats | Tennis Betting Form & Rankings",
+    description:
+      "Research top ATP and WTA player stats, rankings, recent form, tournament context, and betting signals for tennis predictions.",
+    canonical: "/player-stats/",
+  },
+  news: {
+    title: "Tennis News for Betting | ATP, WTA & Market Updates",
+    description:
+      "Latest tennis news for betting research, including ATP and WTA updates, player stories, tournament context, and market signals.",
+    canonical: "/tennis-news/",
+  },
+};
 
 const surfaces = ["All", "Hard", "Clay", "Grass"];
 const tours = ["ATP", "WTA"];
@@ -30,7 +60,6 @@ const matchCategories = [
   { id: "upcoming", label: "Upcoming" },
 ];
 const newsCategories = ["All", "Setup", "News", "Tournament", "Player News", "Market", "Trend"];
-const defaultBetUrl = "https://www.cloudbet.com/en/sports/tennis";
 
 const initialLiveData = {
   generatedAt: null,
@@ -42,12 +71,47 @@ const initialLiveData = {
   errors: [],
 };
 
+function pageFromPath(pathname) {
+  const match = pages.find((page) => page.path === pathname || page.path.replace(/\/$/, "") === pathname);
+  return match?.id || "home";
+}
+
+function setMetaTag(selector, attribute, content) {
+  let element = document.head.querySelector(selector);
+  if (!element) {
+    element = document.createElement("meta");
+    const [key, value] = attribute === "property" ? ["property", selector.match(/\[property=\"(.+?)\"\]/)?.[1]] : ["name", selector.match(/\[name=\"(.+?)\"\]/)?.[1]];
+    if (value) element.setAttribute(key, value);
+    document.head.appendChild(element);
+  }
+  element.setAttribute("content", content);
+}
+
+function updateDocumentSeo(pageId) {
+  const meta = pageMeta[pageId] || pageMeta.home;
+  const canonicalUrl = `${siteUrl}${meta.canonical}`;
+  document.title = meta.title;
+  setMetaTag('meta[name="description"]', "name", meta.description);
+  setMetaTag('meta[property="og:title"]', "property", meta.title);
+  setMetaTag('meta[property="og:description"]', "property", meta.description);
+  setMetaTag('meta[property="og:url"]', "property", canonicalUrl);
+  setMetaTag('meta[name="twitter:title"]', "name", meta.title);
+  setMetaTag('meta[name="twitter:description"]', "name", meta.description);
+
+  let canonical = document.head.querySelector('link[rel="canonical"]');
+  if (!canonical) {
+    canonical = document.createElement("link");
+    canonical.setAttribute("rel", "canonical");
+    document.head.appendChild(canonical);
+  }
+  canonical.setAttribute("href", canonicalUrl);
+}
+
 function getPrediction(match, modelRun = 0) {
   const baseConfidence = Number(match.confidence) || 55;
   const confidence = Math.max(51, Math.min(84, Math.round(baseConfidence + modelRun)));
   const pick = match.predictedWinner || match.market || "Value watch";
   const value = confidence >= 70 ? "Strong" : confidence >= 63 ? "Positive" : "Lean";
-
   return { confidence, pick, value };
 }
 
@@ -57,7 +121,6 @@ function getAnticipationScore(match) {
   const statusBoost = match.live ? 8 : 0;
   const oddsBoost = hasCloudbetOdds ? 15 : 0;
   const tourBoost = ["ATP", "WTA"].includes(match.tour) ? 4 : 0;
-
   return (Number(match.confidence) || 0) + Math.min(recentMatches, 30) * 0.7 + oddsBoost + statusBoost + tourBoost;
 }
 
@@ -73,7 +136,6 @@ function formatUpdatedAt(value) {
 
 function StatBar({ value }) {
   const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
-
   return (
     <div className="h-2 w-full rounded-full bg-slate-800">
       <div className="h-2 rounded-full bg-lime-400" style={{ width: `${safeValue}%` }} />
@@ -83,17 +145,8 @@ function StatBar({ value }) {
 
 function NewsImage({ item }) {
   if (item.imageUrl) {
-    return (
-      <img
-        src={item.imageUrl}
-        alt=""
-        loading="lazy"
-        referrerPolicy="no-referrer"
-        className="h-48 w-full object-cover"
-      />
-    );
+    return <img src={item.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-48 w-full object-cover" />;
   }
-
   return (
     <div className="flex h-48 w-full items-center justify-center bg-slate-900">
       <Newspaper size={42} className="text-lime-300/70" />
@@ -120,40 +173,49 @@ function DataStatus({ liveData, loading, error, onRefresh }) {
   );
 }
 
-function PageButton({ page, activePage, onClick }) {
+function PageLink({ page, activePage, onNavigate }) {
   const Icon = page.icon;
   const active = activePage === page.id;
-
   return (
-    <button
-      type="button"
-      onClick={() => onClick(page.id)}
+    <a
+      href={page.path}
+      onClick={(event) => {
+        event.preventDefault();
+        onNavigate(page.id);
+      }}
       className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
         active ? "bg-lime-400 text-slate-950" : "text-slate-300 hover:bg-white/10 hover:text-white"
       }`}
     >
       <Icon size={16} />
       {page.label}
-    </button>
+    </a>
   );
 }
 
-function Header({ activePage, setActivePage }) {
+function Header({ activePage, onNavigate }) {
   return (
     <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 backdrop-blur">
       <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 md:flex-row md:items-center md:justify-between md:px-6">
-        <button type="button" onClick={() => setActivePage("home")} className="flex w-fit items-center gap-3 text-left">
+        <a
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            onNavigate("home");
+          }}
+          className="flex w-fit items-center gap-3 text-left"
+        >
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-400 text-slate-950 shadow-lg shadow-lime-400/20">
             <Trophy size={22} />
           </span>
           <span>
             <span className="block text-xl font-bold tracking-tight">TennisTipz</span>
-            <span className="block text-xs text-slate-400">live tennis predictions</span>
+            <span className="block text-xs text-slate-400">crypto tennis betting tips</span>
           </span>
-        </button>
-        <nav className="flex gap-2 overflow-x-auto pb-1 md:pb-0">
+        </a>
+        <nav className="flex gap-2 overflow-x-auto pb-1 md:pb-0" aria-label="Main navigation">
           {pages.map((page) => (
-            <PageButton key={page.id} page={page} activePage={activePage} onClick={setActivePage} />
+            <PageLink key={page.id} page={page} activePage={activePage} onNavigate={onNavigate} />
           ))}
         </nav>
       </div>
@@ -161,7 +223,7 @@ function Header({ activePage, setActivePage }) {
   );
 }
 
-function HomePage({ setActivePage, liveData }) {
+function HomePage({ onNavigate, liveData }) {
   const liveMatches = liveData.matches.filter((match) => match.live).length;
   const upcomingMatches = liveData.matches.length - liveMatches;
 
@@ -173,16 +235,16 @@ function HomePage({ setActivePage, liveData }) {
             <TrendingUp size={16} /> Cloudbet odds plus last-100-days form
           </div>
           <h1 className="max-w-3xl text-4xl font-black leading-tight tracking-tight md:text-6xl">
-            Live tennis predictions, stats, and market news.
+            Crypto tennis betting tips, predictions, stats, and news.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-            TennisTipz combines live fixtures, 100-day player form, top-150 ATP/WTA rankings, Cloudbet prices and Tennis.com headlines.
+            TennisTipz combines live tennis betting markets, 100-day player form, top-500 ATP/WTA rankings, Cloudbet prices, crypto betting context and market-relevant tennis headlines.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <button type="button" onClick={() => setActivePage("predictions")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 shadow-xl shadow-lime-400/20 hover:bg-lime-300">
+            <button type="button" onClick={() => onNavigate("predictions")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 shadow-xl shadow-lime-400/20 hover:bg-lime-300">
               View Predictions
             </button>
-            <button type="button" onClick={() => setActivePage("stats")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">
+            <button type="button" onClick={() => onNavigate("stats")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">
               Compare Players
             </button>
           </div>
@@ -191,51 +253,46 @@ function HomePage({ setActivePage, liveData }) {
 
         <div className="border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/30">
           <div className="bg-slate-900 p-5">
-            <div className="mb-5">
-              <p className="text-sm text-slate-400">Live data snapshot</p>
-              <h2 className="text-2xl font-bold">Today on TennisTipz</h2>
-            </div>
-            <div className="grid gap-3 text-center sm:grid-cols-2">
-              <div className="bg-white/5 p-5">
-                <p className="text-3xl font-black">{liveMatches}</p>
-                <p className="text-xs text-slate-400">Live matches</p>
-              </div>
-              <div className="bg-white/5 p-5">
-                <p className="text-3xl font-black">{upcomingMatches}</p>
-                <p className="text-xs text-slate-400">Upcoming matches</p>
-              </div>
-              <div className="bg-white/5 p-5">
-                <p className="text-3xl font-black">{liveData.players.length}</p>
-                <p className="text-xs text-slate-400">ATP/WTA players</p>
-              </div>
-              <div className="bg-white/5 p-5">
-                <p className="text-3xl font-black">{liveData.news.length}</p>
-                <p className="text-xs text-slate-400">News updates</p>
-              </div>
+            <p className="text-sm text-slate-400">Live data snapshot</p>
+            <h2 className="mt-1 text-2xl font-bold">Today on TennisTipz</h2>
+            <div className="mt-5 grid gap-3 text-center sm:grid-cols-2">
+              <div className="bg-white/5 p-5"><p className="text-3xl font-black">{liveMatches}</p><p className="text-xs text-slate-400">Live matches</p></div>
+              <div className="bg-white/5 p-5"><p className="text-3xl font-black">{upcomingMatches}</p><p className="text-xs text-slate-400">Upcoming matches</p></div>
+              <div className="bg-white/5 p-5"><p className="text-3xl font-black">{liveData.players.length}</p><p className="text-xs text-slate-400">ATP/WTA players</p></div>
+              <div className="bg-white/5 p-5"><p className="text-3xl font-black">{liveData.news.length}</p><p className="text-xs text-slate-400">News updates</p></div>
             </div>
             <div className="mt-5 bg-slate-800 p-5 text-sm leading-6 text-slate-400">
-              Predictions are available on the dedicated board, grouped into live and upcoming matches from Cloudbet betting markets.
+              Predictions are grouped into live and upcoming Cloudbet tennis betting markets and sorted by anticipation.
             </div>
           </div>
         </div>
       </section>
 
       <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-3 md:px-6">
-        <button type="button" onClick={() => setActivePage("predictions")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
+        <button type="button" onClick={() => onNavigate("predictions")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <Target className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">Live and Upcoming</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Prediction cards are grouped by status and sorted by the most anticipated matches first.</p>
+          <h3 className="text-xl font-bold">Tennis Betting Predictions</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Live and upcoming ATP/WTA markets sorted by the most anticipated matches first.</p>
         </button>
-        <button type="button" onClick={() => setActivePage("stats")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
+        <button type="button" onClick={() => onNavigate("stats")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <BarChart3 className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">Top 150 ATP/WTA</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Separate rankings tables for ATP and WTA with points, movement and rating signals.</p>
+          <h3 className="text-xl font-bold">Top 500 ATP/WTA</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Separate player stat views for ATP and WTA with rankings, points and rating signals.</p>
         </button>
-        <button type="button" onClick={() => setActivePage("news")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
+        <button type="button" onClick={() => onNavigate("news")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <Newspaper className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">News Feed</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Track player availability, tournament notes and market-relevant tennis headlines.</p>
+          <h3 className="text-xl font-bold">Tennis Betting News</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Track player availability, tournament notes and odds-relevant tennis headlines.</p>
         </button>
+      </section>
+
+      <section className="mx-auto max-w-7xl px-5 py-10 md:px-6">
+        <div className="border border-white/10 bg-white/[0.04] p-6">
+          <h2 className="text-2xl font-black">Why TennisTipz for crypto tennis betting?</h2>
+          <p className="mt-4 max-w-4xl leading-8 text-slate-400">
+            Tennis markets move quickly, especially when live odds, late withdrawals and player form all collide. TennisTipz keeps crypto tennis betting tips connected to Cloudbet odds, ATP and WTA stats, current news, and responsible betting context so every prediction has visible reasoning behind it.
+          </p>
+        </div>
       </section>
     </>
   );
@@ -243,17 +300,10 @@ function HomePage({ setActivePage, liveData }) {
 
 function OddsLink({ match, fallbackBetUrl }) {
   const href = match.betUrl || fallbackBetUrl || defaultBetUrl;
-
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer sponsored"
-      className="group block bg-slate-900 p-4 ring-1 ring-lime-400/20 transition hover:bg-lime-400 hover:text-slate-950"
-    >
+    <a href={href} target="_blank" rel="noreferrer sponsored" className="group block bg-slate-900 p-4 ring-1 ring-lime-400/20 transition hover:bg-lime-400 hover:text-slate-950">
       <span className="flex items-center justify-between gap-3 text-xs text-slate-500 group-hover:text-slate-800">
-        Cloudbet odds
-        <ExternalLink size={14} />
+        Cloudbet odds <ExternalLink size={14} />
       </span>
       <span className="mt-1 block font-bold">{match.predictedWinnerOdds || match.odds || "N/A"}</span>
       <span className="mt-1 block text-xs text-slate-500 group-hover:text-slate-800">{match.oddsSource || "Cloudbet"}</span>
@@ -272,21 +322,19 @@ function PredictionsPage({ matches, betUrl }) {
   }), [matches]);
   const effectiveCategory = categoryCounts[category] ? category : categoryCounts.upcoming ? "upcoming" : "live";
 
-  const filteredMatches = useMemo(() => {
-    return matches
-      .filter((match) => (effectiveCategory === "live" ? match.live : !match.live))
-      .filter((match) => surface === "All" || match.surface === surface)
-      .map((match) => ({ ...match, prediction: getPrediction(match, modelRun), anticipation: getAnticipationScore(match) }))
-      .sort((a, b) => b.anticipation - a.anticipation || b.prediction.confidence - a.prediction.confidence);
-  }, [matches, effectiveCategory, surface, modelRun]);
+  const filteredMatches = useMemo(() => matches
+    .filter((match) => (effectiveCategory === "live" ? match.live : !match.live))
+    .filter((match) => surface === "All" || match.surface === surface)
+    .map((match) => ({ ...match, prediction: getPrediction(match, modelRun), anticipation: getAnticipationScore(match) }))
+    .sort((a, b) => b.anticipation - a.anticipation || b.prediction.confidence - a.prediction.confidence), [matches, effectiveCategory, surface, modelRun]);
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
       <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase text-lime-300">Prediction board</p>
-          <h1 className="mt-2 text-4xl font-black">Winner Predictions</h1>
-          <p className="mt-3 max-w-2xl text-slate-400">Live and upcoming matches are separated, with the most anticipated predictions ranked first using form, confidence, status and available Cloudbet odds.</p>
+          <p className="text-sm font-semibold uppercase text-lime-300">Cloudbet ATP/WTA markets</p>
+          <h1 className="mt-2 text-4xl font-black">Tennis Betting Predictions</h1>
+          <p className="mt-3 max-w-2xl text-slate-400">Live and upcoming tennis betting matches are separated, with the most anticipated predictions ranked first using odds, form, status and confidence.</p>
         </div>
         <button type="button" onClick={() => setModelRun((value) => (value === 3 ? -2 : value + 1))} className="inline-flex w-fit items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">
           <Gauge size={18} /> Re-run Model
@@ -320,38 +368,19 @@ function PredictionsPage({ matches, betUrl }) {
               <span className="rounded-full bg-lime-400/10 px-3 py-1 text-sm font-bold text-lime-300">{match.prediction.confidence}%</span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-full px-3 py-1 text-xs font-bold ${match.live ? "bg-red-500/15 text-red-200" : "bg-sky-400/10 text-sky-200"}`}>
-                {match.live ? "Live" : "Upcoming"}
-              </span>
+              <span className={`rounded-full px-3 py-1 text-xs font-bold ${match.live ? "bg-red-500/15 text-red-200" : "bg-sky-400/10 text-sky-200"}`}>{match.live ? "Live" : "Upcoming"}</span>
               <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">Anticipation {Math.round(match.anticipation)}</span>
             </div>
             <p className="mt-5 text-slate-300">Predicted winner: <span className="font-bold text-white">{match.prediction.pick}</span></p>
             <div className="mt-5 grid gap-4 sm:grid-cols-3">
               <OddsLink match={match} fallbackBetUrl={betUrl} />
-              <div className="bg-slate-900 p-4">
-                <p className="text-xs text-slate-500">{match.playerA} 100d</p>
-                <p className="mt-1 font-bold">{match.recentA?.wins || 0}-{match.recentA?.losses || 0}</p>
-                <p className="mt-1 text-xs text-slate-500">{match.recentA?.winRate || 50}% win rate</p>
-              </div>
-              <div className="bg-slate-900 p-4">
-                <p className="text-xs text-slate-500">{match.playerB} 100d</p>
-                <p className="mt-1 font-bold">{match.recentB?.wins || 0}-{match.recentB?.losses || 0}</p>
-                <p className="mt-1 text-xs text-slate-500">{match.recentB?.winRate || 50}% win rate</p>
-              </div>
+              <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">{match.playerA} 100d</p><p className="mt-1 font-bold">{match.recentA?.wins || 0}-{match.recentA?.losses || 0}</p><p className="mt-1 text-xs text-slate-500">{match.recentA?.winRate || 50}% win rate</p></div>
+              <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">{match.playerB} 100d</p><p className="mt-1 font-bold">{match.recentB?.wins || 0}-{match.recentB?.losses || 0}</p><p className="mt-1 text-xs text-slate-500">{match.recentB?.winRate || 50}% win rate</p></div>
             </div>
             <div className="mt-5 grid gap-4 sm:grid-cols-3">
-              <div className="bg-slate-900 p-4">
-                <p className="text-xs text-slate-500">Surface</p>
-                <p className="mt-1 font-bold">{match.surface}</p>
-              </div>
-              <div className="bg-slate-900 p-4">
-                <p className="text-xs text-slate-500">Status</p>
-                <p className="mt-1 font-bold">{match.live ? "Live" : match.status}</p>
-              </div>
-              <div className="bg-slate-900 p-4">
-                <p className="text-xs text-slate-500">Score</p>
-                <p className="mt-1 font-bold">{match.score || "Pre-match"}</p>
-              </div>
+              <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">Surface</p><p className="mt-1 font-bold">{match.surface}</p></div>
+              <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">Status</p><p className="mt-1 font-bold">{match.live ? "Live" : match.status}</p></div>
+              <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">Score</p><p className="mt-1 font-bold">{match.score || "Pre-match"}</p></div>
             </div>
             <div className="mt-5 space-y-3 text-sm text-slate-300">
               <p>100-day form edge: {(match.formA || 0) - (match.formB || 0) > 0 ? "+" : ""}{(match.formA || 0) - (match.formB || 0)}</p>
@@ -361,11 +390,7 @@ function PredictionsPage({ matches, betUrl }) {
         ))}
       </div>
 
-      {!filteredMatches.length && (
-        <div className="mt-8 border border-white/10 bg-white/[0.04] p-8 text-slate-400">
-          No Cloudbet tennis betting matches found right now.
-        </div>
-      )}
+      {!filteredMatches.length && <div className="mt-8 border border-white/10 bg-white/[0.04] p-8 text-slate-400">No Cloudbet tennis betting matches found right now.</div>}
     </section>
   );
 }
@@ -375,25 +400,23 @@ function StatsPage({ players }) {
   const [sortKey, setSortKey] = useState("rank");
   const [activeTour, setActiveTour] = useState("ATP");
 
-  const filteredPlayers = useMemo(() => {
-    return players
-      .filter((player) => (player.sex || player.tour) === activeTour)
-      .filter((player) => player.name.toLowerCase().includes(query.toLowerCase()) || player.country?.toLowerCase?.().includes(query.toLowerCase()))
-      .sort((a, b) => (sortKey === "rank" ? a.rank - b.rank : b[sortKey] - a[sortKey]));
-  }, [players, activeTour, query, sortKey]);
+  const filteredPlayers = useMemo(() => players
+    .filter((player) => (player.sex || player.tour) === activeTour)
+    .filter((player) => player.name.toLowerCase().includes(query.toLowerCase()) || player.country?.toLowerCase?.().includes(query.toLowerCase()))
+    .sort((a, b) => (sortKey === "rank" ? a.rank - b.rank : (b[sortKey] || 0) - (a[sortKey] || 0))), [players, activeTour, query, sortKey]);
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
       <div>
         <p className="text-sm font-semibold uppercase text-lime-300">Player database</p>
-        <h1 className="mt-2 text-4xl font-black">Player Stats</h1>
-        <p className="mt-3 max-w-2xl text-slate-400">Top 150 ATP and top 150 WTA players, split by tour with ranking points and rating signals.</p>
+        <h1 className="mt-2 text-4xl font-black">ATP and WTA Player Stats</h1>
+        <p className="mt-3 max-w-2xl text-slate-400">Top 500 ATP and top 500 WTA players, split by tour with ranking points and betting-relevant rating signals.</p>
       </div>
 
       <div className="mt-8 flex gap-2 overflow-x-auto">
         {tours.map((tour) => (
           <button key={tour} type="button" onClick={() => setActiveTour(tour)} className={`rounded-xl px-5 py-2 text-sm font-bold ${activeTour === tour ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
-            {tour} Top 150
+            {tour} Top 500
           </button>
         ))}
       </div>
@@ -421,17 +444,11 @@ function StatsPage({ players }) {
         </div>
         {filteredPlayers.map((player) => (
           <div key={player.id || player.name} className="grid gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 md:grid-cols-[1.2fr_0.5fr_0.7fr_repeat(6,0.7fr)] md:items-center">
-            <div>
-              <p className="font-bold">{player.name}</p>
-              <p className="text-sm text-slate-500">{player.country || activeTour} movement {player.movement || player.trend}</p>
-            </div>
+            <div><p className="font-bold">{player.name}</p><p className="text-sm text-slate-500">{player.country || activeTour} movement {player.movement || player.trend}</p></div>
             <p className="text-sm text-slate-300">#{player.rank}</p>
             <p className="text-sm text-slate-300">{player.points || 0}</p>
             {[player.form, player.hold, player.breakRate, player.clay, player.hard, player.grass].map((value, index) => (
-              <div key={`${player.id || player.name}-${index}`}>
-                <p className="mb-2 text-sm font-bold">{value}</p>
-                <StatBar value={value} />
-              </div>
+              <div key={`${player.id || player.name}-${index}`}><p className="mb-2 text-sm font-bold">{value}</p><StatBar value={value} /></div>
             ))}
           </div>
         ))}
@@ -442,16 +459,15 @@ function StatsPage({ players }) {
 
 function NewsPage({ news }) {
   const [category, setCategory] = useState("All");
-
-  const filteredNews = useMemo(() => news.filter((item) => category === "All" || item.category === category), [news, category]);
+  const filteredNews = useMemo(() => news.filter((item) => category === "All" || item.category === category).slice(0, 16), [news, category]);
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
       <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-sm font-semibold uppercase text-lime-300">Live newsroom</p>
-          <h1 className="mt-2 text-4xl font-black">Tennis News</h1>
-          <p className="mt-3 max-w-2xl text-slate-400">Filter updates by tournament context, player availability, market movement and trend signals.</p>
+          <h1 className="mt-2 text-4xl font-black">Tennis News for Betting</h1>
+          <p className="mt-3 max-w-2xl text-slate-400">Filter ATP and WTA updates by tournament context, player availability, market movement and trend signals.</p>
         </div>
         <CalendarDays className="text-slate-500" />
       </div>
@@ -475,11 +491,7 @@ function NewsPage({ news }) {
               </div>
               <h2 className="text-xl font-black leading-tight">{item.title}</h2>
               <p className="mt-4 leading-7 text-slate-400">{item.summary}</p>
-              {item.url && item.url !== "#" && (
-                <a href={item.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">
-                  Read from {item.source}
-                </a>
-              )}
+              {item.url && item.url !== "#" && <a href={item.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">Read from {item.source}</a>}
             </div>
           </article>
         ))}
@@ -492,32 +504,34 @@ function ResponsibleFooter() {
   return (
     <footer className="border-t border-white/10 px-5 py-8 text-sm text-slate-500 md:px-6">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-4 flex items-center gap-2 text-slate-300">
-          <ShieldCheck size={18} /> Responsible Play
-        </div>
-        <p className="max-w-4xl">
-          18+ only. Tennis predictions are analytical opinions based on available information and are not guaranteed outcomes. Betting involves risk. Never bet more than you can afford to lose.
-        </p>
+        <div className="mb-4 flex items-center gap-2 text-slate-300"><ShieldCheck size={18} /> Responsible Play</div>
+        <p className="max-w-4xl">18+ only. Tennis predictions are analytical opinions based on available information and are not guaranteed outcomes. Betting involves risk. Never bet more than you can afford to lose.</p>
       </div>
     </footer>
   );
 }
 
 export default function TennisTipzApp() {
-  const [activePage, setActivePage] = useState("home");
+  const [activePage, setActivePage] = useState(() => pageFromPath(window.location.pathname));
   const [liveData, setLiveData] = useState(initialLiveData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  function navigateToPage(pageId) {
+    const nextPage = pages.find((page) => page.id === pageId) || pages[0];
+    setActivePage(nextPage.id);
+    if (window.location.pathname !== nextPage.path) {
+      window.history.pushState({ pageId: nextPage.id }, "", nextPage.path);
+    }
+  }
+
   async function loadLiveData() {
     setLoading(true);
     setError("");
-
     try {
       const response = await fetch(`/api/live-data?ts=${Date.now()}`);
       if (!response.ok) throw new Error(`Live data returned ${response.status}`);
       const payload = await response.json();
-
       setLiveData({
         generatedAt: payload.generatedAt || null,
         source: payload.source || initialLiveData.source,
@@ -527,7 +541,6 @@ export default function TennisTipzApp() {
         news: payload.news?.length ? payload.news : fallbackNews,
         errors: payload.errors || [],
       });
-
       if (payload.errors?.length) setError("Some live feeds used fallback data.");
     } catch (loadError) {
       setLiveData(initialLiveData);
@@ -541,12 +554,22 @@ export default function TennisTipzApp() {
     loadLiveData();
   }, []);
 
+  useEffect(() => {
+    updateDocumentSeo(activePage);
+  }, [activePage]);
+
+  useEffect(() => {
+    const onPopState = () => setActivePage(pageFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <Header activePage={activePage} setActivePage={setActivePage} />
+      <Header activePage={activePage} onNavigate={navigateToPage} />
       <DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} />
       <main>
-        {activePage === "home" && <HomePage setActivePage={setActivePage} liveData={liveData} />}
+        {activePage === "home" && <HomePage onNavigate={navigateToPage} liveData={liveData} />}
         {activePage === "predictions" && <PredictionsPage matches={liveData.matches} betUrl={liveData.betUrl} />}
         {activePage === "stats" && <StatsPage players={liveData.players} />}
         {activePage === "news" && <NewsPage news={liveData.news} />}
