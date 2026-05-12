@@ -1,0 +1,18 @@
+{
+  "name": "TennisTipz - Crypto Tennis Betting Tips",
+  "short_name": "TennisTipz",
+  "description": "Crypto tennis betting tips, live match predictions, Cloudbet odds, ATP and WTA player stats, and tennis news.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "48x48 72x72 96x96 128x128 256x256 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
