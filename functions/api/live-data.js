@@ -4,7 +4,7 @@ const DEFAULT_CLOUDBET_URL = "https://www.cloudbet.com/en/sports/tennis";
 const RSS_NEWS_FEEDS = [{ source: "Tennis.com", url: "https://www.tennis.com/roots/rss-feeds/news/" }];
 
 const DEFAULT_FORM = { wins: 0, losses: 0, matches: 0, winRate: 50 };
-const CLOUDBET_COMPETITION_LIMIT = 40;
+const CLOUDBET_COMPETITION_LIMIT = 200;
 const PUBLIC_PLAYER_LIMIT = 500;
 const PREDICTION_PLAYER_LIMIT = 500;
 const PLAYER_CACHE_KEY = "players:standings:v1";
