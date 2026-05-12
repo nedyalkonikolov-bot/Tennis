@@ -5,8 +5,10 @@ const RSS_NEWS_FEEDS = [{ source: "Tennis.com", url: "https://www.tennis.com/roo
 
 const DEFAULT_FORM = { wins: 0, losses: 0, matches: 0, winRate: 50 };
 const CLOUDBET_COMPETITION_LIMIT = 28;
-const PUBLIC_PLAYER_LIMIT = 150;
+const PUBLIC_PLAYER_LIMIT = 500;
 const PREDICTION_PLAYER_LIMIT = 500;
+const PLAYER_CACHE_KEY = "players:standings:v1";
+const PLAYER_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const NEWS_ARTICLE_LIMIT = 16;
 const NEWS_ARTICLE_IMAGE_LIMIT = 16;
 const H2H_LOOKUP_LIMIT = 2;
@@ -281,12 +283,44 @@ async function getMatches(env, betUrl, players = []) {
   const recentForms = await getRecentFormsForMatches(env, bettingEvents);
   return bettingEvents.map((event, index) => normalizeCloudbetMatch(event, recentForms[index], betUrl));
 }
-async function getPlayers(env, limit = PUBLIC_PLAYER_LIMIT) {
+function slicePlayersByTour(players, limit = PUBLIC_PLAYER_LIMIT) { return [...players.filter((player) => player.tour === "ATP").slice(0, limit), ...players.filter((player) => player.tour === "WTA").slice(0, limit)]; }
+async function fetchPlayersFromApi(env, limit = PUBLIC_PLAYER_LIMIT) {
   if (!env.API_TENNIS_KEY) return [];
   const [atp, wta] = await Promise.all([fetchApiTennis(env, "get_standings", { event_type: "ATP" }).catch(() => []), fetchApiTennis(env, "get_standings", { event_type: "WTA" }).catch(() => [])]);
   return [...(atp || []).slice(0, limit).map((player) => normalizePlayer(player, "ATP")), ...(wta || []).slice(0, limit).map((player) => normalizePlayer(player, "WTA"))];
 }
-function getPublicPlayers(players) { return [...players.filter((player) => player.tour === "ATP").slice(0, PUBLIC_PLAYER_LIMIT), ...players.filter((player) => player.tour === "WTA").slice(0, PUBLIC_PLAYER_LIMIT)]; }
+function getPlayerCache(env) { return env.TENNIS_PLAYERS_CACHE || env.PLAYER_STATS_KV || env.PLAYERS_KV || null; }
+async function readCachedPlayers(env) {
+  const cache = getPlayerCache(env);
+  if (!cache) return null;
+  try {
+    const snapshot = await cache.get(PLAYER_CACHE_KEY, "json");
+    if (!snapshot?.players?.length) return null;
+    return snapshot;
+  } catch { return null; }
+}
+async function writeCachedPlayers(env, players) {
+  const cache = getPlayerCache(env);
+  if (!cache || !players?.length) return false;
+  try {
+    await cache.put(PLAYER_CACHE_KEY, JSON.stringify({ updatedAt: new Date().toISOString(), players }), { expirationTtl: 3 * 24 * 60 * 60 });
+    return true;
+  } catch { return false; }
+}
+async function getPlayers(env, limit = PUBLIC_PLAYER_LIMIT) {
+  const cached = await readCachedPlayers(env);
+  const cachedAt = cached?.updatedAt ? Date.parse(cached.updatedAt) : 0;
+  const isFresh = cached?.players?.length && cachedAt && Date.now() - cachedAt < PLAYER_CACHE_MAX_AGE_MS;
+  if (isFresh) return slicePlayersByTour(cached.players, limit);
+  try {
+    const players = await fetchPlayersFromApi(env, Math.max(limit, PREDICTION_PLAYER_LIMIT));
+    await writeCachedPlayers(env, players);
+    return slicePlayersByTour(players, limit);
+  } catch (error) {
+    if (cached?.players?.length) return slicePlayersByTour(cached.players, limit);
+    throw error;
+  }
+}
 async function getNews() {
   const feedResults = await Promise.all(RSS_NEWS_FEEDS.map(async (feed) => { const response = await fetch(feed.url, { headers: { accept: "application/rss+xml, application/xml, text/xml" } }); if (!response.ok) throw new Error(`${feed.source} returned ${response.status}`); return parseRssItems(await response.text(), feed.source); }));
   const articles = Array.from(new Map(feedResults.flat().map((article) => [article.url, article])).values()).slice(0, NEWS_ARTICLE_LIMIT);
@@ -299,13 +333,13 @@ async function getNews() {
 export async function onRequestGet({ env }) {
   const betUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_CLOUDBET_URL).trim();
   const errors = [];
-  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT, cloudbetCompetitionScope: "Cloudbet tennis markets filtered to ATP/WTA ranking profile matches; simulated markets excluded", blockedCloudbetMarkets: "Simulated Reality League, SRL, virtual, simulation", newsArticleLimit: NEWS_ARTICLE_LIMIT, newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT, h2hLookupLimit: H2H_LOOKUP_LIMIT, matchCount: 0, liveMatchCount: 0, upcomingMatchCount: 0, playerCount: 0, predictionPlayerPool: 0, newsCount: 0, newsWithImagesCount: 0, newsProvider: "Tennis.com RSS", playerStats: "Top 150 ATP + Top 150 WTA", predictionSource: "Cloudbet tennis.winner markets + expanded ATP/WTA ranking profile filter + API-Tennis form/rank signals", predictionVariables: "Cloudbet implied probability, 100-day form, sample size, ranking, points, surface rating, trend, live status", predictionWindow: "Last 100 days where API-Tennis player keys match" };
+  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasPlayerCache: Boolean(getPlayerCache(env)), cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT, cloudbetCompetitionScope: "Cloudbet tennis markets filtered to ATP/WTA ranking profile matches; simulated markets excluded", blockedCloudbetMarkets: "Simulated Reality League, SRL, virtual, simulation", newsArticleLimit: NEWS_ARTICLE_LIMIT, newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT, h2hLookupLimit: H2H_LOOKUP_LIMIT, matchCount: 0, liveMatchCount: 0, upcomingMatchCount: 0, playerCount: 0, predictionPlayerPool: 0, newsCount: 0, newsWithImagesCount: 0, newsProvider: "Tennis.com RSS", playerStats: "Top 500 ATP + Top 500 WTA", playerStatsStorage: "Cloudflare KV TENNIS_PLAYERS_CACHE when configured, API-Tennis fallback otherwise", predictionSource: "Cloudbet tennis.winner markets + expanded ATP/WTA ranking profile filter + API-Tennis form/rank signals", predictionVariables: "Cloudbet implied probability, 100-day form, sample size, ranking, points, surface rating, trend, live status", predictionWindow: "Last 100 days where API-Tennis player keys match" };
   let matches = [];
   let players = [];
   let predictionPlayers = [];
   let news = [];
 
-  try { predictionPlayers = await getPlayers(env, PREDICTION_PLAYER_LIMIT); players = getPublicPlayers(predictionPlayers); diagnostics.playerCount = players.length; diagnostics.predictionPlayerPool = predictionPlayers.length; } catch (error) { errors.push(`player stats: ${error.message}`); }
+  try { predictionPlayers = await getPlayers(env, PREDICTION_PLAYER_LIMIT); players = slicePlayersByTour(predictionPlayers, PUBLIC_PLAYER_LIMIT); diagnostics.playerCount = players.length; diagnostics.predictionPlayerPool = predictionPlayers.length; } catch (error) { errors.push(`player stats: ${error.message}`); }
   try { matches = await getMatches(env, betUrl, predictionPlayers); diagnostics.matchCount = matches.length; diagnostics.liveMatchCount = matches.filter((match) => match.live).length; diagnostics.upcomingMatchCount = matches.filter((match) => !match.live).length; } catch (error) { errors.push(`cloudbet predictions: ${error.message}`); }
   try { news = await getNews(); diagnostics.newsCount = news.length; diagnostics.newsWithImagesCount = news.filter((article) => article.imageUrl).length; } catch (error) { errors.push(`news: ${error.message}`); }
 
@@ -313,7 +347,7 @@ export async function onRequestGet({ env }) {
   if (!diagnostics.hasCloudbetApiKey) errors.push("missing CLOUDBET_API_KEY Cloudflare secret for Cloudbet odds");
   if (!diagnostics.hasCloudbetAffiliateUrl) errors.push("missing CLOUDBET_AFFILIATE_URL Cloudflare variable for affiliate click-throughs");
 
-  const hasLiveTennis = Boolean(env.API_TENNIS_KEY && players.length);
+  const hasLiveTennis = Boolean((env.API_TENNIS_KEY || diagnostics.hasPlayerCache) && players.length);
   const hasCloudbetConnection = diagnostics.hasCloudbetApiKey && !errors.some((error) => error.startsWith("cloudbet predictions:"));
   const hasLiveNews = Boolean(news.length);
   return jsonResponse({ generatedAt: new Date().toISOString(), source: { tennis: hasLiveTennis ? "API-Tennis" : "fallback", odds: hasCloudbetConnection ? "Cloudbet" : "fallback", news: hasLiveNews ? "Tennis.com" : "fallback" }, betUrl, matches, players: players.length ? players : fallbackPlayers, news: news.length ? news : fallbackNews, errors, diagnostics });
