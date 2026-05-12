@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/site.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TennisTipz | Crypto Tennis Betting Tips, Predictions & Player Stats</title>
     <meta
@@ -11,7 +12,7 @@
     />
     <meta
       name="keywords"
-      content="crypto tennis betting, tennis betting, tennis tips, tennis predictions, ATP betting tips, WTA betting tips, Cloudbet tennis odds, tennis player stats"
+      content="crypto tennis betting, tennis betting, tennis betting tips, tennis predictions, ATP betting tips, WTA betting tips, Cloudbet tennis odds, tennis player stats"
     />
     <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="author" content="TennisTipz" />
@@ -26,20 +27,29 @@
       content="Live tennis betting tips, match predictions, Cloudbet odds, ATP/WTA stats, tennis news, and crypto betting insights. 18+ bet responsibly."
     />
     <meta property="og:url" content="https://www.tennistipz.win/" />
-    <meta property="og:image" content="https://www.tennistipz.win/favicon.svg" />
+    <meta property="og:image" content="https://www.tennistipz.win/og-image.svg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
 
-    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="TennisTipz | Tennis Betting Tips & Crypto Odds" />
     <meta
       name="twitter:description"
       content="Tennis predictions, crypto betting insights, Cloudbet odds, ATP/WTA player stats, and tennis tips for responsible bettors."
     />
-    <meta name="twitter:image" content="https://www.tennistipz.win/favicon.svg" />
+    <meta name="twitter:image" content="https://www.tennistipz.win/og-image.svg" />
 
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://www.tennistipz.win/#organization",
+            "name": "TennisTipz",
+            "url": "https://www.tennistipz.win/",
+            "logo": "https://www.tennistipz.win/favicon.svg"
+          },
           {
             "@type": "WebSite",
             "@id": "https://www.tennistipz.win/#website",
@@ -47,15 +57,17 @@
             "url": "https://www.tennistipz.win/",
             "description": "Live tennis predictions, crypto tennis betting insights, tennis tips, ATP and WTA player stats, Cloudbet odds, and tennis news.",
             "inLanguage": "en",
+            "publisher": { "@id": "https://www.tennistipz.win/#organization" },
             "audience": {
               "@type": "PeopleAudience",
               "requiredMinAge": 18
             },
-            "potentialAction": {
-              "@type": "SearchAction",
-              "target": "https://www.tennistipz.win/?q={search_term_string}",
-              "query-input": "required name=search_term_string"
-            }
+            "hasPart": [
+              { "@id": "https://www.tennistipz.win/tennis-predictions/#webpage" },
+              { "@id": "https://www.tennistipz.win/player-stats/#webpage" },
+              { "@id": "https://www.tennistipz.win/tennis-news/#webpage" },
+              { "@id": "https://www.tennistipz.win/crypto-tennis-betting/#webpage" }
+            ]
           },
           {
             "@type": "WebApplication",
@@ -66,11 +78,37 @@
             "operatingSystem": "Web",
             "isAccessibleForFree": true,
             "description": "Tennis betting prediction app with crypto betting context, live and upcoming Cloudbet tennis odds, ATP/WTA stats, and tennis tips.",
-            "publisher": {
-              "@type": "Organization",
-              "name": "TennisTipz",
-              "url": "https://www.tennistipz.win/"
-            }
+            "publisher": { "@id": "https://www.tennistipz.win/#organization" }
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://www.tennistipz.win/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "What does TennisTipz provide?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "TennisTipz provides tennis betting tips, live and upcoming match predictions, Cloudbet odds context, ATP and WTA player stats, and tennis news for responsible bettors."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Are TennisTipz predictions guaranteed?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No. Tennis predictions are informational and should be used as research, not a guarantee of betting results. Always bet responsibly."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Does TennisTipz cover crypto tennis betting?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. TennisTipz focuses on tennis betting markets with crypto-friendly context, including Cloudbet odds and ATP/WTA match research."
+                }
+              }
+            ]
           }
         ]
       }
