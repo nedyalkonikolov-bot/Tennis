@@ -217,6 +217,10 @@ function Header({ activePage, onNavigate }) {
           {pages.map((page) => (
             <PageLink key={page.id} page={page} activePage={activePage} onNavigate={onNavigate} />
           ))}
+          <a href="/betting-sites/" className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white">
+            <ExternalLink size={16} />
+            Betting Sites
+          </a>
         </nav>
       </div>
     </header>
@@ -247,6 +251,9 @@ function HomePage({ onNavigate, liveData }) {
             <button type="button" onClick={() => onNavigate("stats")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">
               Compare Players
             </button>
+            <a href="/betting-sites/" className="rounded-xl border border-lime-400/40 px-6 py-4 text-center font-bold text-lime-200 hover:bg-lime-400/10">
+              Betting Sites
+            </a>
           </div>
           <p className="mt-4 text-xs text-slate-500">18+. Tips are opinions, not guaranteed outcomes. Bet responsibly.</p>
         </div>
@@ -268,7 +275,7 @@ function HomePage({ onNavigate, liveData }) {
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-3 md:px-6">
+      <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-2 lg:grid-cols-4 md:px-6">
         <button type="button" onClick={() => onNavigate("predictions")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
           <Target className="mb-4 text-lime-300" />
           <h3 className="text-xl font-bold">Tennis Betting Predictions</h3>
@@ -284,6 +291,11 @@ function HomePage({ onNavigate, liveData }) {
           <h3 className="text-xl font-bold">Tennis Betting News</h3>
           <p className="mt-3 text-sm leading-6 text-slate-400">Track player availability, tournament notes and odds-relevant tennis headlines.</p>
         </button>
+        <a href="/betting-sites/" className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
+          <ExternalLink className="mb-4 text-lime-300" />
+          <h3 className="text-xl font-bold text-white">Betting Sites</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Compare Cloudbet, Stake.com and BC.Game with referral links and responsible betting notes.</p>
+        </a>
       </section>
 
       <section className="mx-auto max-w-7xl px-5 py-10 md:px-6">
