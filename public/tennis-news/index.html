@@ -6,9 +6,22 @@
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
+      let consentGranted = false;
+      try { consentGranted = localStorage.getItem('tennistipz_cookie_consent') === 'accepted'; } catch (error) {}
+      gtag('consent', 'default', {
+        ad_storage: consentGranted ? 'granted' : 'denied',
+        analytics_storage: consentGranted ? 'granted' : 'denied',
+        ad_user_data: consentGranted ? 'granted' : 'denied',
+        ad_personalization: consentGranted ? 'granted' : 'denied',
+        functionality_storage: 'granted',
+        security_storage: 'granted',
+        wait_for_update: 500
+      });
       gtag('js', new Date());
-      gtag('config', 'G-6P32BV3SQQ');
+      gtag('config', 'G-6P32BV3SQQ', { anonymize_ip: true });
     </script>
+    <link rel="stylesheet" href="/consent.css" />
+    <script defer src="/consent.js"></script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tennis News for Betting | ATP, WTA & Market Updates</title>
