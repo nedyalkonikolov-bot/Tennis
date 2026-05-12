@@ -251,16 +251,14 @@ function enrichCloudbetEventsWithProfiles(events, players = []) {
     let second = findPlayerProfile(players, event.event_second_player, event.tour || first?.tour || "");
     if (!first && second) first = findPlayerProfile(players, event.event_first_player, second.tour);
     if (first && second && first.tour !== second.tour) { first = null; second = null; }
-    const tour = event.tour || first?.tour || second?.tour || "";
+    const tour = event.tour || "";
     return { ...event, tour, first_player_key: first?.playerKey || "", second_player_key: second?.playerKey || "", profiles: { first, second } };
   });
 }
 function isAtpOrWtaProfileMatch(event) {
-  const profileTour = event.profiles?.first && event.profiles?.second && event.profiles.first.tour === event.profiles.second.tour ? event.profiles.first.tour : "";
-  const tour = event.tour || profileTour;
-  if (!["ATP", "WTA"].includes(tour)) return false;
-  if (event.profiles?.first && event.profiles?.second) return event.profiles.first.tour === event.profiles.second.tour;
-  return Boolean(event.tour && (event.profiles?.first || event.profiles?.second));
+  if (!["ATP", "WTA"].includes(event.tour)) return false;
+  if (event.profiles?.first && event.profiles?.second) return event.profiles.first.tour === event.tour && event.profiles.second.tour === event.tour;
+  return event.profiles?.first?.tour === event.tour || event.profiles?.second?.tour === event.tour;
 }
 async function getRecentFormsForMatches(env, matches) {
   const keyedMatches = matches.filter((match) => match.first_player_key && match.second_player_key).slice(0, H2H_LOOKUP_LIMIT);
@@ -333,7 +331,7 @@ async function getNews() {
 export async function onRequestGet({ env }) {
   const betUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_CLOUDBET_URL).trim();
   const errors = [];
-  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasPlayerCache: Boolean(getPlayerCache(env)), cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT, cloudbetCompetitionScope: "Cloudbet tennis markets filtered to ATP/WTA ranking profile matches; simulated markets excluded", blockedCloudbetMarkets: "Simulated Reality League, SRL, virtual, simulation", newsArticleLimit: NEWS_ARTICLE_LIMIT, newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT, h2hLookupLimit: H2H_LOOKUP_LIMIT, matchCount: 0, liveMatchCount: 0, upcomingMatchCount: 0, playerCount: 0, predictionPlayerPool: 0, newsCount: 0, newsWithImagesCount: 0, newsProvider: "Tennis.com RSS", playerStats: "Top 500 ATP + Top 500 WTA", playerStatsStorage: "Cloudflare KV TENNIS_PLAYERS_CACHE when configured, API-Tennis fallback otherwise", predictionSource: "Cloudbet tennis.winner markets + expanded ATP/WTA ranking profile filter + API-Tennis form/rank signals", predictionVariables: "Cloudbet implied probability, 100-day form, sample size, ranking, points, surface rating, trend, live status", predictionWindow: "Last 100 days where API-Tennis player keys match" };
+  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasPlayerCache: Boolean(getPlayerCache(env)), cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT, cloudbetCompetitionScope: "Cloudbet tennis markets filtered to ATP/WTA competitions; ITF, Challenger, simulated and virtual markets excluded", blockedCloudbetMarkets: "Simulated Reality League, SRL, virtual, simulation", newsArticleLimit: NEWS_ARTICLE_LIMIT, newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT, h2hLookupLimit: H2H_LOOKUP_LIMIT, matchCount: 0, liveMatchCount: 0, upcomingMatchCount: 0, playerCount: 0, predictionPlayerPool: 0, newsCount: 0, newsWithImagesCount: 0, newsProvider: "Tennis.com RSS", playerStats: "Top 500 ATP + Top 500 WTA", playerStatsStorage: "Cloudflare KV TENNIS_PLAYERS_CACHE when configured, API-Tennis fallback otherwise", predictionSource: "Cloudbet ATP/WTA tennis.winner markets + ranking profile filter + API-Tennis form/rank signals", predictionVariables: "Cloudbet implied probability, 100-day form, sample size, ranking, points, surface rating, trend, live status", predictionWindow: "Last 100 days where API-Tennis player keys match" };
   let matches = [];
   let players = [];
   let predictionPlayers = [];
