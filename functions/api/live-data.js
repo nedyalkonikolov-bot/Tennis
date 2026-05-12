@@ -4,98 +4,49 @@ const DEFAULT_CLOUDBET_URL = "https://www.cloudbet.com/en/sports/tennis";
 const RSS_NEWS_FEEDS = [{ source: "Tennis.com", url: "https://www.tennis.com/roots/rss-feeds/news/" }];
 
 const DEFAULT_FORM = { wins: 0, losses: 0, matches: 0, winRate: 50 };
-const CLOUDBET_COMPETITION_LIMIT = 28;
+const CLOUDBET_COMPETITION_LIMIT = 40;
 const PUBLIC_PLAYER_LIMIT = 500;
 const PREDICTION_PLAYER_LIMIT = 500;
 const PLAYER_CACHE_KEY = "players:standings:v1";
 const PLAYER_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const NEWS_ARTICLE_LIMIT = 16;
-const NEWS_ARTICLE_IMAGE_LIMIT = 16;
-const H2H_LOOKUP_LIMIT = 2;
+const NEWS_ARTICLE_IMAGE_LIMIT = 6;
+const H2H_LOOKUP_LIMIT = 0;
 const DEFAULT_NEWS_IMAGE = "https://images.tennis.com/image/upload/t_q-best/tenniscom-prd/colectyfnidvc41bazww.jpg";
 const BLOCKED_CLOUDBET_MARKET_RE = /\b(simulated|simulation|simulator|virtual|srl|sr\s*league|simulated\s*reality|reality\s*league)\b/i;
+const BLOCKED_TOUR_TEXT_RE = /\b(itf|utr|challenger|exhibition|boys|girls|junior|juniors|college|davis|billie|hopman)\b/i;
 
 const fallbackPlayers = [
   { id: "demo-player-1", playerKey: "", name: "Jannik Sinner", sex: "ATP", tour: "ATP", rank: 1, points: 10550, country: "Italy", movement: "same", form: 88, hold: 91, breakRate: 28, clay: 84, hard: 92, grass: 79, trend: "+6" },
   { id: "demo-player-2", playerKey: "", name: "Carlos Alcaraz", sex: "ATP", tour: "ATP", rank: 2, points: 8850, country: "Spain", movement: "same", form: 84, hold: 88, breakRate: 31, clay: 91, hard: 86, grass: 83, trend: "+3" },
   { id: "demo-player-3", playerKey: "", name: "Iga Swiatek", sex: "WTA", tour: "WTA", rank: 1, points: 9200, country: "Poland", movement: "same", form: 92, hold: 82, breakRate: 46, clay: 96, hard: 88, grass: 73, trend: "+8" },
 ];
-
 const fallbackNews = [{ id: "demo-news-1", title: "Free RSS news feed is waiting for deployment", category: "Setup", time: "Now", summary: "Redeploy Cloudflare Pages to replace this fallback with live tennis headlines from free RSS feeds.", url: "#", imageUrl: DEFAULT_NEWS_IMAGE, source: "TennisTipz" }];
 
-function jsonResponse(payload, status = 200) {
-  return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300, stale-while-revalidate=900" } });
-}
+function jsonResponse(payload, status = 200) { return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300, stale-while-revalidate=900" } }); }
 function asNumber(value, fallback = 0) { const n = Number.parseInt(value, 10); return Number.isFinite(n) ? n : fallback; }
 function asFloat(value, fallback = null) { const n = Number.parseFloat(value); return Number.isFinite(n) ? n : fallback; }
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
 function addDays(date, days) { const next = new Date(date); next.setUTCDate(next.getUTCDate() + days); return next; }
-
-function decodeEntities(value = "") {
-  return String(value).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-}
+function decodeEntities(value = "") { return String(value).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">"); }
 function cleanText(value = "") { return decodeEntities(value).replace(/<[^>]+>/g, " ").replace(/\s+\|\s*[^|<>]+$/g, "").replace(/\s+[-\u2013]\s+(ATP Tour|WTA Tennis|Tennis\.com)$/i, "").replace(/\s+/g, " ").trim(); }
 function normalizeName(value = "") { return String(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim(); }
-function namesLookSimilar(a, b) {
-  const left = normalizeName(a).split(" ").filter(Boolean);
-  const right = normalizeName(b).split(" ").filter(Boolean);
-  if (!left.length || !right.length) return false;
-  const rightSet = new Set(right);
-  const shared = left.filter((part) => rightSet.has(part));
-  return left.at(-1) === right.at(-1) && (shared.length >= 2 || left.length === 1 || right.length === 1);
-}
+function namesLookSimilar(a, b) { const left = normalizeName(a).split(" ").filter(Boolean); const right = normalizeName(b).split(" ").filter(Boolean); if (!left.length || !right.length) return false; const rightSet = new Set(right); const shared = left.filter((part) => rightSet.has(part)); return left.at(-1) === right.at(-1) && (shared.length >= 2 || left.length === 1 || right.length === 1); }
 
 function getTagRawValue(item, tag) { const match = item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`, "i")); return decodeEntities(match?.[1] || ""); }
 function getTagValue(item, tag) { return cleanText(getTagRawValue(item, tag)); }
 function getAttributeValue(markup = "", attribute) { const match = String(markup).match(new RegExp(`${attribute}=(?:["']([^"']+)["']|([^\\s>]+))`, "i")); return decodeEntities(match?.[1] || match?.[2] || "").trim(); }
 function normalizeImageUrl(value = "") { const clean = decodeEntities(value).trim(); if (clean.startsWith("//")) return `https:${clean}`; return /^https?:\/\//i.test(clean) ? clean : ""; }
-function getRssImageUrl(item) {
-  const candidates = [item.match(/<media:content[^>]+>/i)?.[0], item.match(/<media:thumbnail[^>]+>/i)?.[0], item.match(/<enclosure[^>]+>/i)?.[0], item.match(/<image[^>]+>/i)?.[0]];
-  for (const candidate of candidates) {
-    const url = normalizeImageUrl(getAttributeValue(candidate, "url") || getAttributeValue(candidate, "href") || getAttributeValue(candidate, "src"));
-    if (url) return url;
-  }
-  const inlineImage = getTagRawValue(item, "description").match(/<img[^>]+src=(?:["']([^"']+)["']|([^\s>]+))/i);
-  return normalizeImageUrl(inlineImage?.[1] || inlineImage?.[2] || "");
-}
-function getMetaImageUrl(html = "") {
-  const metaTags = html.match(/<meta[^>]+>/gi) || [];
-  for (const tag of metaTags) {
-    const property = (getAttributeValue(tag, "property") || getAttributeValue(tag, "name")).toLowerCase();
-    if (!["og:image", "og:image:url", "twitter:image", "twitter:image:src"].includes(property)) continue;
-    const content = normalizeImageUrl(getAttributeValue(tag, "content"));
-    if (content) return content;
-  }
-  const jsonLdMatch = html.match(/"image"\s*:\s*(?:"([^"]+)"|\[\s*"([^"]+)")/i);
-  return normalizeImageUrl(jsonLdMatch?.[1] || jsonLdMatch?.[2] || "");
-}
-async function fetchArticleImageUrl(articleUrl) {
-  if (!articleUrl || !articleUrl.includes("tennis.com/")) return "";
-  try {
-    const response = await fetch(articleUrl, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 TennisTipzBot/1.0" } });
-    if (!response.ok) return "";
-    return getMetaImageUrl(await response.text());
-  } catch { return ""; }
-}
+function getRssImageUrl(item) { const candidates = [item.match(/<media:content[^>]+>/i)?.[0], item.match(/<media:thumbnail[^>]+>/i)?.[0], item.match(/<enclosure[^>]+>/i)?.[0], item.match(/<image[^>]+>/i)?.[0]]; for (const candidate of candidates) { const url = normalizeImageUrl(getAttributeValue(candidate, "url") || getAttributeValue(candidate, "href") || getAttributeValue(candidate, "src")); if (url) return url; } const inlineImage = getTagRawValue(item, "description").match(/<img[^>]+src=(?:["']([^"']+)["']|([^\s>]+))/i); return normalizeImageUrl(inlineImage?.[1] || inlineImage?.[2] || ""); }
+function getMetaImageUrl(html = "") { const metaTags = html.match(/<meta[^>]+>/gi) || []; for (const tag of metaTags) { const property = (getAttributeValue(tag, "property") || getAttributeValue(tag, "name")).toLowerCase(); if (!["og:image", "og:image:url", "twitter:image", "twitter:image:src"].includes(property)) continue; const content = normalizeImageUrl(getAttributeValue(tag, "content")); if (content) return content; } const jsonLdMatch = html.match(/"image"\s*:\s*(?:"([^"]+)"|\[\s*"([^"]+)")/i); return normalizeImageUrl(jsonLdMatch?.[1] || jsonLdMatch?.[2] || ""); }
+async function fetchArticleImageUrl(articleUrl) { if (!articleUrl || !articleUrl.includes("tennis.com/")) return ""; try { const response = await fetch(articleUrl, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 TennisTipzBot/1.0" } }); if (!response.ok) return ""; return getMetaImageUrl(await response.text()); } catch { return ""; } }
 
 function getCloudbetCompetitionText(competition = {}) { return [competition.name, competition.key, competition.category?.name, competition.category?.key, competition.group, competition.path].filter(Boolean).join(" "); }
 function getCloudbetEventText(event = {}) { return [event.name, event.key, event.id, event.home?.name, event.away?.name, event.tournament_name, event.event_type_type, getCloudbetCompetitionText(event.competition || {})].filter(Boolean).join(" "); }
 function isBlockedCloudbetMarket(event = {}) { return BLOCKED_CLOUDBET_MARKET_RE.test(getCloudbetEventText(event)); }
-function getCloudbetTourFromText(value = "") {
-  const text = String(value).toLowerCase();
-  if (/\b(itf|utr|challenger|exhibition|boys|girls|junior|juniors|college|davis|billie|hopman)\b/.test(text)) return "";
-  if (/\bwta\b|women's tennis association/.test(text)) return "WTA";
-  if (/\batp\b|association of tennis professionals/.test(text)) return "ATP";
-  return "";
-}
+function getCloudbetTourFromText(value = "") { const text = String(value).toLowerCase(); if (BLOCKED_TOUR_TEXT_RE.test(text)) return ""; if (/\bwta\b|women's tennis association/.test(text)) return "WTA"; if (/\batp\b|association of tennis professionals/.test(text)) return "ATP"; return ""; }
 function getCloudbetTour(competition = {}) { return getCloudbetTourFromText(getCloudbetCompetitionText(competition)); }
-
-function inferSurface(event) {
-  const text = `${event.tournament_name || ""} ${event.event_type_type || ""} ${event.competition?.name || ""} ${event.name || ""}`.toLowerCase();
-  if (text.includes("grass") || text.includes("queens") || text.includes("halle") || text.includes("wimbledon")) return "Grass";
-  if (text.includes("clay") || text.includes("roland") || text.includes("madrid") || text.includes("rome") || text.includes("monte")) return "Clay";
-  return "Hard";
-}
+function inferSurface(event) { const text = `${event.tournament_name || ""} ${event.event_type_type || ""} ${event.competition?.name || ""} ${event.name || ""}`.toLowerCase(); if (text.includes("grass") || text.includes("queens") || text.includes("halle") || text.includes("wimbledon")) return "Grass"; if (text.includes("clay") || text.includes("roland") || text.includes("madrid") || text.includes("rome") || text.includes("monte")) return "Clay"; return "Hard"; }
 function inferNewsCategory(title = "") { const text = title.toLowerCase(); if (text.includes("injur") || text.includes("withdraw") || text.includes("return")) return "Player News"; if (text.includes("rank") || text.includes("stat")) return "Trend"; if (text.includes("draw") || text.includes("schedule") || text.includes("open") || text.includes("masters")) return "Tournament"; return "News"; }
 function eventStatus(event) { return String(event.event_status || event.status || "").toLowerCase().trim(); }
 function eventScore(event) { return String(event.event_final_result || event.event_game_result || "").trim(); }
@@ -104,253 +55,54 @@ function isFinishedEvent(event) { const status = eventStatus(event); const terms
 function isUpcomingEvent(event) { const status = eventStatus(event); if (isLiveEvent(event) || isFinishedEvent(event)) return false; if (!status || status === "-" || status === "scheduled" || status === "not started" || status === "upcoming" || status === "trading") return true; return status.includes("scheduled") || status.includes("not started") || status.includes("trading"); }
 
 function getMatchWinner(event, playerKey) { if (!event.event_winner || event.event_winner === "-") return false; if (event.event_winner === "First Player") return String(event.first_player_key) === String(playerKey); if (event.event_winner === "Second Player") return String(event.second_player_key) === String(playerKey); return false; }
-function getRecentForm(events = [], playerKey, days = 100) {
-  const cutoff = addDays(new Date(), -days);
-  const recent = events.filter((event) => { const date = new Date(event.event_date); return event.event_status === "Finished" && !Number.isNaN(date.getTime()) && date >= cutoff; });
-  const wins = recent.filter((event) => getMatchWinner(event, playerKey)).length;
-  const losses = Math.max(0, recent.length - wins);
-  return { wins, losses, matches: recent.length, winRate: recent.length ? Math.round((wins / recent.length) * 100) : 50 };
-}
-function getImpliedProbability(odds) {
-  const homeOdds = asFloat(odds?.home);
-  const awayOdds = asFloat(odds?.away);
-  if (!homeOdds || !awayOdds) return { home: 50, away: 50, edge: 0 };
-  const homeRaw = 1 / homeOdds;
-  const awayRaw = 1 / awayOdds;
-  const total = homeRaw + awayRaw;
-  const home = Math.round((homeRaw / total) * 1000) / 10;
-  const away = Math.round((awayRaw / total) * 1000) / 10;
-  return { home, away, edge: home - away };
-}
+function getRecentForm(events = [], playerKey, days = 100) { const cutoff = addDays(new Date(), -days); const recent = events.filter((event) => { const date = new Date(event.event_date); return event.event_status === "Finished" && !Number.isNaN(date.getTime()) && date >= cutoff; }); const wins = recent.filter((event) => getMatchWinner(event, playerKey)).length; const losses = Math.max(0, recent.length - wins); return { wins, losses, matches: recent.length, winRate: recent.length ? Math.round((wins / recent.length) * 100) : 50 }; }
+function getImpliedProbability(odds) { const homeOdds = asFloat(odds?.home); const awayOdds = asFloat(odds?.away); if (!homeOdds || !awayOdds) return { home: 50, away: 50, edge: 0 }; const homeRaw = 1 / homeOdds; const awayRaw = 1 / awayOdds; const total = homeRaw + awayRaw; const home = Math.round((homeRaw / total) * 1000) / 10; const away = Math.round((awayRaw / total) * 1000) / 10; return { home, away, edge: home - away }; }
 function getSurfaceRating(profile, surface) { if (!profile) return 50; const key = surface?.toLowerCase?.() || "hard"; return asNumber(profile[key], profile.form || 50); }
 function getTrendScore(profile) { if (!profile) return 0; if (profile.movement === "up") return 2; if (profile.movement === "down") return -2; return clamp(asNumber(profile.trend, 0), -3, 3); }
 function getRankEdge(firstProfile, secondProfile) { const a = firstProfile?.rank && firstProfile.rank < 999 ? firstProfile.rank : null; const b = secondProfile?.rank && secondProfile.rank < 999 ? secondProfile.rank : null; return !a || !b ? 0 : clamp((b - a) * 0.18, -12, 12); }
 function getPointsEdge(firstProfile, secondProfile) { const a = asNumber(firstProfile?.points, 0); const b = asNumber(secondProfile?.points, 0); return !a || !b ? 0 : clamp(((a - b) / Math.max(a, b)) * 10, -6, 6); }
 
-function makePredictionFromSignals(event, firstRecent, secondRecent, odds, firstProfile, secondProfile) {
-  const surface = inferSurface(event);
-  const marketProbability = getImpliedProbability(odds);
-  const formEdge = ((firstRecent.winRate || 50) - (secondRecent.winRate || 50)) * 0.34;
-  const volumeEdge = clamp(((firstRecent.matches || 0) - (secondRecent.matches || 0)) * 0.22, -4, 4);
-  const rankEdge = getRankEdge(firstProfile, secondProfile);
-  const pointsEdge = getPointsEdge(firstProfile, secondProfile);
-  const marketEdge = marketProbability.edge * 0.42;
-  const surfaceEdge = (getSurfaceRating(firstProfile, surface) - getSurfaceRating(secondProfile, surface)) * 0.16;
-  const trendEdge = getTrendScore(firstProfile) - getTrendScore(secondProfile);
-  const liveAdjustment = isLiveEvent(event) ? 1.5 : 0;
-  const modelEdge = formEdge + volumeEdge + rankEdge + pointsEdge + marketEdge + surfaceEdge + trendEdge + liveAdjustment;
-  const predictedSide = modelEdge >= 0 ? "home" : "away";
-  const predictedWinner = predictedSide === "home" ? event.event_first_player : event.event_second_player;
-  const predictedWinnerOdds = predictedSide === "home" ? odds?.home : odds?.away;
-  const dataPoints = [firstRecent.matches || secondRecent.matches, firstProfile?.rank && secondProfile?.rank, firstProfile?.points && secondProfile?.points, odds?.home && odds?.away, surface !== "Hard" || firstProfile || secondProfile].filter(Boolean).length;
-  const confidence = clamp(Math.round(54 + Math.abs(modelEdge) * 0.78 + dataPoints * 1.4), 52, 86);
-  return { predictedWinner, predictedSide, confidence, predictedWinnerOdds: predictedWinnerOdds || "N/A", modelEdge: Math.round(modelEdge * 10) / 10, factors: { marketProbability, formEdge: Math.round(formEdge * 10) / 10, rankEdge: Math.round(rankEdge * 10) / 10, pointsEdge: Math.round(pointsEdge * 10) / 10, surfaceEdge: Math.round(surfaceEdge * 10) / 10, trendEdge: Math.round(trendEdge * 10) / 10, volumeEdge: Math.round(volumeEdge * 10) / 10, dataPoints } };
-}
-
-function normalizeCloudbetMatch(event, recentForms = {}, betUrl = DEFAULT_CLOUDBET_URL) {
-  const playerA = event.event_first_player;
-  const playerB = event.event_second_player;
-  const recentA = recentForms.first || DEFAULT_FORM;
-  const recentB = recentForms.second || DEFAULT_FORM;
-  const profileA = event.profiles?.first || null;
-  const profileB = event.profiles?.second || null;
-  const prediction = makePredictionFromSignals(event, recentA, recentB, event.cloudbetOdds, profileA, profileB);
-  const startDate = event.startTime || event.cutoffTime || "";
-  const startTime = startDate ? new Date(startDate).toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Available now";
-  return { id: String(event.event_key), tournament: event.tournament_name || "Cloudbet Tennis", startTime, playerA, playerB, surface: inferSurface(event), market: `${prediction.predictedWinner} to Win`, formA: recentA.winRate, formB: recentB.winRate, recentA, recentB, rankA: profileA?.rank || null, rankB: profileB?.rank || null, pointsA: profileA?.points || 0, pointsB: profileB?.points || 0, serveHoldA: profileA?.hold || 68 + (asNumber(event.first_player_key, playerA.length) % 24), serveHoldB: profileB?.hold || 68 + (asNumber(event.second_player_key, playerB.length) % 24), returnEdge: recentA.winRate - recentB.winRate, h2hEdge: 0, odds: prediction.predictedWinnerOdds, oddsSource: "Cloudbet", cloudbetOdds: event.cloudbetOdds, predictedWinner: prediction.predictedWinner, predictedSide: prediction.predictedSide, predictedWinnerOdds: prediction.predictedWinnerOdds, confidence: prediction.confidence, modelEdge: prediction.modelEdge, predictionFactors: prediction.factors, status: isLiveEvent(event) ? "Live" : "Scheduled", score: "", live: isLiveEvent(event), tour: event.tour, betUrl };
-}
-
-function normalizePlayer(player, tour) {
-  const rank = asNumber(player.place || player.player_place || player.rank || player.standing_place, 999);
-  const points = asNumber(player.points, 0);
-  const name = player.player || player.player_name || player.name || "Unknown player";
-  const playerKey = String(player.player_key || player.player_id || "");
-  const seed = rank === 999 ? name.length : rank;
-  return { id: playerKey || `${tour}-${name}`, playerKey, name, sex: tour, tour, rank, points, country: player.country || player.player_country || "", movement: player.movement || "same", form: Math.max(52, 96 - Math.min(seed, 44)), hold: 65 + (seed % 28), breakRate: 18 + (seed % 24), clay: 62 + ((seed + 9) % 32), hard: 62 + ((seed + 17) % 32), grass: 58 + ((seed + 23) % 30), trend: player.movement === "up" ? "+" : player.movement === "down" ? "-" : "0" };
-}
-function normalizeRssItem(item, source, index) {
-  const title = getTagValue(item, "title");
-  const url = getTagValue(item, "link") || getTagValue(item, "guid");
-  const summary = getTagValue(item, "description") || "Read the latest tennis update.";
-  const imageUrl = getRssImageUrl(item);
-  const published = new Date(getTagValue(item, "pubDate") || getTagValue(item, "published"));
-  const time = Number.isNaN(published.getTime()) ? "Latest" : published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  return { id: url || `${source}-${index}`, title: title || "Tennis update", category: inferNewsCategory(title), time, summary, url: url || "#", imageUrl, source };
-}
+function makePredictionFromSignals(event, firstRecent, secondRecent, odds, firstProfile, secondProfile) { const surface = inferSurface(event); const marketProbability = getImpliedProbability(odds); const formEdge = ((firstRecent.winRate || 50) - (secondRecent.winRate || 50)) * 0.34; const volumeEdge = clamp(((firstRecent.matches || 0) - (secondRecent.matches || 0)) * 0.22, -4, 4); const rankEdge = getRankEdge(firstProfile, secondProfile); const pointsEdge = getPointsEdge(firstProfile, secondProfile); const marketEdge = marketProbability.edge * 0.42; const surfaceEdge = (getSurfaceRating(firstProfile, surface) - getSurfaceRating(secondProfile, surface)) * 0.16; const trendEdge = getTrendScore(firstProfile) - getTrendScore(secondProfile); const liveAdjustment = isLiveEvent(event) ? 1.5 : 0; const modelEdge = formEdge + volumeEdge + rankEdge + pointsEdge + marketEdge + surfaceEdge + trendEdge + liveAdjustment; const predictedSide = modelEdge >= 0 ? "home" : "away"; const predictedWinner = predictedSide === "home" ? event.event_first_player : event.event_second_player; const predictedWinnerOdds = predictedSide === "home" ? odds?.home : odds?.away; const dataPoints = [firstRecent.matches || secondRecent.matches, firstProfile?.rank && secondProfile?.rank, firstProfile?.points && secondProfile?.points, odds?.home && odds?.away, surface !== "Hard" || firstProfile || secondProfile].filter(Boolean).length; const confidence = clamp(Math.round(54 + Math.abs(modelEdge) * 0.78 + dataPoints * 1.4), 52, 86); return { predictedWinner, predictedSide, confidence, predictedWinnerOdds: predictedWinnerOdds || "N/A", modelEdge: Math.round(modelEdge * 10) / 10, factors: { marketProbability, formEdge: Math.round(formEdge * 10) / 10, rankEdge: Math.round(rankEdge * 10) / 10, pointsEdge: Math.round(pointsEdge * 10) / 10, surfaceEdge: Math.round(surfaceEdge * 10) / 10, trendEdge: Math.round(trendEdge * 10) / 10, volumeEdge: Math.round(volumeEdge * 10) / 10, dataPoints } }; }
+function normalizeCloudbetMatch(event, recentForms = {}, betUrl = DEFAULT_CLOUDBET_URL) { const playerA = event.event_first_player; const playerB = event.event_second_player; const recentA = recentForms.first || DEFAULT_FORM; const recentB = recentForms.second || DEFAULT_FORM; const profileA = event.profiles?.first || null; const profileB = event.profiles?.second || null; const prediction = makePredictionFromSignals(event, recentA, recentB, event.cloudbetOdds, profileA, profileB); const startDate = event.startTime || event.cutoffTime || ""; const startTime = startDate ? new Date(startDate).toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Available now"; return { id: String(event.event_key), tournament: event.tournament_name || "Cloudbet Tennis", startTime, playerA, playerB, surface: inferSurface(event), market: `${prediction.predictedWinner} to Win`, formA: recentA.winRate, formB: recentB.winRate, recentA, recentB, rankA: profileA?.rank || null, rankB: profileB?.rank || null, pointsA: profileA?.points || 0, pointsB: profileB?.points || 0, serveHoldA: profileA?.hold || 68 + (asNumber(event.first_player_key, playerA.length) % 24), serveHoldB: profileB?.hold || 68 + (asNumber(event.second_player_key, playerB.length) % 24), returnEdge: recentA.winRate - recentB.winRate, h2hEdge: 0, odds: prediction.predictedWinnerOdds, oddsSource: "Cloudbet", cloudbetOdds: event.cloudbetOdds, predictedWinner: prediction.predictedWinner, predictedSide: prediction.predictedSide, predictedWinnerOdds: prediction.predictedWinnerOdds, confidence: prediction.confidence, modelEdge: prediction.modelEdge, predictionFactors: prediction.factors, status: isLiveEvent(event) ? "Live" : "Scheduled", score: "", live: isLiveEvent(event), tour: event.tour, betUrl }; }
+function normalizePlayer(player, tour) { const rank = asNumber(player.place || player.player_place || player.rank || player.standing_place, 999); const points = asNumber(player.points, 0); const name = player.player || player.player_name || player.name || "Unknown player"; const playerKey = String(player.player_key || player.player_id || ""); const seed = rank === 999 ? name.length : rank; return { id: playerKey || `${tour}-${name}`, playerKey, name, sex: tour, tour, rank, points, country: player.country || player.player_country || "", movement: player.movement || "same", form: Math.max(52, 96 - Math.min(seed, 44)), hold: 65 + (seed % 28), breakRate: 18 + (seed % 24), clay: 62 + ((seed + 9) % 32), hard: 62 + ((seed + 17) % 32), grass: 58 + ((seed + 23) % 30), trend: player.movement === "up" ? "+" : player.movement === "down" ? "-" : "0" }; }
+function normalizeRssItem(item, source, index) { const title = getTagValue(item, "title"); const url = getTagValue(item, "link") || getTagValue(item, "guid"); const summary = getTagValue(item, "description") || "Read the latest tennis update."; const imageUrl = getRssImageUrl(item); const published = new Date(getTagValue(item, "pubDate") || getTagValue(item, "published")); const time = Number.isNaN(published.getTime()) ? "Latest" : published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); return { id: url || `${source}-${index}`, title: title || "Tennis update", category: inferNewsCategory(title), time, summary, url: url || "#", imageUrl, source }; }
 function parseRssItems(xml, source) { return [...xml.matchAll(/<item[\s\S]*?<\/item>/gi)].map((match, index) => normalizeRssItem(match[0], source, index)).filter((article) => article.title && article.url).slice(0, NEWS_ARTICLE_LIMIT); }
 
-async function fetchApiTennis(env, method, params = {}) {
-  if (!env.API_TENNIS_KEY) return null;
-  const url = new URL(TENNIS_API_BASE);
-  url.searchParams.set("method", method);
-  url.searchParams.set("APIkey", env.API_TENNIS_KEY);
-  Object.entries(params).forEach(([key, value]) => { if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value); });
-  const response = await fetch(url, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`${method} returned ${response.status}`);
-  const payload = await response.json();
-  if (payload.success === 0) throw new Error(payload.error || `${method} returned no success flag`);
-  return payload.result ?? [];
-}
-async function fetchCloudbet(env, path) {
-  if (!env.CLOUDBET_API_KEY) return null;
-  const response = await fetch(`${CLOUDBET_API_BASE}${path}`, { headers: { accept: "application/json", "content-type": "application/json", "x-api-key": env.CLOUDBET_API_KEY } });
-  if (!response.ok) throw new Error(`Cloudbet ${path} returned ${response.status}`);
-  return response.json();
-}
+async function fetchApiTennis(env, method, params = {}) { if (!env.API_TENNIS_KEY) return null; const url = new URL(TENNIS_API_BASE); url.searchParams.set("method", method); url.searchParams.set("APIkey", env.API_TENNIS_KEY); Object.entries(params).forEach(([key, value]) => { if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value); }); const response = await fetch(url, { headers: { accept: "application/json" } }); if (!response.ok) throw new Error(`${method} returned ${response.status}`); const payload = await response.json(); if (payload.success === 0) throw new Error(payload.error || `${method} returned no success flag`); return payload.result ?? []; }
+async function fetchCloudbet(env, path) { if (!env.CLOUDBET_API_KEY) return null; const response = await fetch(`${CLOUDBET_API_BASE}${path}`, { headers: { accept: "application/json", "content-type": "application/json", "x-api-key": env.CLOUDBET_API_KEY } }); if (!response.ok) throw new Error(`Cloudbet ${path} returned ${response.status}`); return response.json(); }
 function getMarketSelections(market) { const submarkets = market?.submarkets || market?.subMarkets || {}; const groups = Object.values(submarkets); return groups.length ? groups.flatMap((group) => group?.selections || []) : market?.selections || []; }
 function isEnabledSelection(selection) { const price = asFloat(selection?.price || selection?.odds); return price && (!selection.status || selection.status === "SELECTION_ENABLED") && (!selection.side || selection.side === "BACK"); }
-function extractWinnerOddsFromEvent(event) {
-  if (!event?.home?.name || !event?.away?.name || isBlockedCloudbetMarket(event) || isFinishedEvent(event)) return null;
-  const markets = event.markets || {};
-  const winnerEntry = Object.entries(markets).find(([key, market]) => { const name = String(market?.name || "").toLowerCase(); return key === "tennis.winner" || key.endsWith(".winner") || name === "winner" || name.includes("money line") || name.includes("moneyline"); });
-  if (!winnerEntry) return null;
-  const [marketKey, market] = winnerEntry;
-  const selections = getMarketSelections(market).filter(isEnabledSelection);
-  const homeSelection = selections.find((selection) => selection.outcome === "home" || selection.name === event.home?.name);
-  const awaySelection = selections.find((selection) => selection.outcome === "away" || selection.name === event.away?.name);
-  const home = asFloat(homeSelection?.price || homeSelection?.odds);
-  const away = asFloat(awaySelection?.price || awaySelection?.odds);
-  if (!home || !away) return null;
-  return { eventId: event.id, eventKey: event.key, eventName: event.name || `${event.home.name} vs ${event.away.name}`, homeName: event.home.name, awayName: event.away.name, home: home.toFixed(2), away: away.toFixed(2), marketKey, marketUrlHome: `${marketKey}/home${homeSelection?.params ? `?${homeSelection.params}` : ""}`, marketUrlAway: `${marketKey}/away${awaySelection?.params ? `?${awaySelection.params}` : ""}` };
-}
-function normalizeCloudbetEvent(event) {
-  if (isBlockedCloudbetMarket(event)) return null;
-  const odds = extractWinnerOddsFromEvent(event);
-  if (!odds) return null;
-  const tour = getCloudbetTour(event.competition || {});
-  return { event_key: String(event.id || event.key || odds.eventName), event_first_player: odds.homeName, event_second_player: odds.awayName, first_player_key: "", second_player_key: "", tournament_name: event.competition?.name || event.name || "Cloudbet Tennis", event_type_type: event.competition?.category?.name || event.competition?.key || tour || "Cloudbet", event_date: event.startTime || event.cutoffTime || "", event_status: event.status || "TRADING", startTime: event.startTime || event.cutoffTime || "", cutoffTime: event.cutoffTime || "", status: event.status || "TRADING", competition: event.competition || null, name: event.name || odds.eventName, tour, cloudbetOdds: odds };
-}
+function extractWinnerOddsFromEvent(event) { if (!event?.home?.name || !event?.away?.name || isBlockedCloudbetMarket(event) || isFinishedEvent(event)) return null; const markets = event.markets || {}; const winnerEntry = Object.entries(markets).find(([key, market]) => { const name = String(market?.name || "").toLowerCase(); return key === "tennis.winner" || key.endsWith(".winner") || name === "winner" || name.includes("money line") || name.includes("moneyline"); }); if (!winnerEntry) return null; const [marketKey, market] = winnerEntry; const selections = getMarketSelections(market).filter(isEnabledSelection); const homeSelection = selections.find((selection) => selection.outcome === "home" || selection.name === event.home?.name); const awaySelection = selections.find((selection) => selection.outcome === "away" || selection.name === event.away?.name); const home = asFloat(homeSelection?.price || homeSelection?.odds); const away = asFloat(awaySelection?.price || awaySelection?.odds); if (!home || !away) return null; return { eventId: event.id, eventKey: event.key, eventName: event.name || `${event.home.name} vs ${event.away.name}`, homeName: event.home.name, awayName: event.away.name, home: home.toFixed(2), away: away.toFixed(2), marketKey, marketUrlHome: `${marketKey}/home${homeSelection?.params ? `?${homeSelection.params}` : ""}`, marketUrlAway: `${marketKey}/away${awaySelection?.params ? `?${awaySelection.params}` : ""}` }; }
+function normalizeCloudbetEvent(event) { if (isBlockedCloudbetMarket(event)) return null; const odds = extractWinnerOddsFromEvent(event); if (!odds) return null; const tour = getCloudbetTour(event.competition || {}); return { event_key: String(event.id || event.key || odds.eventName), event_first_player: odds.homeName, event_second_player: odds.awayName, first_player_key: "", second_player_key: "", tournament_name: event.competition?.name || event.name || "Cloudbet Tennis", event_type_type: event.competition?.category?.name || event.competition?.key || tour || "Cloudbet", event_date: event.startTime || event.cutoffTime || "", event_status: event.status || "TRADING", startTime: event.startTime || event.cutoffTime || "", cutoffTime: event.cutoffTime || "", status: event.status || "TRADING", competition: event.competition || null, name: event.name || odds.eventName, tour, cloudbetOdds: odds }; }
 function sortCloudbetEvents(a, b) { if (isLiveEvent(a) !== isLiveEvent(b)) return isLiveEvent(a) ? -1 : 1; const aOdds = getImpliedProbability(a.cloudbetOdds); const bOdds = getImpliedProbability(b.cloudbetOdds); const aBalance = Math.abs(aOdds.edge); const bBalance = Math.abs(bOdds.edge); if (Math.abs(aBalance - bBalance) > 8) return aBalance - bBalance; return String(a.startTime || a.cutoffTime || "").localeCompare(String(b.startTime || b.cutoffTime || "")); }
 function dedupeEvents(events) { return Array.from(new Map(events.map((event) => [event.event_key || JSON.stringify(event), event])).values()); }
-
-async function getCloudbetTennisEvents(env) {
-  if (!env.CLOUDBET_API_KEY) return [];
-  const sport = await fetchCloudbet(env, "/sports/tennis");
-  const competitions = (sport?.categories || [])
-    .flatMap((category) => (category.competitions || []).map((competition) => ({ ...competition, category })))
-    .filter((competition) => competition.eventCount > 0)
-    .filter((competition) => !BLOCKED_CLOUDBET_MARKET_RE.test(getCloudbetCompetitionText(competition)))
-    .sort((a, b) => { const aTour = getCloudbetTour(a) ? 1 : 0; const bTour = getCloudbetTour(b) ? 1 : 0; return bTour - aTour || (b.eventCount || 0) - (a.eventCount || 0); })
-    .slice(0, CLOUDBET_COMPETITION_LIMIT);
-  const competitionPayloads = await Promise.all(competitions.map(async (competition) => ({ competition, payload: await fetchCloudbet(env, `/competitions/${competition.key}?markets=tennis.winner`).catch(() => null) })));
-  return dedupeEvents(
-    competitionPayloads
-      .flatMap(({ competition, payload }) => (payload?.events || []).map((event) => ({ ...event, competition: event.competition || competition })))
-      .filter((event) => !isBlockedCloudbetMarket(event))
-      .map(normalizeCloudbetEvent)
-      .filter(Boolean)
-      .filter((event) => isLiveEvent(event) || isUpcomingEvent(event))
-      .sort(sortCloudbetEvents),
-  );
-}
+async function getCloudbetTennisEvents(env) { if (!env.CLOUDBET_API_KEY) return []; const sport = await fetchCloudbet(env, "/sports/tennis"); const competitions = (sport?.categories || []).flatMap((category) => (category.competitions || []).map((competition) => ({ ...competition, category }))).filter((competition) => competition.eventCount > 0).filter((competition) => !BLOCKED_CLOUDBET_MARKET_RE.test(getCloudbetCompetitionText(competition))).sort((a, b) => { const aTour = getCloudbetTour(a) ? 1 : 0; const bTour = getCloudbetTour(b) ? 1 : 0; return bTour - aTour || (b.eventCount || 0) - (a.eventCount || 0); }).slice(0, CLOUDBET_COMPETITION_LIMIT); const competitionPayloads = await Promise.all(competitions.map(async (competition) => ({ competition, payload: await fetchCloudbet(env, `/competitions/${competition.key}?markets=tennis.winner`).catch(() => null) }))); return dedupeEvents(competitionPayloads.flatMap(({ competition, payload }) => (payload?.events || []).map((event) => ({ ...event, competition: event.competition || competition }))).filter((event) => !isBlockedCloudbetMarket(event)).map(normalizeCloudbetEvent).filter(Boolean).filter((event) => isLiveEvent(event) || isUpcomingEvent(event)).sort(sortCloudbetEvents)); }
 
 function findPlayerProfile(players, playerName, tour = "") { return players.find((player) => (!tour || player.tour === tour) && namesLookSimilar(player.name, playerName)) || null; }
-function enrichCloudbetEventsWithProfiles(events, players = []) {
-  return events.map((event) => {
-    let first = findPlayerProfile(players, event.event_first_player, event.tour);
-    let second = findPlayerProfile(players, event.event_second_player, event.tour || first?.tour || "");
-    if (!first && second) first = findPlayerProfile(players, event.event_first_player, second.tour);
-    if (first && second && first.tour !== second.tour) { first = null; second = null; }
-    const profileTour = first && second && first.tour === second.tour ? first.tour : first?.tour || second?.tour || "";
-    const eventTextTour = getCloudbetTourFromText(getCloudbetEventText(event));
-    const tour = event.tour || eventTextTour || profileTour;
-    return { ...event, tour, first_player_key: first?.playerKey || "", second_player_key: second?.playerKey || "", profiles: { first, second } };
-  });
-}
-function isAtpOrWtaProfileMatch(event) {
-  if (isBlockedCloudbetMarket(event) || getCloudbetTourFromText(getCloudbetEventText(event)) === "") {
-    const text = getCloudbetEventText(event).toLowerCase();
-    if (/\b(itf|utr|challenger|exhibition|boys|girls|junior|juniors|college|davis|billie|hopman)\b/.test(text)) return false;
-  }
-  if (!["ATP", "WTA"].includes(event.tour)) return false;
-  if (event.profiles?.first && event.profiles?.second) return event.profiles.first.tour === event.tour && event.profiles.second.tour === event.tour;
-  return event.profiles?.first?.tour === event.tour || event.profiles?.second?.tour === event.tour;
-}
-async function getRecentFormsForMatches(env, matches) {
-  const keyedMatches = matches.filter((match) => match.first_player_key && match.second_player_key).slice(0, H2H_LOOKUP_LIMIT);
-  const formByEvent = new Map();
-  await Promise.all(keyedMatches.map(async (match) => {
-    try {
-      const result = await fetchApiTennis(env, "get_H2H", { first_player_key: match.first_player_key, second_player_key: match.second_player_key });
-      formByEvent.set(match.event_key, { first: getRecentForm(result.firstPlayerResults || [], match.first_player_key, 100), second: getRecentForm(result.secondPlayerResults || [], match.second_player_key, 100) });
-    } catch { formByEvent.set(match.event_key, { first: DEFAULT_FORM, second: DEFAULT_FORM }); }
-  }));
-  return matches.map((match) => formByEvent.get(match.event_key) || { first: DEFAULT_FORM, second: DEFAULT_FORM });
-}
+function enrichCloudbetEventsWithProfiles(events, players = []) { return events.map((event) => { let first = findPlayerProfile(players, event.event_first_player, event.tour); let second = findPlayerProfile(players, event.event_second_player, event.tour || first?.tour || ""); if (!first && second) first = findPlayerProfile(players, event.event_first_player, second.tour); if (first && second && first.tour !== second.tour) { first = null; second = null; } const profileTour = first && second && first.tour === second.tour ? first.tour : first?.tour || second?.tour || ""; const eventTextTour = getCloudbetTourFromText(getCloudbetEventText(event)); const tour = event.tour || eventTextTour || profileTour; return { ...event, tour, first_player_key: first?.playerKey || "", second_player_key: second?.playerKey || "", profiles: { first, second } }; }); }
+function isAtpOrWtaProfileMatch(event) { const text = getCloudbetEventText(event).toLowerCase(); if (isBlockedCloudbetMarket(event) || BLOCKED_TOUR_TEXT_RE.test(text)) return false; if (!["ATP", "WTA"].includes(event.tour)) return false; if (event.profiles?.first && event.profiles?.second) return event.profiles.first.tour === event.tour && event.profiles.second.tour === event.tour; return event.profiles?.first?.tour === event.tour || event.profiles?.second?.tour === event.tour; }
+async function getRecentFormsForMatches(env, matches) { const keyedMatches = matches.filter((match) => match.first_player_key && match.second_player_key).slice(0, H2H_LOOKUP_LIMIT); const formByEvent = new Map(); await Promise.all(keyedMatches.map(async (match) => { try { const result = await fetchApiTennis(env, "get_H2H", { first_player_key: match.first_player_key, second_player_key: match.second_player_key }); formByEvent.set(match.event_key, { first: getRecentForm(result.firstPlayerResults || [], match.first_player_key, 100), second: getRecentForm(result.secondPlayerResults || [], match.second_player_key, 100) }); } catch { formByEvent.set(match.event_key, { first: DEFAULT_FORM, second: DEFAULT_FORM }); } })); return matches.map((match) => formByEvent.get(match.event_key) || { first: DEFAULT_FORM, second: DEFAULT_FORM }); }
 function isSinglesMatch(event) { return !String(event.event_first_player || "").includes("/") && !String(event.event_second_player || "").includes("/"); }
-async function getMatches(env, betUrl, players = []) {
-  const cloudbetEvents = (await getCloudbetTennisEvents(env)).filter(isSinglesMatch);
-  const profileEvents = enrichCloudbetEventsWithProfiles(cloudbetEvents, players).filter(isAtpOrWtaProfileMatch);
-  const liveEvents = profileEvents.filter(isLiveEvent).slice(0, 8);
-  const upcomingEvents = profileEvents.filter((event) => !isLiveEvent(event)).slice(0, 12);
-  const bettingEvents = [...liveEvents, ...upcomingEvents];
-  const recentForms = await getRecentFormsForMatches(env, bettingEvents);
-  return bettingEvents.map((event, index) => normalizeCloudbetMatch(event, recentForms[index], betUrl));
-}
+async function getMatches(env, betUrl, players = []) { const cloudbetEvents = (await getCloudbetTennisEvents(env)).filter(isSinglesMatch); const profileEvents = enrichCloudbetEventsWithProfiles(cloudbetEvents, players).filter(isAtpOrWtaProfileMatch); const liveEvents = profileEvents.filter(isLiveEvent).slice(0, 8); const upcomingEvents = profileEvents.filter((event) => !isLiveEvent(event)).slice(0, 12); const bettingEvents = [...liveEvents, ...upcomingEvents]; const recentForms = await getRecentFormsForMatches(env, bettingEvents); return bettingEvents.map((event, index) => normalizeCloudbetMatch(event, recentForms[index], betUrl)); }
 function slicePlayersByTour(players, limit = PUBLIC_PLAYER_LIMIT) { return [...players.filter((player) => player.tour === "ATP").slice(0, limit), ...players.filter((player) => player.tour === "WTA").slice(0, limit)]; }
-async function fetchPlayersFromApi(env, limit = PUBLIC_PLAYER_LIMIT) {
-  if (!env.API_TENNIS_KEY) return [];
-  const [atp, wta] = await Promise.all([fetchApiTennis(env, "get_standings", { event_type: "ATP" }).catch(() => []), fetchApiTennis(env, "get_standings", { event_type: "WTA" }).catch(() => [])]);
-  return [...(atp || []).slice(0, limit).map((player) => normalizePlayer(player, "ATP")), ...(wta || []).slice(0, limit).map((player) => normalizePlayer(player, "WTA"))];
-}
+async function fetchPlayersFromApi(env, limit = PUBLIC_PLAYER_LIMIT) { if (!env.API_TENNIS_KEY) return []; const [atp, wta] = await Promise.all([fetchApiTennis(env, "get_standings", { event_type: "ATP" }).catch(() => []), fetchApiTennis(env, "get_standings", { event_type: "WTA" }).catch(() => [])]); return [...(atp || []).slice(0, limit).map((player) => normalizePlayer(player, "ATP")), ...(wta || []).slice(0, limit).map((player) => normalizePlayer(player, "WTA"))]; }
 function getPlayerCache(env) { return env.TENNIS_PLAYERS_CACHE || env.PLAYER_STATS_KV || env.PLAYERS_KV || null; }
-async function readCachedPlayers(env) {
-  const cache = getPlayerCache(env);
-  if (!cache) return null;
-  try {
-    const snapshot = await cache.get(PLAYER_CACHE_KEY, "json");
-    if (!snapshot?.players?.length) return null;
-    return snapshot;
-  } catch { return null; }
-}
-async function writeCachedPlayers(env, players) {
-  const cache = getPlayerCache(env);
-  if (!cache || !players?.length) return false;
-  try {
-    await cache.put(PLAYER_CACHE_KEY, JSON.stringify({ updatedAt: new Date().toISOString(), players }), { expirationTtl: 3 * 24 * 60 * 60 });
-    return true;
-  } catch { return false; }
-}
-async function getPlayers(env, limit = PUBLIC_PLAYER_LIMIT) {
-  const cached = await readCachedPlayers(env);
-  const cachedAt = cached?.updatedAt ? Date.parse(cached.updatedAt) : 0;
-  const isFresh = cached?.players?.length && cachedAt && Date.now() - cachedAt < PLAYER_CACHE_MAX_AGE_MS;
-  if (isFresh) return slicePlayersByTour(cached.players, limit);
-  try {
-    const players = await fetchPlayersFromApi(env, Math.max(limit, PREDICTION_PLAYER_LIMIT));
-    await writeCachedPlayers(env, players);
-    return slicePlayersByTour(players, limit);
-  } catch (error) {
-    if (cached?.players?.length) return slicePlayersByTour(cached.players, limit);
-    throw error;
-  }
-}
-async function getNews() {
-  const feedResults = await Promise.all(RSS_NEWS_FEEDS.map(async (feed) => { const response = await fetch(feed.url, { headers: { accept: "application/rss+xml, application/xml, text/xml" } }); if (!response.ok) throw new Error(`${feed.source} returned ${response.status}`); return parseRssItems(await response.text(), feed.source); }));
-  const articles = Array.from(new Map(feedResults.flat().map((article) => [article.url, article])).values()).slice(0, NEWS_ARTICLE_LIMIT);
-  return Promise.all(articles.map(async (article, index) => {
-    const imageUrl = article.imageUrl || (index < NEWS_ARTICLE_IMAGE_LIMIT ? await fetchArticleImageUrl(article.url) : "");
-    return { ...article, imageUrl: imageUrl || DEFAULT_NEWS_IMAGE };
-  }));
-}
+async function readCachedPlayers(env) { const cache = getPlayerCache(env); if (!cache) return null; try { const snapshot = await cache.get(PLAYER_CACHE_KEY, "json"); if (!snapshot?.players?.length) return null; return snapshot; } catch { return null; } }
+async function writeCachedPlayers(env, players) { const cache = getPlayerCache(env); if (!cache || !players?.length) return false; try { await cache.put(PLAYER_CACHE_KEY, JSON.stringify({ updatedAt: new Date().toISOString(), players }), { expirationTtl: 3 * 24 * 60 * 60 }); return true; } catch { return false; } }
+async function getPlayers(env, limit = PUBLIC_PLAYER_LIMIT) { const cached = await readCachedPlayers(env); const cachedAt = cached?.updatedAt ? Date.parse(cached.updatedAt) : 0; const isFresh = cached?.players?.length && cachedAt && Date.now() - cachedAt < PLAYER_CACHE_MAX_AGE_MS; if (isFresh) return slicePlayersByTour(cached.players, limit); try { const players = await fetchPlayersFromApi(env, Math.max(limit, PREDICTION_PLAYER_LIMIT)); await writeCachedPlayers(env, players); return slicePlayersByTour(players, limit); } catch (error) { if (cached?.players?.length) return slicePlayersByTour(cached.players, limit); throw error; } }
+async function getNews() { const feedResults = await Promise.all(RSS_NEWS_FEEDS.map(async (feed) => { const response = await fetch(feed.url, { headers: { accept: "application/rss+xml, application/xml, text/xml" } }); if (!response.ok) throw new Error(`${feed.source} returned ${response.status}`); return parseRssItems(await response.text(), feed.source); })); const articles = Array.from(new Map(feedResults.flat().map((article) => [article.url, article])).values()).slice(0, NEWS_ARTICLE_LIMIT); return Promise.all(articles.map(async (article, index) => { const imageUrl = article.imageUrl || (index < NEWS_ARTICLE_IMAGE_LIMIT ? await fetchArticleImageUrl(article.url) : ""); return { ...article, imageUrl: imageUrl || DEFAULT_NEWS_IMAGE }; })); }
 
 export async function onRequestGet({ env }) {
   const betUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_CLOUDBET_URL).trim();
   const errors = [];
-  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasPlayerCache: Boolean(getPlayerCache(env)), cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT, cloudbetCompetitionScope: "Cloudbet tennis markets filtered to ATP/WTA profile matches; ITF, Challenger, simulated and virtual markets excluded", blockedCloudbetMarkets: "Simulated Reality League, SRL, virtual, simulation", newsArticleLimit: NEWS_ARTICLE_LIMIT, newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT, h2hLookupLimit: H2H_LOOKUP_LIMIT, matchCount: 0, liveMatchCount: 0, upcomingMatchCount: 0, playerCount: 0, predictionPlayerPool: 0, newsCount: 0, newsWithImagesCount: 0, newsProvider: "Tennis.com RSS", playerStats: "Top 500 ATP + Top 500 WTA", playerStatsStorage: "Cloudflare KV TENNIS_PLAYERS_CACHE when configured, API-Tennis fallback otherwise", predictionSource: "Cloudbet tennis.winner markets + ATP/WTA profile inference + API-Tennis form/rank signals", predictionVariables: "Cloudbet implied probability, 100-day form, sample size, ranking, points, surface rating, trend, live status", predictionWindow: "Last 100 days where API-Tennis player keys match" };
-  let matches = [];
-  let players = [];
-  let predictionPlayers = [];
-  let news = [];
-
+  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasPlayerCache: Boolean(getPlayerCache(env)), cloudbetCompetitionLimit: CLOUDBET_COMPETITION_LIMIT, cloudbetCompetitionScope: "Cloudbet tennis markets filtered to ATP/WTA profile matches; ITF, Challenger, simulated and virtual markets excluded", blockedCloudbetMarkets: "Simulated Reality League, SRL, virtual, simulation", newsArticleLimit: NEWS_ARTICLE_LIMIT, newsArticleImageLimit: NEWS_ARTICLE_IMAGE_LIMIT, h2hLookupLimit: H2H_LOOKUP_LIMIT, matchCount: 0, liveMatchCount: 0, upcomingMatchCount: 0, playerCount: 0, predictionPlayerPool: 0, newsCount: 0, newsWithImagesCount: 0, newsProvider: "Tennis.com RSS", playerStats: "Top 500 ATP + Top 500 WTA", playerStatsStorage: "Cloudflare KV TENNIS_PLAYERS_CACHE when configured, API-Tennis fallback otherwise", predictionSource: "Cloudbet tennis.winner markets + ATP/WTA profile inference + API-Tennis form/rank signals", predictionVariables: "Cloudbet implied probability, ranking, points, surface rating, trend, live status", predictionWindow: "Cloudbet market scan widened; H2H lookups disabled to preserve Cloudflare request budget" };
+  let matches = []; let players = []; let predictionPlayers = []; let news = [];
   try { predictionPlayers = await getPlayers(env, PREDICTION_PLAYER_LIMIT); players = slicePlayersByTour(predictionPlayers, PUBLIC_PLAYER_LIMIT); diagnostics.playerCount = players.length; diagnostics.predictionPlayerPool = predictionPlayers.length; } catch (error) { errors.push(`player stats: ${error.message}`); }
   try { matches = await getMatches(env, betUrl, predictionPlayers); diagnostics.matchCount = matches.length; diagnostics.liveMatchCount = matches.filter((match) => match.live).length; diagnostics.upcomingMatchCount = matches.filter((match) => !match.live).length; } catch (error) { errors.push(`cloudbet predictions: ${error.message}`); }
   try { news = await getNews(); diagnostics.newsCount = news.length; diagnostics.newsWithImagesCount = news.filter((article) => article.imageUrl).length; } catch (error) { errors.push(`news: ${error.message}`); }
-
   if (!diagnostics.hasApiTennisKey) errors.push("missing API_TENNIS_KEY Cloudflare secret");
   if (!diagnostics.hasCloudbetApiKey) errors.push("missing CLOUDBET_API_KEY Cloudflare secret for Cloudbet odds");
   if (!diagnostics.hasCloudbetAffiliateUrl) errors.push("missing CLOUDBET_AFFILIATE_URL Cloudflare variable for affiliate click-throughs");
-
   const hasLiveTennis = Boolean((env.API_TENNIS_KEY || diagnostics.hasPlayerCache) && players.length);
   const hasCloudbetConnection = diagnostics.hasCloudbetApiKey && !errors.some((error) => error.startsWith("cloudbet predictions:"));
   const hasLiveNews = Boolean(news.length);
