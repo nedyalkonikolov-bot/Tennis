@@ -2,3 +2,4 @@ User-agent: *
 Allow: /
 
 Sitemap: https://www.tennistipz.win/sitemap.xml
+Sitemap: https://www.tennistipz.win/dynamic-sitemap.xml
