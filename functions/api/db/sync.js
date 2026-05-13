@@ -1,7 +1,7 @@
 const TENNIS_API_BASE = "https://api.api-tennis.com/tennis/";
 const MODEL_VERSION = "v1";
 const RECENT_MATCH_WINDOW_DAYS = 100;
-const RECENT_MATCH_PAIR_LIMIT = 30;
+const RECENT_PLAYER_SYNC_LIMIT = 40;
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -168,7 +168,12 @@ async function ensureMatchPlayer(db, name, tour, playerKey = "") {
   if (!name) return null;
   const normalized = normalizeName(name);
   const found = await db.prepare("SELECT id FROM players WHERE tour = ? AND normalized_name = ? LIMIT 1").bind(tour, normalized).first();
-  if (found?.id) return found.id;
+  if (found?.id) {
+    if (playerKey) {
+      await db.prepare("UPDATE players SET player_key = COALESCE(NULLIF(player_key, ''), ?), updated_at = datetime('now') WHERE id = ?").bind(playerKey, found.id).run();
+    }
+    return found.id;
+  }
   const id = makePlayerId(tour, name, playerKey);
   await db.prepare(`
     INSERT INTO players (id, player_key, name, normalized_name, tour, source, updated_at)
@@ -294,10 +299,16 @@ function eventSourceId(event) {
   return String(event.event_key || event.event_id || `${getEventDate(event)}:${first}:${second}`);
 }
 
+function eventIsTourSingles(event) {
+  const type = String(event.event_type_type || "").toLowerCase();
+  return type.includes("singles") && !type.includes("doubles") && !/itf|challenger|boys|girls|junior/.test(type);
+}
+
 function eventIsRecentFinished(event) {
   const date = getEventDate(event);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
   if (date < todayIsoDate(-RECENT_MATCH_WINDOW_DAYS) || date > todayIsoDate()) return false;
+  if (!eventIsTourSingles(event)) return false;
   return Boolean(getApiTennisWinnerName(event)) || Boolean(event.event_final_result);
 }
 
@@ -328,7 +339,7 @@ function recentMatchStatement(db, player, event) {
     INSERT INTO player_recent_matches (
       id, player_id, player_key, tour, match_date, source_event_id, tournament, surface,
       opponent_name, opponent_key, score, result, event_status, source, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'api-tennis', datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'api-tennis-fixtures', datetime('now'))
     ON CONFLICT(player_id, source_event_id) DO UPDATE SET
       player_key = excluded.player_key,
       tour = excluded.tour,
@@ -359,49 +370,39 @@ function recentMatchStatement(db, player, event) {
   );
 }
 
-function h2hEvents(result) {
-  const events = [
-    ...(Array.isArray(result?.firstPlayerResults) ? result.firstPlayerResults : []),
-    ...(Array.isArray(result?.secondPlayerResults) ? result.secondPlayerResults : []),
-    ...(Array.isArray(result?.H2H) ? result.H2H : []),
-  ];
-  const seen = new Set();
-  return events.filter((event) => {
-    const id = eventSourceId(event);
-    if (seen.has(id)) return false;
-    seen.add(id);
-    return true;
-  });
-}
-
 async function syncRecentPlayerMatches(db, env, syncedMatches) {
   if (!env.API_TENNIS_KEY || !syncedMatches.length) return 0;
-  const pairs = [];
-  const pairKeys = new Set();
+  const players = [];
+  const playerIds = new Set();
   for (const row of syncedMatches) {
     const match = row.match;
-    if (match.doubles || !match.playerAKey || !match.playerBKey || !row.playerAId || !row.playerBId) continue;
-    const key = [match.playerAKey, match.playerBKey].sort().join(":");
-    if (pairKeys.has(key)) continue;
-    pairKeys.add(key);
-    pairs.push(row);
-    if (pairs.length >= RECENT_MATCH_PAIR_LIMIT) break;
-  }
-
-  const statements = [];
-  for (const row of pairs) {
-    const match = row.match;
-    const h2h = await fetchApiTennisRaw(env, "get_H2H", { first_player_key: match.playerAKey, second_player_key: match.playerBKey });
-    for (const event of h2hEvents(h2h)) {
-      const playerAStatement = recentMatchStatement(db, { id: row.playerAId, key: match.playerAKey, name: match.playerA, tour: match.tour }, event);
-      const playerBStatement = recentMatchStatement(db, { id: row.playerBId, key: match.playerBKey, name: match.playerB, tour: match.tour }, event);
-      if (playerAStatement) statements.push(playerAStatement);
-      if (playerBStatement) statements.push(playerBStatement);
+    if (match.doubles || !match.playerAKey || !match.playerBKey) continue;
+    for (const player of [
+      { id: row.playerAId, key: match.playerAKey, name: match.playerA, tour: match.tour },
+      { id: row.playerBId, key: match.playerBKey, name: match.playerB, tour: match.tour },
+    ]) {
+      if (!player.id || !player.key || playerIds.has(player.id)) continue;
+      playerIds.add(player.id);
+      players.push(player);
+      if (players.length >= RECENT_PLAYER_SYNC_LIMIT) break;
     }
+    if (players.length >= RECENT_PLAYER_SYNC_LIMIT) break;
   }
 
-  await runBatches(db, statements);
-  return statements.length;
+  let inserted = 0;
+  for (const player of players) {
+    const fixtures = await fetchApiTennis(env, "get_fixtures", {
+      player_key: player.key,
+      date_start: todayIsoDate(-RECENT_MATCH_WINDOW_DAYS),
+      date_stop: todayIsoDate(),
+    });
+    await db.prepare("DELETE FROM player_recent_matches WHERE player_id = ? AND match_date >= date('now', '-100 days')").bind(player.id).run();
+    const statements = fixtures.map((event) => recentMatchStatement(db, player, event)).filter(Boolean);
+    await runBatches(db, statements);
+    inserted += statements.length;
+  }
+
+  return inserted;
 }
 
 async function settleOutcomes(db, env) {
@@ -503,7 +504,7 @@ async function syncDatabase(request, env) {
     `).bind(playersUpserted, matchesUpserted, predictionsUpserted, outcomesSettled, "Database sync completed", runId).run();
     await db.prepare("UPDATE sync_runs SET recent_matches_upserted = ? WHERE id = ?").bind(recentMatchesUpserted, runId).run().catch(() => null);
 
-    return jsonResponse({ ok: true, runId, playersUpserted, matchesUpserted, predictionsUpserted, recentMatchesUpserted, outcomesSettled, liveDataSource: liveData.source, errors: liveData.errors || [] });
+    return jsonResponse({ ok: true, runId, playersUpserted, matchesUpserted, predictionsUpserted, recentMatchesUpserted, outcomesSettled, recentFormSource: "API-Tennis get_fixtures by player_key", liveDataSource: liveData.source, errors: liveData.errors || [] });
   } catch (error) {
     await db.prepare("UPDATE sync_runs SET status = 'error', finished_at = datetime('now'), error = ? WHERE id = ?").bind(error.message, runId).run();
     return jsonResponse({ ok: false, runId, error: error.message }, 500);
