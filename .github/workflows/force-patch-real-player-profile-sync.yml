@@ -166,3 +166,5 @@ async function syncPlayerProfiles(db, env, livePlayers) {
             git commit -m "Sync API Tennis player profiles"
             git push
           fi
+      - name: Marker
+        run: echo "triggered-2026-05-13"
