@@ -1,0 +1,43 @@
+function jsonResponse(payload, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=120" },
+  });
+}
+
+async function count(db, table) {
+  const row = await db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).first();
+  return row?.count || 0;
+}
+
+export async function onRequestGet({ env }) {
+  if (!env.TENNIS_DB) return jsonResponse({ ok: false, error: "Missing TENNIS_DB D1 binding" }, 500);
+  const db = env.TENNIS_DB;
+  const accuracy = await db.prepare(`
+    SELECT
+      COUNT(*) AS settled,
+      SUM(CASE WHEN correct = 1 THEN 1 ELSE 0 END) AS correct
+    FROM prediction_outcomes
+    WHERE result_status = 'settled'
+  `).first();
+  const latestSync = await db.prepare("SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1").first();
+
+  return jsonResponse({
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    counts: {
+      players: await count(db, "players"),
+      playerStatSnapshots: await count(db, "player_stat_snapshots"),
+      matches: await count(db, "matches"),
+      predictions: await count(db, "predictions"),
+      settledOutcomes: accuracy?.settled || 0,
+      syncRuns: await count(db, "sync_runs"),
+    },
+    predictionAccuracy: {
+      settled: accuracy?.settled || 0,
+      correct: accuracy?.correct || 0,
+      percent: accuracy?.settled ? Math.round((accuracy.correct / accuracy.settled) * 1000) / 10 : null,
+    },
+    latestSync,
+  });
+}
