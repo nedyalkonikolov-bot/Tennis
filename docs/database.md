@@ -47,6 +47,12 @@ DATABASE_SYNC_TOKEN=<a long private random string>
 
 Do not expose this token in the frontend.
 
+If you want the included GitHub Actions workflow to run daily, add the same value as a GitHub repository secret:
+
+```txt
+TENNISTIPZ_DATABASE_SYNC_TOKEN=<same long private random string>
+```
+
 ## 5. Run a sync
 
 After deployment and binding, call:
@@ -63,18 +69,22 @@ The sync endpoint:
 - stores predictions and model factors
 - checks recent API-Tennis finished matches and settles prediction outcomes when possible
 
-## 6. Check database status
+## 6. Check database status and history
 
 ```bash
 curl https://tennistipz.win/api/db/summary
+curl https://tennistipz.win/api/db/players?tour=ATP&limit=100
+curl https://tennistipz.win/api/db/players?tour=WTA&limit=100
 curl https://tennistipz.win/api/db/predictions
+curl https://tennistipz.win/api/db/predictions?status=settled
 ```
 
 ## 7. Daily automation
 
-Cloudflare Pages Functions do not run scheduled jobs by themselves. Use one of these:
+The repo includes `.github/workflows/database-sync.yml`, which runs once per day and can also be started manually from GitHub Actions.
 
-- GitHub Actions scheduled workflow calling `/api/db/sync`
+Cloudflare Pages Functions do not run scheduled jobs by themselves. Other options are:
+
 - Cloudflare Worker Cron Trigger calling `/api/db/sync`
 - external cron service calling `/api/db/sync`
 
