@@ -2,7 +2,7 @@ const TENNIS_API_BASE = "https://api.api-tennis.com/tennis/";
 const MODEL_VERSION = "v1";
 const RECENT_MATCH_WINDOW_DAYS = 100;
 const RECENT_PLAYER_SYNC_LIMIT = 40;
-const PLAYER_PROFILE_SYNC_LIMIT = 180;
+const PLAYER_PROFILE_SYNC_LIMIT = 6;
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
