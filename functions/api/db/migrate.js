@@ -56,6 +56,52 @@ async function migrate(request, env) {
     await db.prepare("ALTER TABLE sync_runs ADD COLUMN recent_matches_upserted INTEGER DEFAULT 0").run();
     applied.push("sync_runs.recent_matches_upserted");
   }
+  if (!(await columnExists(db, "sync_runs", "player_profiles_upserted"))) {
+    await db.prepare("ALTER TABLE sync_runs ADD COLUMN player_profiles_upserted INTEGER DEFAULT 0").run();
+    applied.push("sync_runs.player_profiles_upserted");
+  }
+  if (!(await columnExists(db, "sync_runs", "player_season_stats_upserted"))) {
+    await db.prepare("ALTER TABLE sync_runs ADD COLUMN player_season_stats_upserted INTEGER DEFAULT 0").run();
+    applied.push("sync_runs.player_season_stats_upserted");
+  }
+  if (!(await columnExists(db, "players", "player_bday"))) {
+    await db.prepare("ALTER TABLE players ADD COLUMN player_bday TEXT").run();
+    applied.push("players.player_bday");
+  }
+  if (!(await columnExists(db, "players", "player_logo"))) {
+    await db.prepare("ALTER TABLE players ADD COLUMN player_logo TEXT").run();
+    applied.push("players.player_logo");
+  }
+
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS player_season_stats (
+        id TEXT PRIMARY KEY,
+        player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        player_key TEXT,
+        tour TEXT NOT NULL CHECK (tour IN ('ATP', 'WTA')),
+        season TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'singles',
+        season_rank INTEGER,
+        titles INTEGER DEFAULT 0,
+        matches_won INTEGER DEFAULT 0,
+        matches_lost INTEGER DEFAULT 0,
+        hard_won INTEGER DEFAULT 0,
+        hard_lost INTEGER DEFAULT 0,
+        clay_won INTEGER DEFAULT 0,
+        clay_lost INTEGER DEFAULT 0,
+        grass_won INTEGER DEFAULT 0,
+        grass_lost INTEGER DEFAULT 0,
+        source TEXT NOT NULL DEFAULT 'api-tennis-get-players',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(player_id, season, type)
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_player_season_stats_player_season ON player_season_stats(player_id, season DESC, type)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_player_season_stats_tour_season ON player_season_stats(tour, season DESC, type)"),
+  ]);
+  applied.push("player_season_stats");
 
   return jsonResponse({ ok: true, applied, migratedAt: new Date().toISOString() });
 }
