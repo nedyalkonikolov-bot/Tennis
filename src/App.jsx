@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
+  CheckCircle2,
   ExternalLink,
   Gauge,
   Home,
+  Landmark,
   Newspaper,
   RefreshCw,
   Search,
@@ -18,38 +20,49 @@ import { fallbackMatches, fallbackNews, fallbackPlayers } from "./data/fallbackD
 
 const siteUrl = "https://www.tennistipz.win";
 const defaultBetUrl = "https://www.cloudbet.com/en/sports/tennis";
+const cloudbetUrl = "https://cldbt.cloud/go/en/landing/bitcoin-betting?af_token=ecea0a0896472c99ee3ff23d7fae8483&aftm_campaign=Tennis&aftm_source=tennistipz.win&aftm_medium=organic&aftm_content=Predictions&aftm_cid=4";
+const bcGameUrl = "https://bc.game/i-9767ib363b-n/";
+const stakeUrl = "https://stake.com/?c=NOYIoKcY";
 
-const pages = [
+const navPages = [
   { id: "home", label: "Home", path: "/", icon: Home },
   { id: "predictions", label: "Predictions", path: "/tennis-predictions/", icon: Target },
+  { id: "record", label: "Record", path: "/prediction-record/", icon: CheckCircle2 },
   { id: "stats", label: "Player Stats", path: "/player-stats/", icon: Users },
   { id: "news", label: "News", path: "/tennis-news/", icon: Newspaper },
+  { id: "betting", label: "Betting Sites", path: "/betting-sites/", icon: Landmark },
 ];
 
 const pageMeta = {
   home: {
     title: "TennisTipz | Crypto Tennis Betting Tips, Predictions & Player Stats",
-    description:
-      "TennisTipz delivers live tennis predictions, crypto tennis betting insights, Cloudbet odds, ATP and WTA player stats, tennis tips, and market news for responsible bettors.",
+    description: "TennisTipz delivers live tennis predictions, crypto tennis betting insights, Cloudbet odds, ATP and WTA player stats, tennis tips, and market news for responsible bettors.",
     canonical: "/",
   },
   predictions: {
-    title: "Tennis Betting Predictions | Cloudbet Odds & Crypto Tennis Tips",
-    description:
-      "Live and upcoming tennis betting predictions with Cloudbet odds, ATP and WTA market context, player form signals, and crypto tennis betting tips.",
+    title: "Tennis Predictions Today | Cloudbet Odds & Crypto Tennis Betting Tips",
+    description: "Daily ATP and WTA tennis predictions with Cloudbet odds, player form, ranking signals, surface ratings, and crypto betting context.",
     canonical: "/tennis-predictions/",
   },
+  record: {
+    title: "TennisTipz Prediction Record | Tennis Betting Accuracy Tracker",
+    description: "Track TennisTipz prediction results, settled picks, ATP and WTA accuracy, surface performance, and recent match outcomes.",
+    canonical: "/prediction-record/",
+  },
   stats: {
-    title: "ATP & WTA Player Stats | Tennis Betting Form & Rankings",
-    description:
-      "Research top ATP and WTA player stats, rankings, recent form, tournament context, and betting signals for tennis predictions.",
+    title: "ATP & WTA Player Stats | Tennis Betting Form, Rankings & Surfaces",
+    description: "Research ATP and WTA player stats, rankings, points, form ratings, serve hold, return pressure, and clay, hard, and grass signals.",
     canonical: "/player-stats/",
   },
   news: {
     title: "Tennis News for Betting | ATP, WTA & Market Updates",
-    description:
-      "Latest tennis news for betting research, including ATP and WTA updates, player stories, tournament context, and market signals.",
+    description: "Latest tennis news for betting research, including ATP and WTA player updates, tournament context, market angles, and injury signals.",
     canonical: "/tennis-news/",
+  },
+  betting: {
+    title: "Best Tennis Betting Sites | Cloudbet, BC.Game, Stake.com Reviews",
+    description: "Compare crypto tennis betting sites including Cloudbet, BC.Game, and Stake.com with referral links, tennis market notes, and responsible betting guidance.",
+    canonical: "/betting-sites/",
   },
 };
 
@@ -64,31 +77,121 @@ const newsCategories = ["All", "Setup", "News", "Tournament", "Player News", "Ma
 const initialLiveData = {
   generatedAt: null,
   source: { tennis: "fallback", odds: "fallback", news: "fallback" },
-  betUrl: defaultBetUrl,
+  betUrl: cloudbetUrl,
   matches: fallbackMatches,
   players: fallbackPlayers,
   news: fallbackNews,
   errors: [],
 };
 
-function pageFromPath(pathname) {
-  const match = pages.find((page) => page.path === pathname || page.path.replace(/\/$/, "") === pathname);
-  return match?.id || "home";
+const initialDbData = {
+  summary: null,
+  record: null,
+  recentResults: [],
+  matchPages: [],
+  playerPages: [],
+};
+
+function slugify(value = "") {
+  return String(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "item";
+}
+
+function normalizePlayer(player) {
+  return {
+    id: player.id || player.player_key || player.name,
+    name: player.name,
+    tour: player.tour || player.sex || "ATP",
+    country: player.country || "World",
+    rank: Number(player.rank ?? player.current_rank ?? 999999),
+    points: Number(player.points || 0),
+    movement: player.movement || player.trend || "same",
+    form: Number(player.form ?? player.form_rating ?? 50),
+    hold: Number(player.hold ?? player.hold_rate ?? 0),
+    breakRate: Number(player.breakRate ?? player.break_rate ?? 0),
+    clay: Number(player.clay ?? player.clay_rating ?? 0),
+    hard: Number(player.hard ?? player.hard_rating ?? 0),
+    grass: Number(player.grass ?? player.grass_rating ?? 0),
+    storedMatches: Number(player.stored_matches || 0),
+    storedWins: Number(player.stored_wins || 0),
+    predictionMentions: Number(player.prediction_mentions || 0),
+    url: player.url || `/players/${String(player.tour || player.sex || "ATP").toLowerCase()}/${slugify(player.name)}/`,
+    slug: player.slug || slugify(player.name),
+  };
+}
+
+function getRoute(pathname) {
+  const cleanPath = pathname.endsWith("/") ? pathname : `${pathname}/`;
+  const matchDetail = cleanPath.match(/^\/predictions\/([^/]+)\/$/);
+  if (matchDetail) return { id: "match-detail", slug: matchDetail[1] };
+  const playerDetail = cleanPath.match(/^\/players\/(atp|wta)\/([^/]+)\/$/i);
+  if (playerDetail) return { id: "player-detail", tour: playerDetail[1].toUpperCase(), slug: playerDetail[2] };
+  if (cleanPath === "/tennis-predictions-today/") return { id: "predictions", mode: "today" };
+  if (cleanPath === "/atp-predictions/") return { id: "predictions", tour: "ATP" };
+  if (cleanPath === "/wta-predictions/") return { id: "predictions", tour: "WTA" };
+  if (cleanPath === "/players/atp/") return { id: "stats", tour: "ATP" };
+  if (cleanPath === "/players/wta/") return { id: "stats", tour: "WTA" };
+  if (["/tennis-betting/", "/crypto-tennis-betting/", "/best-tennis-betting-sites/", "/betting-sites/"].includes(cleanPath)) return { id: "betting", path: cleanPath };
+  const page = navPages.find((item) => item.path === cleanPath);
+  return { id: page?.id || "home" };
 }
 
 function setMetaTag(selector, attribute, content) {
   let element = document.head.querySelector(selector);
   if (!element) {
     element = document.createElement("meta");
-    const [key, value] = attribute === "property" ? ["property", selector.match(/\[property=\"(.+?)\"\]/)?.[1]] : ["name", selector.match(/\[name=\"(.+?)\"\]/)?.[1]];
-    if (value) element.setAttribute(key, value);
+    const value = selector.match(/\[(?:name|property)="(.+?)"\]/)?.[1];
+    if (value) element.setAttribute(attribute, value);
     document.head.appendChild(element);
   }
   element.setAttribute("content", content);
 }
 
-function updateDocumentSeo(pageId) {
-  const meta = pageMeta[pageId] || pageMeta.home;
+function buildDynamicMeta(route, dbData) {
+  if (route.id === "match-detail") {
+    const match = dbData.matchPages.find((item) => item.slug === route.slug);
+    if (match) {
+      return {
+        title: `${match.title} Prediction, Odds & Betting Tips | TennisTipz`,
+        description: `${match.tour} ${match.title} prediction with odds, confidence, surface context, and betting analysis for ${match.tournament || "today's tennis"}.`,
+        canonical: match.url,
+      };
+    }
+  }
+  if (route.id === "player-detail") {
+    const player = dbData.playerPages.map(normalizePlayer).find((item) => item.tour === route.tour && item.slug === route.slug);
+    if (player) {
+      return {
+        title: `${player.name} Stats, Ranking & Tennis Betting Form | TennisTipz`,
+        description: `${player.name} ${player.tour} player profile with ranking, points, form rating, surface stats, and tennis betting research signals.`,
+        canonical: player.url,
+      };
+    }
+  }
+  if (route.id === "predictions" && route.tour) {
+    return {
+      title: `${route.tour} Tennis Predictions Today | Betting Tips & Cloudbet Odds`,
+      description: `${route.tour} tennis predictions with Cloudbet odds, form data, rankings, player stats, and crypto tennis betting tips.`,
+      canonical: `/${route.tour.toLowerCase()}-predictions/`,
+    };
+  }
+  if (route.id === "predictions" && route.mode === "today") {
+    return {
+      title: "Tennis Predictions Today | ATP & WTA Betting Tips",
+      description: "Today's tennis predictions for ATP and WTA matches with Cloudbet odds, confidence, player form, and surface signals.",
+      canonical: "/tennis-predictions-today/",
+    };
+  }
+  return pageMeta[route.id] || pageMeta.home;
+}
+
+function updateDocumentSeo(route, dbData) {
+  const meta = buildDynamicMeta(route, dbData);
   const canonicalUrl = `${siteUrl}${meta.canonical}`;
   document.title = meta.title;
   setMetaTag('meta[name="description"]', "name", meta.description);
@@ -107,51 +210,119 @@ function updateDocumentSeo(pageId) {
   canonical.setAttribute("href", canonicalUrl);
 }
 
+function updateStructuredData(route, liveData, dbData) {
+  let script = document.getElementById("tennistipz-dynamic-schema");
+  if (!script) {
+    script = document.createElement("script");
+    script.type = "application/ld+json";
+    script.id = "tennistipz-dynamic-schema";
+    document.head.appendChild(script);
+  }
+
+  const graph = [
+    {
+      "@type": "Organization",
+      "@id": `${siteUrl}/#organization`,
+      name: "TennisTipz",
+      url: `${siteUrl}/`,
+      logo: `${siteUrl}/favicon.svg`,
+    },
+    {
+      "@type": "WebSite",
+      "@id": `${siteUrl}/#website`,
+      name: "TennisTipz",
+      url: `${siteUrl}/`,
+      publisher: { "@id": `${siteUrl}/#organization` },
+      audience: { "@type": "PeopleAudience", requiredMinAge: 18 },
+    },
+  ];
+
+  if (route.id === "match-detail") {
+    const match = dbData.matchPages.find((item) => item.slug === route.slug);
+    if (match) {
+      graph.push({
+        "@type": "SportsEvent",
+        name: match.title,
+        url: `${siteUrl}${match.url}`,
+        sport: "Tennis",
+        eventStatus: match.live ? "https://schema.org/EventInProgress" : "https://schema.org/EventScheduled",
+        startDate: match.start_time || undefined,
+        location: { "@type": "Place", name: match.tournament || "Tennis tournament" },
+        competitor: [
+          { "@type": "SportsTeam", name: match.player_a_name },
+          { "@type": "SportsTeam", name: match.player_b_name },
+        ],
+      });
+    }
+  }
+
+  if (route.id === "player-detail") {
+    const player = dbData.playerPages.map(normalizePlayer).find((item) => item.tour === route.tour && item.slug === route.slug);
+    if (player) {
+      graph.push({
+        "@type": "Person",
+        name: player.name,
+        url: `${siteUrl}${player.url}`,
+        nationality: player.country,
+        athlete: true,
+      });
+    }
+  }
+
+  if (route.id === "betting") {
+    graph.push({
+      "@type": "FAQPage",
+      mainEntity: [
+        { "@type": "Question", name: "What are the best tennis betting sites on TennisTipz?", acceptedAnswer: { "@type": "Answer", text: "TennisTipz compares Cloudbet, BC.Game, and Stake.com for crypto tennis betting research and responsible betting." } },
+        { "@type": "Question", name: "Does TennisTipz provide guaranteed picks?", acceptedAnswer: { "@type": "Answer", text: "No. TennisTipz predictions are analytical opinions based on available data and are not guaranteed betting results." } },
+      ],
+    });
+  }
+
+  if (route.id === "predictions") {
+    graph.push(...liveData.matches.slice(0, 10).map((match) => ({
+      "@type": "SportsEvent",
+      name: `${match.playerA} vs ${match.playerB}`,
+      sport: "Tennis",
+      eventStatus: match.live ? "https://schema.org/EventInProgress" : "https://schema.org/EventScheduled",
+      location: { "@type": "Place", name: match.tournament || "Tennis tournament" },
+      competitor: [{ "@type": "SportsTeam", name: match.playerA }, { "@type": "SportsTeam", name: match.playerB }],
+    })));
+  }
+
+  script.textContent = JSON.stringify({ "@context": "https://schema.org", "@graph": graph });
+}
+
 function getPrediction(match, modelRun = 0) {
   const baseConfidence = Number(match.confidence) || 55;
   const confidence = Math.max(51, Math.min(84, Math.round(baseConfidence + modelRun)));
-  const pick = match.predictedWinner || match.market || "Value watch";
-  const value = confidence >= 70 ? "Strong" : confidence >= 63 ? "Positive" : "Lean";
-  return { confidence, pick, value };
+  const pick = match.predictedWinner || match.predicted_winner_name || match.market || "Value watch";
+  return { confidence, pick, value: confidence >= 70 ? "Strong" : confidence >= 63 ? "Positive" : "Lean" };
 }
 
 function getAnticipationScore(match) {
   const recentMatches = (Number(match.recentA?.matches) || 0) + (Number(match.recentB?.matches) || 0);
   const hasCloudbetOdds = match.oddsSource === "Cloudbet" && match.predictedWinnerOdds && match.predictedWinnerOdds !== "N/A";
-  const statusBoost = match.live ? 8 : 0;
-  const oddsBoost = hasCloudbetOdds ? 15 : 0;
-  const tourBoost = ["ATP", "WTA"].includes(match.tour) ? 4 : 0;
-  return (Number(match.confidence) || 0) + Math.min(recentMatches, 30) * 0.7 + oddsBoost + statusBoost + tourBoost;
+  return (Number(match.confidence) || 0) + Math.min(recentMatches, 30) * 0.7 + (hasCloudbetOdds ? 15 : 0) + (match.live ? 8 : 0) + (["ATP", "WTA"].includes(match.tour) ? 4 : 0);
 }
 
 function formatUpdatedAt(value) {
   if (!value) return "Using fallback data";
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function StatBar({ value }) {
   const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
-  return (
-    <div className="h-2 w-full rounded-full bg-slate-800">
-      <div className="h-2 rounded-full bg-lime-400" style={{ width: `${safeValue}%` }} />
-    </div>
-  );
+  return <div className="h-2 w-full rounded-full bg-slate-800"><div className="h-2 rounded-full bg-lime-400" style={{ width: `${safeValue}%` }} /></div>;
+}
+
+function Metric({ label, value, helper }) {
+  return <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-2xl font-black">{value}</p>{helper && <p className="mt-1 text-xs text-slate-500">{helper}</p>}</div>;
 }
 
 function NewsImage({ item }) {
-  if (item.imageUrl) {
-    return <img src={item.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-48 w-full object-cover" />;
-  }
-  return (
-    <div className="flex h-48 w-full items-center justify-center bg-slate-900">
-      <Newspaper size={42} className="text-lime-300/70" />
-    </div>
-  );
+  if (item.imageUrl) return <img src={item.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-48 w-full object-cover" />;
+  return <div className="flex h-48 w-full items-center justify-center bg-slate-900"><Newspaper size={42} className="text-lime-300/70" /></div>;
 }
 
 function DataStatus({ liveData, loading, error, onRefresh }) {
@@ -173,387 +344,212 @@ function DataStatus({ liveData, loading, error, onRefresh }) {
   );
 }
 
-function PageLink({ page, activePage, onNavigate }) {
-  const Icon = page.icon;
-  const active = activePage === page.id;
-  return (
-    <a
-      href={page.path}
-      onClick={(event) => {
-        event.preventDefault();
-        onNavigate(page.id);
-      }}
-      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
-        active ? "bg-lime-400 text-slate-950" : "text-slate-300 hover:bg-white/10 hover:text-white"
-      }`}
-    >
-      <Icon size={16} />
-      {page.label}
-    </a>
-  );
-}
-
-function Header({ activePage, onNavigate }) {
+function Header({ route, onNavigate }) {
   return (
     <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 backdrop-blur">
       <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 md:flex-row md:items-center md:justify-between md:px-6">
-        <a
-          href="/"
-          onClick={(event) => {
-            event.preventDefault();
-            onNavigate("home");
-          }}
-          className="flex w-fit items-center gap-3 text-left"
-        >
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-400 text-slate-950 shadow-lg shadow-lime-400/20">
-            <Trophy size={22} />
-          </span>
-          <span>
-            <span className="block text-xl font-bold tracking-tight">TennisTipz</span>
-            <span className="block text-xs text-slate-400">crypto tennis betting tips</span>
-          </span>
+        <a href="/" onClick={(event) => { event.preventDefault(); onNavigate("/"); }} className="flex w-fit items-center gap-3 text-left">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-400 text-slate-950 shadow-lg shadow-lime-400/20"><Trophy size={22} /></span>
+          <span><span className="block text-xl font-bold tracking-tight">TennisTipz</span><span className="block text-xs text-slate-400">crypto tennis betting tips</span></span>
         </a>
         <nav className="flex gap-2 overflow-x-auto pb-1 md:pb-0" aria-label="Main navigation">
-          {pages.map((page) => (
-            <PageLink key={page.id} page={page} activePage={activePage} onNavigate={onNavigate} />
-          ))}
-          <a href="/betting-sites/" className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white">
-            <ExternalLink size={16} />
-            Betting Sites
-          </a>
+          {navPages.map((page) => {
+            const Icon = page.icon;
+            const active = route.id === page.id;
+            return <a key={page.id} href={page.path} onClick={(event) => { event.preventDefault(); onNavigate(page.path); }} className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${active ? "bg-lime-400 text-slate-950" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}><Icon size={16} />{page.label}</a>;
+          })}
         </nav>
       </div>
     </header>
   );
 }
 
-function HomePage({ onNavigate, liveData }) {
+function HomePage({ onNavigate, liveData, dbData }) {
   const liveMatches = liveData.matches.filter((match) => match.live).length;
   const upcomingMatches = liveData.matches.length - liveMatches;
-
   return (
     <>
       <section className="mx-auto grid max-w-7xl gap-10 px-5 py-14 md:grid-cols-[1.05fr_0.95fr] md:px-6 md:py-20">
         <div className="flex flex-col justify-center">
-          <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-lime-400/30 bg-lime-400/10 px-4 py-2 text-sm text-lime-300">
-            <TrendingUp size={16} /> Cloudbet odds plus last-100-days form
-          </div>
-          <h1 className="max-w-3xl text-4xl font-black leading-tight tracking-tight md:text-6xl">
-            Crypto tennis betting tips, predictions, stats, and news.
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-            TennisTipz combines live tennis betting markets, 100-day player form, top-500 ATP/WTA rankings, Cloudbet prices, crypto betting context and market-relevant tennis headlines.
-          </p>
+          <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-lime-400/30 bg-lime-400/10 px-4 py-2 text-sm text-lime-300"><TrendingUp size={16} /> Cloudbet odds plus last-100-days form</div>
+          <h1 className="max-w-3xl text-4xl font-black leading-tight tracking-tight md:text-6xl">Crypto tennis betting tips, predictions, stats, and news.</h1>
+          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">TennisTipz combines live tennis betting markets, 100-day player form, top-500 ATP/WTA rankings, Cloudbet prices, crypto betting context and market-relevant tennis headlines.</p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <button type="button" onClick={() => onNavigate("predictions")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 shadow-xl shadow-lime-400/20 hover:bg-lime-300">
-              View Predictions
-            </button>
-            <button type="button" onClick={() => onNavigate("stats")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">
-              Compare Players
-            </button>
-            <a href="/betting-sites/" className="rounded-xl border border-lime-400/40 px-6 py-4 text-center font-bold text-lime-200 hover:bg-lime-400/10">
-              Betting Sites
-            </a>
+            <button type="button" onClick={() => onNavigate("/tennis-predictions/")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 shadow-xl shadow-lime-400/20 hover:bg-lime-300">View Predictions</button>
+            <button type="button" onClick={() => onNavigate("/player-stats/")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">Compare Players</button>
+            <button type="button" onClick={() => onNavigate("/prediction-record/")} className="rounded-xl border border-lime-400/40 px-6 py-4 font-bold text-lime-200 hover:bg-lime-400/10">Prediction Record</button>
           </div>
           <p className="mt-4 text-xs text-slate-500">18+. Tips are opinions, not guaranteed outcomes. Bet responsibly.</p>
         </div>
-
         <div className="border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/30">
           <div className="bg-slate-900 p-5">
-            <p className="text-sm text-slate-400">Live data snapshot</p>
+            <p className="text-sm text-slate-400">Database snapshot</p>
             <h2 className="mt-1 text-2xl font-bold">Today on TennisTipz</h2>
             <div className="mt-5 grid gap-3 text-center sm:grid-cols-2">
-              <div className="bg-white/5 p-5"><p className="text-3xl font-black">{liveMatches}</p><p className="text-xs text-slate-400">Live matches</p></div>
-              <div className="bg-white/5 p-5"><p className="text-3xl font-black">{upcomingMatches}</p><p className="text-xs text-slate-400">Upcoming matches</p></div>
-              <div className="bg-white/5 p-5"><p className="text-3xl font-black">{liveData.players.length}</p><p className="text-xs text-slate-400">ATP/WTA players</p></div>
-              <div className="bg-white/5 p-5"><p className="text-3xl font-black">{liveData.news.length}</p><p className="text-xs text-slate-400">News updates</p></div>
+              <Metric label="Live matches" value={liveMatches} />
+              <Metric label="Upcoming matches" value={upcomingMatches} />
+              <Metric label="Stored players" value={dbData.summary?.counts?.players || liveData.players.length} />
+              <Metric label="Stored predictions" value={dbData.summary?.counts?.predictions || 0} />
             </div>
-            <div className="mt-5 bg-slate-800 p-5 text-sm leading-6 text-slate-400">
-              Predictions are grouped into live and upcoming Cloudbet tennis betting markets and sorted by anticipation.
-            </div>
+            <div className="mt-5 bg-slate-800 p-5 text-sm leading-6 text-slate-400">Predictions are grouped into live and upcoming Cloudbet tennis betting markets and sorted by anticipation.</div>
           </div>
         </div>
       </section>
-
-      <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-2 lg:grid-cols-4 md:px-6">
-        <button type="button" onClick={() => onNavigate("predictions")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
-          <Target className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">Tennis Betting Predictions</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Live and upcoming ATP/WTA markets sorted by the most anticipated matches first.</p>
-        </button>
-        <button type="button" onClick={() => onNavigate("stats")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
-          <BarChart3 className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">Top 500 ATP/WTA</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Separate player stat views for ATP and WTA with rankings, points and rating signals.</p>
-        </button>
-        <button type="button" onClick={() => onNavigate("news")} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
-          <Newspaper className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold">Tennis Betting News</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Track player availability, tournament notes and odds-relevant tennis headlines.</p>
-        </button>
-        <a href="/betting-sites/" className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40">
-          <ExternalLink className="mb-4 text-lime-300" />
-          <h3 className="text-xl font-bold text-white">Betting Sites</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Compare Cloudbet, Stake.com and BC.Game with referral links and responsible betting notes.</p>
-        </a>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-5 py-10 md:px-6">
-        <div className="border border-white/10 bg-white/[0.04] p-6">
-          <h2 className="text-2xl font-black">Why TennisTipz for crypto tennis betting?</h2>
-          <p className="mt-4 max-w-4xl leading-8 text-slate-400">
-            Tennis markets move quickly, especially when live odds, late withdrawals and player form all collide. TennisTipz keeps crypto tennis betting tips connected to Cloudbet odds, ATP and WTA stats, current news, and responsible betting context so every prediction has visible reasoning behind it.
-          </p>
-        </div>
-      </section>
+      <SeoHubLinks onNavigate={onNavigate} />
     </>
   );
 }
 
-function OddsLink({ match, fallbackBetUrl }) {
-  const href = match.betUrl || fallbackBetUrl || defaultBetUrl;
-  return (
-    <a href={href} target="_blank" rel="noreferrer sponsored" className="group block bg-slate-900 p-4 ring-1 ring-lime-400/20 transition hover:bg-lime-400 hover:text-slate-950">
-      <span className="flex items-center justify-between gap-3 text-xs text-slate-500 group-hover:text-slate-800">
-        Cloudbet odds <ExternalLink size={14} />
-      </span>
-      <span className="mt-1 block font-bold">{match.predictedWinnerOdds || match.odds || "N/A"}</span>
-      <span className="mt-1 block text-xs text-slate-500 group-hover:text-slate-800">{match.oddsSource || "Cloudbet"}</span>
-    </a>
-  );
+function SeoHubLinks({ onNavigate }) {
+  const links = [
+    ["/tennis-predictions-today/", "Tennis Predictions Today", "Daily ATP and WTA picks with odds and form signals."],
+    ["/atp-predictions/", "ATP Predictions", "Men's tennis betting tips and Cloudbet markets."],
+    ["/wta-predictions/", "WTA Predictions", "Women's tennis predictions, rankings and form notes."],
+    ["/crypto-tennis-betting/", "Crypto Tennis Betting", "Bitcoin-friendly tennis betting guide and site comparison."],
+    ["/players/atp/", "ATP Player Profiles", "Top ATP player stats and betting research pages."],
+    ["/players/wta/", "WTA Player Profiles", "Top WTA player stats and betting research pages."],
+  ];
+  return <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-2 lg:grid-cols-3 md:px-6">{links.map(([href, title, text]) => <button key={href} type="button" onClick={() => onNavigate(href)} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40"><h3 className="text-xl font-bold">{title}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{text}</p></button>)}</section>;
 }
 
-function PredictionsPage({ matches, betUrl }) {
+function OddsLink({ match, fallbackBetUrl }) {
+  const href = match.betUrl || fallbackBetUrl || cloudbetUrl;
+  return <a href={href} target="_blank" rel="noreferrer sponsored" className="group block bg-slate-900 p-4 ring-1 ring-lime-400/20 transition hover:bg-lime-400 hover:text-slate-950"><span className="flex items-center justify-between gap-3 text-xs text-slate-500 group-hover:text-slate-800">Cloudbet odds <ExternalLink size={14} /></span><span className="mt-1 block font-bold">{match.predictedWinnerOdds || match.predicted_odds || match.odds || "N/A"}</span><span className="mt-1 block text-xs text-slate-500 group-hover:text-slate-800">{match.oddsSource || "Cloudbet"}</span></a>;
+}
+
+function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
   const [surface, setSurface] = useState("All");
   const [category, setCategory] = useState("upcoming");
   const [modelRun, setModelRun] = useState(0);
-
-  const categoryCounts = useMemo(() => ({
-    live: matches.filter((match) => match.live).length,
-    upcoming: matches.filter((match) => !match.live).length,
-  }), [matches]);
+  const scopedMatches = useMemo(() => matches.filter((match) => !route.tour || match.tour === route.tour), [matches, route.tour]);
+  const categoryCounts = useMemo(() => ({ live: scopedMatches.filter((match) => match.live).length, upcoming: scopedMatches.filter((match) => !match.live).length }), [scopedMatches]);
   const effectiveCategory = categoryCounts[category] ? category : categoryCounts.upcoming ? "upcoming" : "live";
-
-  const filteredMatches = useMemo(() => matches
+  const filteredMatches = useMemo(() => scopedMatches
     .filter((match) => (effectiveCategory === "live" ? match.live : !match.live))
     .filter((match) => surface === "All" || match.surface === surface)
-    .map((match) => ({ ...match, prediction: getPrediction(match, modelRun), anticipation: getAnticipationScore(match) }))
-    .sort((a, b) => b.anticipation - a.anticipation || b.prediction.confidence - a.prediction.confidence), [matches, effectiveCategory, surface, modelRun]);
+    .map((match) => ({ ...match, prediction: getPrediction(match, modelRun), anticipation: getAnticipationScore(match), slug: slugify(`${match.tour} ${match.playerA} vs ${match.playerB}`) }))
+    .sort((a, b) => b.anticipation - a.anticipation || b.prediction.confidence - a.prediction.confidence), [scopedMatches, effectiveCategory, surface, modelRun]);
+  const heading = route.tour ? `${route.tour} Tennis Predictions` : route.mode === "today" ? "Tennis Predictions Today" : "Tennis Betting Predictions";
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
       <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase text-lime-300">Cloudbet ATP/WTA markets</p>
-          <h1 className="mt-2 text-4xl font-black">Tennis Betting Predictions</h1>
-          <p className="mt-3 max-w-2xl text-slate-400">Live and upcoming tennis betting matches are separated, with the most anticipated predictions ranked first using odds, form, status and confidence.</p>
-        </div>
-        <button type="button" onClick={() => setModelRun((value) => (value === 3 ? -2 : value + 1))} className="inline-flex w-fit items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">
-          <Gauge size={18} /> Re-run Model
-        </button>
+        <div><p className="text-sm font-semibold uppercase text-lime-300">Cloudbet ATP/WTA markets</p><h1 className="mt-2 text-4xl font-black">{heading}</h1><p className="mt-3 max-w-2xl text-slate-400">Live and upcoming tennis betting matches are separated, with the most anticipated predictions ranked first using odds, form, status and confidence.</p></div>
+        <button type="button" onClick={() => setModelRun((value) => (value === 3 ? -2 : value + 1))} className="inline-flex w-fit items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300"><Gauge size={18} /> Re-run Model</button>
       </div>
-
-      <div className="mt-8 flex flex-wrap gap-3">
-        {matchCategories.map((item) => (
-          <button key={item.id} type="button" onClick={() => setCategory(item.id)} className={`rounded-xl px-5 py-2 text-sm font-bold ${effectiveCategory === item.id ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
-            {item.label} ({categoryCounts[item.id] || 0})
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-5 flex gap-2 overflow-x-auto">
-        {surfaces.map((item) => (
-          <button key={item} type="button" onClick={() => setSurface(item)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${surface === item ? "bg-white text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
-            {item}
-          </button>
-        ))}
-      </div>
-
+      <div className="mt-8 flex flex-wrap gap-3">{matchCategories.map((item) => <button key={item.id} type="button" onClick={() => setCategory(item.id)} className={`rounded-xl px-5 py-2 text-sm font-bold ${effectiveCategory === item.id ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{item.label} ({categoryCounts[item.id] || 0})</button>)}</div>
+      <div className="mt-5 flex gap-2 overflow-x-auto">{surfaces.map((item) => <button key={item} type="button" onClick={() => setSurface(item)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${surface === item ? "bg-white text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{item}</button>)}</div>
       <div className="mt-8 grid gap-5 md:grid-cols-2">
-        {filteredMatches.map((match) => (
-          <article key={match.id} className="border border-white/10 bg-white/[0.04] p-6">
-            <div className="mb-5 flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm text-slate-400">{match.tournament} - {match.startTime}</p>
-                <h2 className="mt-2 text-2xl font-black">{match.playerA} vs {match.playerB}</h2>
-              </div>
-              <span className="rounded-full bg-lime-400/10 px-3 py-1 text-sm font-bold text-lime-300">{match.prediction.confidence}%</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-full px-3 py-1 text-xs font-bold ${match.live ? "bg-red-500/15 text-red-200" : "bg-sky-400/10 text-sky-200"}`}>{match.live ? "Live" : "Upcoming"}</span>
-              <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">Anticipation {Math.round(match.anticipation)}</span>
-            </div>
-            <p className="mt-5 text-slate-300">Predicted winner: <span className="font-bold text-white">{match.prediction.pick}</span></p>
-            <div className="mt-5 grid gap-4 sm:grid-cols-3">
-              <OddsLink match={match} fallbackBetUrl={betUrl} />
-              <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">{match.playerA} 100d</p><p className="mt-1 font-bold">{match.recentA?.wins || 0}-{match.recentA?.losses || 0}</p><p className="mt-1 text-xs text-slate-500">{match.recentA?.winRate || 50}% win rate</p></div>
-              <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">{match.playerB} 100d</p><p className="mt-1 font-bold">{match.recentB?.wins || 0}-{match.recentB?.losses || 0}</p><p className="mt-1 text-xs text-slate-500">{match.recentB?.winRate || 50}% win rate</p></div>
-            </div>
-            <div className="mt-5 grid gap-4 sm:grid-cols-3">
-              <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">Surface</p><p className="mt-1 font-bold">{match.surface}</p></div>
-              <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">Status</p><p className="mt-1 font-bold">{match.live ? "Live" : match.status}</p></div>
-              <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">Score</p><p className="mt-1 font-bold">{match.score || "Pre-match"}</p></div>
-            </div>
-            <div className="mt-5 space-y-3 text-sm text-slate-300">
-              <p>100-day form edge: {(match.formA || 0) - (match.formB || 0) > 0 ? "+" : ""}{(match.formA || 0) - (match.formB || 0)}</p>
-              <StatBar value={match.prediction.confidence} />
-            </div>
-          </article>
-        ))}
+        {filteredMatches.map((match) => <article key={match.id} className="border border-white/10 bg-white/[0.04] p-6">
+          <div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-sm text-slate-400">{match.tournament} - {match.startTime}</p><h2 className="mt-2 text-2xl font-black">{match.playerA} vs {match.playerB}</h2></div><span className="rounded-full bg-lime-400/10 px-3 py-1 text-sm font-bold text-lime-300">{match.prediction.confidence}%</span></div>
+          <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-3 py-1 text-xs font-bold ${match.live ? "bg-red-500/15 text-red-200" : "bg-sky-400/10 text-sky-200"}`}>{match.live ? "Live" : "Upcoming"}</span><span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">Anticipation {Math.round(match.anticipation)}</span><button type="button" onClick={() => onNavigate(`/predictions/${match.slug}/`)} className="rounded-full bg-white/5 px-3 py-1 text-xs font-bold text-lime-300 hover:bg-white/10">Match page</button></div>
+          <p className="mt-5 text-slate-300">Predicted winner: <span className="font-bold text-white">{match.prediction.pick}</span></p>
+          <div className="mt-5 grid gap-4 sm:grid-cols-3"><OddsLink match={match} fallbackBetUrl={betUrl} /><Metric label={`${match.playerA} 100d`} value={`${match.recentA?.wins || 0}-${match.recentA?.losses || 0}`} helper={`${match.recentA?.winRate || 50}% win rate`} /><Metric label={`${match.playerB} 100d`} value={`${match.recentB?.wins || 0}-${match.recentB?.losses || 0}`} helper={`${match.recentB?.winRate || 50}% win rate`} /></div>
+          <div className="mt-5 space-y-3 text-sm text-slate-300"><p>Surface: {match.surface} | Status: {match.live ? "Live" : match.status}</p><StatBar value={match.prediction.confidence} /></div>
+        </article>)}
       </div>
-
+      <MatchPageLinks matchPages={dbData.matchPages} onNavigate={onNavigate} />
       {!filteredMatches.length && <div className="mt-8 border border-white/10 bg-white/[0.04] p-8 text-slate-400">No Cloudbet tennis betting matches found right now.</div>}
     </section>
   );
 }
 
-function StatsPage({ players }) {
+function MatchPageLinks({ matchPages, onNavigate }) {
+  if (!matchPages.length) return null;
+  return <div className="mt-10 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Indexable Match Prediction Pages</h2><div className="mt-5 grid gap-3 md:grid-cols-2">{matchPages.slice(0, 24).map((match) => <button key={match.match_id} type="button" onClick={() => onNavigate(match.url)} className="bg-slate-900 p-4 text-left hover:bg-slate-800"><p className="font-bold">{match.title}</p><p className="mt-1 text-sm text-slate-500">{match.tour} - {match.tournament || "Tennis"}</p></button>)}</div></div>;
+}
+
+function RecordPage({ dbData }) {
+  const record = dbData.record?.record;
+  const card = (label, value, helper) => <Metric label={label} value={value ?? "Pending"} helper={helper} />;
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><p className="text-sm font-semibold uppercase text-lime-300">Verified outcomes</p><h1 className="mt-2 text-4xl font-black">Prediction Record</h1><p className="mt-3 max-w-2xl text-slate-400">A public tracker for settled tennis predictions, accuracy by tour, recent performance, and surface splits. It will become stronger as daily syncs settle more matches.</p><div className="mt-8 grid gap-4 md:grid-cols-4">{card("Overall accuracy", record?.overall?.percent ? `${record.overall.percent}%` : "Pending", `${record?.overall?.settled || 0} settled`)}{card("ATP accuracy", record?.tours?.ATP?.percent ? `${record.tours.ATP.percent}%` : "Pending", `${record?.tours?.ATP?.settled || 0} settled`)}{card("WTA accuracy", record?.tours?.WTA?.percent ? `${record.tours.WTA.percent}%` : "Pending", `${record?.tours?.WTA?.settled || 0} settled`)}{card("Last 30 days", record?.last30?.percent ? `${record.last30.percent}%` : "Pending", `${record?.last30?.settled || 0} settled`)}</div><div className="mt-8 grid gap-5 md:grid-cols-3">{["clay", "hard", "grass"].map((surface) => <Metric key={surface} label={`${surface} accuracy`} value={record?.surfaces?.[surface]?.percent ? `${record.surfaces[surface].percent}%` : "Pending"} helper={`${record?.surfaces?.[surface]?.settled || 0} settled`} />)}</div><div className="mt-10 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Recent Settled Predictions</h2>{!dbData.recentResults.length && <p className="mt-4 text-slate-400">No settled outcomes yet. The daily API-Tennis sync will start filling this once stored matches finish.</p>}{dbData.recentResults.map((item) => <div key={item.id} className="mt-4 border-t border-white/10 pt-4"><p className="font-bold">{item.player_a_name} vs {item.player_b_name}</p><p className="text-sm text-slate-400">Pick: {item.predicted_winner_name} | Winner: {item.actual_winner_name || "Pending"} | {item.correct ? "Correct" : "Miss"}</p></div>)}</div></section>;
+}
+
+function StatsPage({ route, livePlayers, dbData, onNavigate }) {
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState("rank");
-  const [activeTour, setActiveTour] = useState("ATP");
+  const [activeTour, setActiveTour] = useState(route.tour || "ATP");
+  useEffect(() => { if (route.tour) setActiveTour(route.tour); }, [route.tour]);
+  const sourcePlayers = dbData.playerPages.length ? dbData.playerPages : livePlayers;
+  const filteredPlayers = useMemo(() => sourcePlayers.map(normalizePlayer).filter((player) => player.tour === activeTour).filter((player) => player.name.toLowerCase().includes(query.toLowerCase()) || player.country?.toLowerCase?.().includes(query.toLowerCase())).sort((a, b) => (sortKey === "rank" ? a.rank - b.rank : (b[sortKey] || 0) - (a[sortKey] || 0))), [sourcePlayers, activeTour, query, sortKey]);
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><p className="text-sm font-semibold uppercase text-lime-300">Player database</p><h1 className="mt-2 text-4xl font-black">ATP and WTA Player Stats</h1><p className="mt-3 max-w-2xl text-slate-400">Top 500 ATP and top 500 WTA players, split by tour with ranking points and betting-relevant rating signals.</p><div className="mt-8 flex gap-2 overflow-x-auto">{tours.map((tour) => <button key={tour} type="button" onClick={() => { setActiveTour(tour); onNavigate(`/players/${tour.toLowerCase()}/`); }} className={`rounded-xl px-5 py-2 text-sm font-bold ${activeTour === tour ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{tour} Top 500</button>)}</div><div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]"><label className="flex items-center gap-3 bg-white/[0.04] px-4 py-3 ring-1 ring-white/10"><Search size={18} className="text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search player or country" className="w-full bg-transparent text-white outline-none placeholder:text-slate-500" /></label><select value={sortKey} onChange={(event) => setSortKey(event.target.value)} className="bg-slate-900 px-4 py-3 text-white ring-1 ring-white/10"><option value="rank">Sort by rank</option><option value="points">Sort by points</option><option value="form">Sort by form</option><option value="hold">Sort by hold rate</option><option value="breakRate">Sort by break rate</option><option value="clay">Sort by clay</option><option value="hard">Sort by hard</option><option value="grass">Sort by grass</option></select></div><div className="mt-8 overflow-hidden border border-white/10"><div className="hidden grid-cols-[1.2fr_0.5fr_0.7fr_repeat(6,0.7fr)] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid"><span>Player</span><span>Rank</span><span>Points</span><span>Form</span><span>Hold</span><span>Break</span><span>Clay</span><span>Hard</span><span>Grass</span></div>{filteredPlayers.map((player) => <button key={player.id || player.name} type="button" onClick={() => onNavigate(player.url)} className="grid w-full gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 text-left hover:bg-white/[0.06] md:grid-cols-[1.2fr_0.5fr_0.7fr_repeat(6,0.7fr)] md:items-center"><div><p className="font-bold text-white">{player.name}</p><p className="text-sm text-slate-500">{player.country} movement {player.movement}</p></div><p className="text-sm text-slate-300">#{player.rank}</p><p className="text-sm text-slate-300">{player.points}</p>{[player.form, player.hold, player.breakRate, player.clay, player.hard, player.grass].map((value, index) => <div key={`${player.id || player.name}-${index}`}><p className="mb-2 text-sm font-bold text-white">{value}</p><StatBar value={value} /></div>)}</button>)}</div></section>;
+}
 
-  const filteredPlayers = useMemo(() => players
-    .filter((player) => (player.sex || player.tour) === activeTour)
-    .filter((player) => player.name.toLowerCase().includes(query.toLowerCase()) || player.country?.toLowerCase?.().includes(query.toLowerCase()))
-    .sort((a, b) => (sortKey === "rank" ? a.rank - b.rank : (b[sortKey] || 0) - (a[sortKey] || 0))), [players, activeTour, query, sortKey]);
+function PlayerDetailPage({ route, dbData, onNavigate }) {
+  const player = dbData.playerPages.map(normalizePlayer).find((item) => item.tour === route.tour && item.slug === route.slug);
+  if (!player) return <NotFound title="Player profile loading" text="This player profile will appear after the database feed loads." />;
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><button type="button" onClick={() => onNavigate(`/players/${player.tour.toLowerCase()}/`)} className="mb-6 text-sm font-bold text-lime-300">Back to {player.tour} players</button><p className="text-sm font-semibold uppercase text-lime-300">{player.tour} player profile</p><h1 className="mt-2 text-5xl font-black">{player.name}</h1><p className="mt-3 max-w-2xl text-slate-400">Player stats, ranking, surface signals, and tennis betting research profile for {player.name}.</p><div className="mt-8 grid gap-4 md:grid-cols-4"><Metric label="Rank" value={`#${player.rank}`} helper={player.country} /><Metric label="Points" value={player.points} /><Metric label="Form rating" value={player.form} /><Metric label="Stored matches" value={player.storedMatches} /></div><div className="mt-8 grid gap-5 md:grid-cols-3"><Metric label="Clay rating" value={player.clay} /><Metric label="Hard rating" value={player.hard} /><Metric label="Grass rating" value={player.grass} /></div><div className="mt-8 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Betting Research Notes</h2><p className="mt-4 leading-8 text-slate-400">Use {player.name}'s rank, points, form rating, serve hold and return pressure alongside Cloudbet odds and surface conditions before making any tennis betting decision. This page is built to accumulate more stored matches and prediction outcomes over time.</p></div></section>;
+}
 
-  return (
-    <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
-      <div>
-        <p className="text-sm font-semibold uppercase text-lime-300">Player database</p>
-        <h1 className="mt-2 text-4xl font-black">ATP and WTA Player Stats</h1>
-        <p className="mt-3 max-w-2xl text-slate-400">Top 500 ATP and top 500 WTA players, split by tour with ranking points and betting-relevant rating signals.</p>
-      </div>
-
-      <div className="mt-8 flex gap-2 overflow-x-auto">
-        {tours.map((tour) => (
-          <button key={tour} type="button" onClick={() => setActiveTour(tour)} className={`rounded-xl px-5 py-2 text-sm font-bold ${activeTour === tour ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
-            {tour} Top 500
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]">
-        <label className="flex items-center gap-3 bg-white/[0.04] px-4 py-3 ring-1 ring-white/10">
-          <Search size={18} className="text-slate-500" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search player or country" className="w-full bg-transparent text-white outline-none placeholder:text-slate-500" />
-        </label>
-        <select value={sortKey} onChange={(event) => setSortKey(event.target.value)} className="bg-slate-900 px-4 py-3 text-white ring-1 ring-white/10">
-          <option value="rank">Sort by rank</option>
-          <option value="points">Sort by points</option>
-          <option value="form">Sort by form</option>
-          <option value="hold">Sort by hold rate</option>
-          <option value="breakRate">Sort by break rate</option>
-          <option value="clay">Sort by clay</option>
-          <option value="hard">Sort by hard</option>
-          <option value="grass">Sort by grass</option>
-        </select>
-      </div>
-
-      <div className="mt-8 overflow-hidden border border-white/10">
-        <div className="hidden grid-cols-[1.2fr_0.5fr_0.7fr_repeat(6,0.7fr)] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid">
-          <span>Player</span><span>Rank</span><span>Points</span><span>Form</span><span>Hold</span><span>Break</span><span>Clay</span><span>Hard</span><span>Grass</span>
-        </div>
-        {filteredPlayers.map((player) => (
-          <div key={player.id || player.name} className="grid gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 md:grid-cols-[1.2fr_0.5fr_0.7fr_repeat(6,0.7fr)] md:items-center">
-            <div><p className="font-bold">{player.name}</p><p className="text-sm text-slate-500">{player.country || activeTour} movement {player.movement || player.trend}</p></div>
-            <p className="text-sm text-slate-300">#{player.rank}</p>
-            <p className="text-sm text-slate-300">{player.points || 0}</p>
-            {[player.form, player.hold, player.breakRate, player.clay, player.hard, player.grass].map((value, index) => (
-              <div key={`${player.id || player.name}-${index}`}><p className="mb-2 text-sm font-bold">{value}</p><StatBar value={value} /></div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
+function MatchDetailPage({ route, dbData, onNavigate }) {
+  const match = dbData.matchPages.find((item) => item.slug === route.slug);
+  if (!match) return <NotFound title="Match page loading" text="This match page will appear after the database feed loads." />;
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><button type="button" onClick={() => onNavigate("/tennis-predictions/")} className="mb-6 text-sm font-bold text-lime-300">Back to predictions</button><p className="text-sm font-semibold uppercase text-lime-300">{match.tour} prediction page</p><h1 className="mt-2 text-5xl font-black">{match.title} Prediction</h1><p className="mt-3 max-w-3xl text-slate-400">Cloudbet odds, prediction confidence, surface context, and stored result tracking for {match.title}.</p><div className="mt-8 grid gap-4 md:grid-cols-4"><Metric label="Prediction" value={match.predicted_winner_name || "Value watch"} /><Metric label="Confidence" value={match.confidence ? `${match.confidence}%` : "Pending"} /><Metric label="Odds" value={match.predicted_odds || "N/A"} /><Metric label="Status" value={match.live ? "Live" : match.status || "Scheduled"} /></div><div className="mt-8 grid gap-5 md:grid-cols-3"><Metric label="Tournament" value={match.tournament || "Tennis"} /><Metric label="Surface" value={match.surface || "TBC"} /><Metric label="Result" value={match.result_status || "pending"} helper={match.actual_winner_name ? `Winner: ${match.actual_winner_name}` : "Outcome updates after settlement"} /></div><div className="mt-8 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Prediction Analysis</h2><p className="mt-4 leading-8 text-slate-400">The model combines market-implied probability, ATP/WTA context, available form, surface ratings, ranking signals and live status. Use this prediction as research only; tennis betting has risk and no outcome is guaranteed.</p><a href={cloudbetUrl} target="_blank" rel="noreferrer sponsored" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Open Cloudbet odds <ExternalLink size={16} /></a></div></section>;
 }
 
 function NewsPage({ news }) {
   const [category, setCategory] = useState("All");
   const filteredNews = useMemo(() => news.filter((item) => category === "All" || item.category === category).slice(0, 16), [news, category]);
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between"><div><p className="text-sm font-semibold uppercase text-lime-300">Live newsroom</p><h1 className="mt-2 text-4xl font-black">Tennis News for Betting</h1><p className="mt-3 max-w-2xl text-slate-400">Filter ATP and WTA updates by tournament context, player availability, market movement and trend signals.</p></div><CalendarDays className="text-slate-500" /></div><div className="mt-8 flex gap-2 overflow-x-auto">{newsCategories.map((item) => <button key={item} type="button" onClick={() => setCategory(item)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${category === item ? "bg-white text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{item}</button>)}</div><div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">{filteredNews.map((item) => <article key={item.id || item.title} className="overflow-hidden border border-white/10 bg-white/[0.04] hover:border-lime-400/40"><NewsImage item={item} /><div className="p-6"><div className="mb-4 flex items-center justify-between gap-3 text-sm"><span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category}</span><span className="text-slate-500">{item.time}</span></div><h2 className="text-xl font-black leading-tight">{item.title}</h2><p className="mt-4 leading-7 text-slate-400">{item.summary}</p>{item.url && item.url !== "#" && <a href={item.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">Read from {item.source}</a>}</div></article>)}</div></section>;
+}
 
-  return (
-    <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
-      <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase text-lime-300">Live newsroom</p>
-          <h1 className="mt-2 text-4xl font-black">Tennis News for Betting</h1>
-          <p className="mt-3 max-w-2xl text-slate-400">Filter ATP and WTA updates by tournament context, player availability, market movement and trend signals.</p>
-        </div>
-        <CalendarDays className="text-slate-500" />
-      </div>
+function BettingHubPage() {
+  const sites = [{ name: "Cloudbet", url: cloudbetUrl, text: "Cloudbet is the main tennis odds source used on TennisTipz, with crypto-friendly betting markets and ATP/WTA odds that fit match prediction research." }, { name: "BC.Game", url: bcGameUrl, text: "BC.Game is a crypto betting option for users comparing alternative sportsbooks and casino-led betting platforms with tennis market coverage." }, { name: "Stake.com", url: stakeUrl, text: "Stake.com is a major crypto betting brand for bettors who want broad sports coverage, familiar markets, and a simple account experience." }];
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><p className="text-sm font-semibold uppercase text-lime-300">Crypto tennis betting</p><h1 className="mt-2 text-4xl font-black">Best Tennis Betting Sites</h1><p className="mt-3 max-w-3xl text-slate-400">Compare crypto-friendly tennis betting sites for ATP and WTA markets, odds research, and responsible tennis betting. These links may be sponsored.</p><div className="mt-8 grid gap-5 md:grid-cols-3">{sites.map((site) => <article key={site.name} className="border border-white/10 bg-white/[0.04] p-6"><div className="mb-5 flex h-28 items-center justify-center bg-slate-900 text-2xl font-black text-lime-300">{site.name}</div><h2 className="text-2xl font-black">{site.name}</h2><p className="mt-4 leading-7 text-slate-400">{site.text}</p><a href={site.url} target="_blank" rel="noreferrer sponsored" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Visit {site.name} <ExternalLink size={16} /></a></article>)}</div><div className="mt-10 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Crypto Tennis Betting Guide</h2><p className="mt-4 leading-8 text-slate-400">A strong tennis betting workflow starts with market availability, then compares odds against player form, ranking movement, surface ratings, recent match load and tournament context. TennisTipz uses Cloudbet odds with ATP and WTA data to help bettors research picks before placing any wager.</p></div></section>;
+}
 
-      <div className="mt-8 flex gap-2 overflow-x-auto">
-        {newsCategories.map((item) => (
-          <button key={item} type="button" onClick={() => setCategory(item)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${category === item ? "bg-white text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
-            {item}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-        {filteredNews.map((item) => (
-          <article key={item.id || item.title} className="overflow-hidden border border-white/10 bg-white/[0.04] hover:border-lime-400/40">
-            <NewsImage item={item} />
-            <div className="p-6">
-              <div className="mb-4 flex items-center justify-between gap-3 text-sm">
-                <span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category}</span>
-                <span className="text-slate-500">{item.time}</span>
-              </div>
-              <h2 className="text-xl font-black leading-tight">{item.title}</h2>
-              <p className="mt-4 leading-7 text-slate-400">{item.summary}</p>
-              {item.url && item.url !== "#" && <a href={item.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">Read from {item.source}</a>}
-            </div>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
+function NotFound({ title = "Page not found", text = "The page could not be loaded yet." }) {
+  return <section className="mx-auto max-w-7xl px-5 py-20 md:px-6"><h1 className="text-4xl font-black">{title}</h1><p className="mt-4 text-slate-400">{text}</p></section>;
 }
 
 function ResponsibleFooter() {
-  return (
-    <footer className="border-t border-white/10 px-5 py-8 text-sm text-slate-500 md:px-6">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-4 flex items-center gap-2 text-slate-300"><ShieldCheck size={18} /> Responsible Play</div>
-        <p className="max-w-4xl">18+ only. Tennis predictions are analytical opinions based on available information and are not guaranteed outcomes. Betting involves risk. Never bet more than you can afford to lose.</p>
-      </div>
-    </footer>
-  );
+  return <footer className="border-t border-white/10 px-5 py-8 text-sm text-slate-500 md:px-6"><div className="mx-auto max-w-7xl"><div className="mb-4 flex items-center gap-2 text-slate-300"><ShieldCheck size={18} /> Responsible Play</div><p className="max-w-4xl">18+ only. Tennis predictions are analytical opinions based on available information and are not guaranteed outcomes. Betting involves risk. Never bet more than you can afford to lose.</p></div></footer>;
 }
 
 export default function TennisTipzApp() {
-  const [activePage, setActivePage] = useState(() => pageFromPath(window.location.pathname));
+  const [route, setRoute] = useState(() => getRoute(window.location.pathname));
   const [liveData, setLiveData] = useState(initialLiveData);
+  const [dbData, setDbData] = useState(initialDbData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  function navigateToPage(pageId) {
-    const nextPage = pages.find((page) => page.id === pageId) || pages[0];
-    setActivePage(nextPage.id);
-    if (window.location.pathname !== nextPage.path) {
-      window.history.pushState({ pageId: nextPage.id }, "", nextPage.path);
-    }
+  function navigateTo(path) {
+    if (window.location.pathname !== path) window.history.pushState({}, "", path);
+    setRoute(getRoute(path));
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function loadLiveData() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`/api/live-data?ts=${Date.now()}`);
-      if (!response.ok) throw new Error(`Live data returned ${response.status}`);
-      const payload = await response.json();
-      setLiveData({
-        generatedAt: payload.generatedAt || null,
-        source: payload.source || initialLiveData.source,
-        betUrl: payload.betUrl || defaultBetUrl,
-        matches: Array.isArray(payload.matches) ? payload.matches : fallbackMatches,
-        players: payload.players?.length ? payload.players : fallbackPlayers,
-        news: payload.news?.length ? payload.news : fallbackNews,
-        errors: payload.errors || [],
-      });
-      if (payload.errors?.length) setError("Some live feeds used fallback data.");
+      const [liveResponse, summaryResponse, recordResponse, matchPagesResponse, atpPlayersResponse, wtaPlayersResponse] = await Promise.allSettled([
+        fetch(`/api/live-data?ts=${Date.now()}`),
+        fetch("/api/db/summary"),
+        fetch("/api/db/record"),
+        fetch("/api/db/match-pages?limit=100"),
+        fetch("/api/db/player-pages?tour=ATP&limit=500"),
+        fetch("/api/db/player-pages?tour=WTA&limit=500"),
+      ]);
+
+      if (liveResponse.status === "fulfilled" && liveResponse.value.ok) {
+        const payload = await liveResponse.value.json();
+        setLiveData({ generatedAt: payload.generatedAt || null, source: payload.source || initialLiveData.source, betUrl: payload.betUrl || cloudbetUrl, matches: Array.isArray(payload.matches) ? payload.matches : fallbackMatches, players: payload.players?.length ? payload.players : fallbackPlayers, news: payload.news?.length ? payload.news : fallbackNews, errors: payload.errors || [] });
+        if (payload.errors?.length) setError("Some live feeds used fallback data.");
+      } else {
+        setLiveData(initialLiveData);
+        setError("Live feed unavailable. Showing fallback data.");
+      }
+
+      const nextDbData = { ...initialDbData };
+      if (summaryResponse.status === "fulfilled" && summaryResponse.value.ok) nextDbData.summary = await summaryResponse.value.json();
+      if (recordResponse.status === "fulfilled" && recordResponse.value.ok) { const payload = await recordResponse.value.json(); nextDbData.record = payload; nextDbData.recentResults = payload.recent || []; }
+      if (matchPagesResponse.status === "fulfilled" && matchPagesResponse.value.ok) { const payload = await matchPagesResponse.value.json(); nextDbData.matchPages = payload.matches || []; }
+      const players = [];
+      if (atpPlayersResponse.status === "fulfilled" && atpPlayersResponse.value.ok) players.push(...((await atpPlayersResponse.value.json()).players || []));
+      if (wtaPlayersResponse.status === "fulfilled" && wtaPlayersResponse.value.ok) players.push(...((await wtaPlayersResponse.value.json()).players || []));
+      nextDbData.playerPages = players;
+      setDbData(nextDbData);
     } catch (loadError) {
       setLiveData(initialLiveData);
       setError(loadError.message);
@@ -562,31 +558,9 @@ export default function TennisTipzApp() {
     }
   }
 
-  useEffect(() => {
-    loadLiveData();
-  }, []);
+  useEffect(() => { loadLiveData(); }, []);
+  useEffect(() => { updateDocumentSeo(route, dbData); updateStructuredData(route, liveData, dbData); }, [route, liveData, dbData]);
+  useEffect(() => { const onPopState = () => setRoute(getRoute(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
 
-  useEffect(() => {
-    updateDocumentSeo(activePage);
-  }, [activePage]);
-
-  useEffect(() => {
-    const onPopState = () => setActivePage(pageFromPath(window.location.pathname));
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <Header activePage={activePage} onNavigate={navigateToPage} />
-      <DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} />
-      <main>
-        {activePage === "home" && <HomePage onNavigate={navigateToPage} liveData={liveData} />}
-        {activePage === "predictions" && <PredictionsPage matches={liveData.matches} betUrl={liveData.betUrl} />}
-        {activePage === "stats" && <StatsPage players={liveData.players} />}
-        {activePage === "news" && <NewsPage news={liveData.news} />}
-      </main>
-      <ResponsibleFooter />
-    </div>
-  );
+  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "record" && <RecordPage dbData={dbData} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} />}{route.id === "betting" && <BettingHubPage />}</main><ResponsibleFooter /></div>;
 }
