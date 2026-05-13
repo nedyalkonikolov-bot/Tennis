@@ -6,6 +6,7 @@ const DEFAULT_NEWS_IMAGE = "https://images.tennis.com/image/upload/t_q-best/tenn
 const PLAYER_CACHE_KEY = "players:standings:v1";
 const PLAYER_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PLAYER_LIMIT = 500;
+const RECENT_FORM_DAYS = 100;
 const BLOCKED_RE = /\b(simulated|simulation|virtual|srl|reality league|itf|utr|challenger|exhibition|junior|boys|girls|college|davis|billie|hopman)\b/i;
 
 const fallbackPlayers = [
@@ -111,6 +112,57 @@ function extractOdds(event) {
 function implied(odds) { const homeOdds = asFloat(odds?.home); const awayOdds = asFloat(odds?.away); if (!homeOdds || !awayOdds) return { home: 50, away: 50, edge: 0 }; const homeRaw = 1 / homeOdds; const awayRaw = 1 / awayOdds; const total = homeRaw + awayRaw; const home = Math.round((homeRaw / total) * 1000) / 10; const away = Math.round((awayRaw / total) * 1000) / 10; return { home, away, edge: Math.round((home - away) * 10) / 10 }; }
 function profileFor(players, name, tour) { return players.find((player) => player.tour === tour && namesLookSimilar(player.name, name)) || null; }
 function surfaceRating(profile, surface) { if (!profile) return 50; return asInt(profile[String(surface).toLowerCase()], profile.form || 50); }
+function emptyRecentForm() { return { wins: 0, losses: 0, matches: 0, winRate: 50 }; }
+async function storedRecentForm(env, tour, name) {
+  if (!env.TENNIS_DB || !tour || !name) return emptyRecentForm();
+  try {
+    const row = await env.TENNIS_DB.prepare(`
+      SELECT
+        SUM(CASE WHEN prm.result = 'win' THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN prm.result = 'loss' THEN 1 ELSE 0 END) AS losses,
+        COUNT(*) AS matches
+      FROM player_recent_matches prm
+      JOIN players p ON p.id = prm.player_id
+      WHERE p.tour = ? AND p.normalized_name = ? AND prm.match_date >= date('now', '-${RECENT_FORM_DAYS} days')
+    `).bind(tour, normalizeName(name)).first();
+    const wins = Number(row?.wins || 0);
+    const losses = Number(row?.losses || 0);
+    const matches = Number(row?.matches || wins + losses);
+    return { wins, losses, matches, winRate: matches ? Math.round((wins / matches) * 1000) / 10 : 50 };
+  } catch {
+    return emptyRecentForm();
+  }
+}
+async function enrichMatchesWithRecentForm(env, matches, diagnostics) {
+  if (!env.TENNIS_DB || !matches.length) {
+    diagnostics.recentFormSource = env.TENNIS_DB ? "empty" : "missing D1";
+    diagnostics.recentFormPlayersFound = 0;
+    return matches;
+  }
+  let found = 0;
+  const enriched = [];
+  for (const match of matches) {
+    const [recentA, recentB] = await Promise.all([
+      storedRecentForm(env, match.tour, match.playerA),
+      storedRecentForm(env, match.tour, match.playerB),
+    ]);
+    if (recentA.matches) found += 1;
+    if (recentB.matches) found += 1;
+    const formA = recentA.matches ? recentA.winRate : 50;
+    const formB = recentB.matches ? recentB.winRate : 50;
+    enriched.push({
+      ...match,
+      formA,
+      formB,
+      recentA,
+      recentB,
+      returnEdge: Math.round((formA - formB) * 10) / 10,
+    });
+  }
+  diagnostics.recentFormSource = "D1 player_recent_matches";
+  diagnostics.recentFormPlayersFound = found;
+  return enriched;
+}
 function makePrediction(event, odds, profileA, profileB) {
   const surface = inferSurface(event);
   const prob = implied(odds);
@@ -130,7 +182,7 @@ function normalizeMatch(event, odds, players, betUrl) {
   const profileB = profileFor(players, event.away.name, tour);
   const prediction = makePrediction(event, odds, profileA, profileB);
   const startDate = event.startTime || event.cutoffTime || "";
-  return { id: String(event.id || event.key), tournament: event.competition?.name || event.name || "Cloudbet Tennis", startTime: startDate ? new Date(startDate).toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Available now", playerA: event.home.name, playerB: event.away.name, surface: inferSurface(event), market: `${prediction.predictedWinner} to Win`, formA: 50, formB: 50, recentA: { wins: 0, losses: 0, matches: 0, winRate: 50 }, recentB: { wins: 0, losses: 0, matches: 0, winRate: 50 }, rankA: profileA?.rank || null, rankB: profileB?.rank || null, pointsA: profileA?.points || 0, pointsB: profileB?.points || 0, serveHoldA: profileA?.hold || 75, serveHoldB: profileB?.hold || 75, returnEdge: 0, h2hEdge: 0, odds: prediction.predictedWinnerOdds, oddsSource: "Cloudbet", cloudbetOdds: odds, predictedWinner: prediction.predictedWinner, predictedSide: prediction.predictedSide, predictedWinnerOdds: prediction.predictedWinnerOdds, confidence: prediction.confidence, modelEdge: prediction.modelEdge, predictionFactors: prediction.factors, status: isLive(event) ? "Live" : "Scheduled", score: "", live: isLive(event), tour, doubles: isDoubles(event), betUrl };
+  return { id: String(event.id || event.key), tournament: event.competition?.name || event.name || "Cloudbet Tennis", startTime: startDate ? new Date(startDate).toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Available now", playerA: event.home.name, playerB: event.away.name, playerAKey: profileA?.playerKey || "", playerBKey: profileB?.playerKey || "", surface: inferSurface(event), market: `${prediction.predictedWinner} to Win`, formA: 50, formB: 50, recentA: emptyRecentForm(), recentB: emptyRecentForm(), rankA: profileA?.rank || null, rankB: profileB?.rank || null, pointsA: profileA?.points || 0, pointsB: profileB?.points || 0, serveHoldA: profileA?.hold || 75, serveHoldB: profileB?.hold || 75, returnEdge: 0, h2hEdge: 0, odds: prediction.predictedWinnerOdds, oddsSource: "Cloudbet", cloudbetOdds: odds, predictedWinner: prediction.predictedWinner, predictedSide: prediction.predictedSide, predictedWinnerOdds: prediction.predictedWinnerOdds, confidence: prediction.confidence, modelEdge: prediction.modelEdge, predictionFactors: prediction.factors, status: isLive(event) ? "Live" : "Scheduled", score: "", live: isLive(event), tour, doubles: isDoubles(event), betUrl };
 }
 async function getCloudbetMatches(env, players, betUrl, diagnostics) {
   const sport = await fetchCloudbet(env, "/sports/tennis");
@@ -162,7 +214,7 @@ async function getCloudbetMatches(env, players, betUrl, diagnostics) {
   diagnostics.singlesMatchCount = matches.filter((match) => !match.doubles).length;
   diagnostics.doublesMatchCount = matches.filter((match) => match.doubles).length;
   diagnostics.derivedWinnerAndTotalCount = matches.filter((match) => match.cloudbetOdds.marketKey === "tennis.winner_and_total").length;
-  return matches;
+  return enrichMatchesWithRecentForm(env, matches, diagnostics);
 }
 
 function rssTag(item, tag) { return cleanText(item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`, "i"))?.[1] || ""); }
@@ -182,7 +234,7 @@ async function getNews() {
 export async function onRequestGet({ env }) {
   const betUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_BET_URL).trim();
   const errors = [];
-  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasPlayerCache: Boolean(getPlayerCache(env)), predictionSource: "Cloudbet ATP/WTA match markets. Direct tennis.winner when available; derived winner side from tennis.winner_and_total when direct winner is absent.", playerStats: "Top 500 ATP + Top 500 WTA", newsProvider: "Tennis.com RSS" };
+  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasPlayerCache: Boolean(getPlayerCache(env)), hasD1: Boolean(env.TENNIS_DB), predictionSource: "Cloudbet ATP/WTA match markets. Direct tennis.winner when available; derived winner side from tennis.winner_and_total when direct winner is absent.", playerStats: "Top 500 ATP + Top 500 WTA", newsProvider: "Tennis.com RSS" };
   let players = [];
   let matches = [];
   let news = [];
