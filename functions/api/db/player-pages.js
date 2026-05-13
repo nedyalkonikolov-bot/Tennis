@@ -38,17 +38,24 @@ export async function onRequestGet({ request, env }) {
       p.current_rank,
       p.points,
       p.movement,
+      p.player_bday,
+      p.player_logo,
       p.updated_at,
       COALESCE(r.recent_matches, 0) AS recent_matches,
       COALESCE(r.recent_wins, 0) AS recent_wins,
       COALESCE(r.recent_losses, 0) AS recent_losses,
       CASE WHEN COALESCE(r.recent_matches, 0) > 0 THEN ROUND((r.recent_wins * 1000.0 / r.recent_matches)) / 10.0 ELSE NULL END AS recent_win_rate,
-      CASE WHEN COALESCE(r.recent_matches, 0) > 0 THEN ROUND((r.recent_wins * 1000.0 / r.recent_matches)) / 10.0 ELSE NULL END AS form_rating,
-      NULL AS hold_rate,
-      NULL AS break_rate,
-      NULL AS clay_rating,
-      NULL AS hard_rating,
-      NULL AS grass_rating,
+      s.season AS season,
+      s.season_rank,
+      s.titles,
+      s.matches_won,
+      s.matches_lost,
+      s.hard_won,
+      s.hard_lost,
+      s.clay_won,
+      s.clay_lost,
+      s.grass_won,
+      s.grass_lost,
       COALESCE(r.recent_matches, 0) AS stored_matches,
       COALESCE(r.recent_wins, 0) AS stored_wins,
       (SELECT COUNT(*) FROM predictions pr JOIN matches m ON m.id = pr.match_id WHERE m.player_a_id = p.id OR m.player_b_id = p.id) AS prediction_mentions
@@ -63,6 +70,12 @@ export async function onRequestGet({ request, env }) {
       WHERE match_date >= date('now', '-100 days') AND source = 'api-tennis-fixtures'
       GROUP BY player_id
     ) r ON r.player_id = p.id
+    LEFT JOIN player_season_stats s ON s.id = (
+      SELECT id FROM player_season_stats
+      WHERE player_id = p.id AND type = 'singles'
+      ORDER BY CAST(season AS INTEGER) DESC
+      LIMIT 1
+    )
     ${where}
     ORDER BY p.tour ASC, COALESCE(p.current_rank, 999999) ASC, p.name ASC
     LIMIT ?
@@ -74,5 +87,5 @@ export async function onRequestGet({ request, env }) {
     url: `/players/${String(row.tour || "atp").toLowerCase()}/${slugify(row.name)}/`,
   }));
 
-  return jsonResponse({ ok: true, generatedAt: new Date().toISOString(), statSource: "API-Tennis standings plus 100-day fixture results from player_recent_matches", players });
+  return jsonResponse({ ok: true, generatedAt: new Date().toISOString(), statSource: "API-Tennis standings, get_players season stats, and 100-day fixture results", players });
 }
