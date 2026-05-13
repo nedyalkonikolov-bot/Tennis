@@ -10,6 +10,14 @@ async function count(db, table) {
   return row?.count || 0;
 }
 
+async function safeCount(db, table) {
+  try {
+    return await count(db, table);
+  } catch {
+    return 0;
+  }
+}
+
 export async function onRequestGet({ env }) {
   if (!env.TENNIS_DB) return jsonResponse({ ok: false, error: "Missing TENNIS_DB D1 binding" }, 500);
   const db = env.TENNIS_DB;
@@ -28,6 +36,7 @@ export async function onRequestGet({ env }) {
     counts: {
       players: await count(db, "players"),
       playerStatSnapshots: await count(db, "player_stat_snapshots"),
+      playerRecentMatches: await safeCount(db, "player_recent_matches"),
       matches: await count(db, "matches"),
       predictions: await count(db, "predictions"),
       settledOutcomes: accuracy?.settled || 0,
