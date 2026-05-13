@@ -1,0 +1,21 @@
+name: Daily TennisTipz database sync
+
+on:
+  schedule:
+    - cron: "15 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync-database:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync TennisTipz D1 database
+        env:
+          SYNC_TOKEN: ${{ secrets.TENNISTIPZ_DATABASE_SYNC_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "Missing TENNISTIPZ_DATABASE_SYNC_TOKEN secret"
+            exit 1
+          fi
+          curl --fail-with-body -X POST "https://tennistipz.win/api/db/sync" \
+            -H "x-sync-token: $SYNC_TOKEN"
