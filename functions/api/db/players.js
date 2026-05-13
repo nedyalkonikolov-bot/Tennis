@@ -34,35 +34,37 @@ export async function onRequestGet({ request, env }) {
       p.current_rank,
       p.points,
       p.movement,
-      p.form_rating,
-      p.hold_rate,
-      p.break_rate,
-      p.clay_rating,
-      p.hard_rating,
-      p.grass_rating,
       p.source,
       p.updated_at,
-      (
-        SELECT COUNT(*)
-        FROM matches m
-        WHERE m.player_a_id = p.id OR m.player_b_id = p.id
-      ) AS stored_matches,
-      (
-        SELECT COUNT(*)
-        FROM matches m
-        WHERE m.winner_player_id = p.id
-      ) AS stored_wins,
-      (
-        SELECT COUNT(*)
-        FROM player_stat_snapshots s
-        WHERE s.player_id = p.id
-      ) AS snapshots
+      COALESCE(r.recent_matches, 0) AS recent_matches,
+      COALESCE(r.recent_wins, 0) AS recent_wins,
+      COALESCE(r.recent_losses, 0) AS recent_losses,
+      CASE WHEN COALESCE(r.recent_matches, 0) > 0 THEN ROUND((r.recent_wins * 1000.0 / r.recent_matches)) / 10.0 ELSE NULL END AS recent_win_rate,
+      CASE WHEN COALESCE(r.recent_matches, 0) > 0 THEN ROUND((r.recent_wins * 1000.0 / r.recent_matches)) / 10.0 ELSE NULL END AS form_rating,
+      NULL AS hold_rate,
+      NULL AS break_rate,
+      NULL AS clay_rating,
+      NULL AS hard_rating,
+      NULL AS grass_rating,
+      COALESCE(r.recent_matches, 0) AS stored_matches,
+      COALESCE(r.recent_wins, 0) AS stored_wins,
+      (SELECT COUNT(*) FROM player_stat_snapshots s WHERE s.player_id = p.id) AS snapshots
     FROM players p
+    LEFT JOIN (
+      SELECT
+        player_id,
+        COUNT(*) AS recent_matches,
+        SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) AS recent_wins,
+        SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) AS recent_losses
+      FROM player_recent_matches
+      WHERE match_date >= date('now', '-100 days') AND source = 'api-tennis-fixtures'
+      GROUP BY player_id
+    ) r ON r.player_id = p.id
     ${where}
     ORDER BY p.tour ASC, COALESCE(p.current_rank, 999999) ASC, p.name ASC
     LIMIT ?
   `);
 
   const result = await statement.bind(...bindings, limit).all();
-  return jsonResponse({ ok: true, generatedAt: new Date().toISOString(), players: result.results || [] });
+  return jsonResponse({ ok: true, generatedAt: new Date().toISOString(), statSource: "API-Tennis standings plus 100-day fixture results from player_recent_matches", players: result.results || [] });
 }
