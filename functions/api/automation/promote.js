@@ -1,5 +1,6 @@
 const SITE_URL = "https://www.tennistipz.win";
 const SITEMAP_URL = `${SITE_URL}/sitemap.xml`;
+const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters";
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -23,6 +24,67 @@ function slugify(value = "") {
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "match";
+}
+
+function base64Url(input) {
+  const bytes = input instanceof ArrayBuffer ? new Uint8Array(input) : new TextEncoder().encode(input);
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function pemToArrayBuffer(pem) {
+  const clean = String(pem || "")
+    .replace(/\\n/g, "\n")
+    .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+    .replace(/-----END PRIVATE KEY-----/g, "")
+    .replace(/\s+/g, "");
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes.buffer;
+}
+
+async function signJwt(env) {
+  const email = env.GOOGLE_SERVICE_ACCOUNT_EMAIL || env.GSC_SERVICE_ACCOUNT_EMAIL;
+  const privateKey = env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || env.GSC_SERVICE_ACCOUNT_PRIVATE_KEY;
+  if (!email || !privateKey) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claim = base64Url(JSON.stringify({
+    iss: email,
+    scope: GSC_SCOPE,
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600,
+  }));
+  const unsigned = `${header}.${claim}`;
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pemToArrayBuffer(privateKey),
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(unsigned));
+  return `${unsigned}.${base64Url(signature)}`;
+}
+
+async function getGoogleAccessToken(env) {
+  const directToken = env.GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN || env.GSC_ACCESS_TOKEN;
+  if (directToken) return { token: directToken, source: "access-token" };
+
+  const assertion = await signJwt(env);
+  if (!assertion) return null;
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.access_token) return { error: true, status: response.status, payload };
+  return { token: payload.access_token, source: "service-account" };
 }
 
 function truncateTweet(text) {
@@ -98,17 +160,18 @@ async function postTweet(env, text) {
 }
 
 async function submitSitemapToGoogle(env) {
-  const token = env.GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN || env.GSC_ACCESS_TOKEN;
-  if (!token) return { skipped: true, reason: "Missing GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN" };
+  const tokenResult = await getGoogleAccessToken(env);
+  if (!tokenResult) return { skipped: true, reason: "Missing GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN or service account env vars" };
+  if (tokenResult.error) return { ok: false, phase: "token", status: tokenResult.status, response: tokenResult.payload };
 
   const site = encodeURIComponent(`${SITE_URL}/`);
   const sitemap = encodeURIComponent(SITEMAP_URL);
   const response = await fetch(`https://www.googleapis.com/webmasters/v3/sites/${site}/sitemaps/${sitemap}`, {
     method: "PUT",
-    headers: { authorization: `Bearer ${token}` },
+    headers: { authorization: `Bearer ${tokenResult.token}` },
   });
   const text = await response.text();
-  return { ok: response.ok, status: response.status, response: text || null, sitemap: SITEMAP_URL };
+  return { ok: response.ok, status: response.status, auth: tokenResult.source, response: text || null, sitemap: SITEMAP_URL };
 }
 
 async function promote(request, env) {
@@ -152,7 +215,7 @@ async function promote(request, env) {
     google,
     setupRequired: {
       twitter: !(env.TWITTER_BEARER_TOKEN || env.X_BEARER_TOKEN || env.TWITTER_ACCESS_TOKEN || env.X_ACCESS_TOKEN),
-      googleSearchConsole: !(env.GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN || env.GSC_ACCESS_TOKEN),
+      googleSearchConsole: !(env.GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN || env.GSC_ACCESS_TOKEN || ((env.GOOGLE_SERVICE_ACCOUNT_EMAIL || env.GSC_SERVICE_ACCOUNT_EMAIL) && (env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || env.GSC_SERVICE_ACCOUNT_PRIVATE_KEY))),
     },
   });
 }
