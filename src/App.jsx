@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
-  CheckCircle2,
   ExternalLink,
   Gauge,
   Home,
@@ -27,7 +26,6 @@ const stakeUrl = "https://stake.com/?c=NOYIoKcY";
 const navPages = [
   { id: "home", label: "Home", path: "/", icon: Home },
   { id: "predictions", label: "Predictions", path: "/tennis-predictions/", icon: Target },
-  { id: "record", label: "Record", path: "/prediction-record/", icon: CheckCircle2 },
   { id: "stats", label: "Player Stats", path: "/player-stats/", icon: Users },
   { id: "news", label: "News", path: "/tennis-news/", icon: Newspaper },
   { id: "betting", label: "Betting Sites", path: "/betting-sites/", icon: Landmark },
@@ -43,11 +41,6 @@ const pageMeta = {
     title: "Tennis Predictions Today | Cloudbet Odds & Crypto Tennis Betting Tips",
     description: "Daily ATP and WTA tennis predictions with Cloudbet odds, player form, ranking signals, surface ratings, and crypto betting context.",
     canonical: "/tennis-predictions/",
-  },
-  record: {
-    title: "TennisTipz Prediction Record | Tennis Betting Accuracy Tracker",
-    description: "Track TennisTipz prediction results, settled picks, ATP and WTA accuracy, surface performance, and recent match outcomes.",
-    canonical: "/prediction-record/",
   },
   stats: {
     title: "ATP & WTA Player Stats | Tennis Betting Form, Rankings & Surfaces",
@@ -398,7 +391,6 @@ function HomePage({ onNavigate, liveData, dbData }) {
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button type="button" onClick={() => onNavigate("/tennis-predictions/")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 shadow-xl shadow-lime-400/20 hover:bg-lime-300">View Predictions</button>
             <button type="button" onClick={() => onNavigate("/player-stats/")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">Compare Players</button>
-            <button type="button" onClick={() => onNavigate("/prediction-record/")} className="rounded-xl border border-lime-400/40 px-6 py-4 font-bold text-lime-200 hover:bg-lime-400/10">Prediction Record</button>
           </div>
           <p className="mt-4 text-xs text-slate-500">18+. Tips are opinions, not guaranteed outcomes. Bet responsibly.</p>
         </div>
@@ -544,10 +536,9 @@ export default function TennisTipzApp() {
     setLoading(true);
     setError("");
     try {
-      const [liveResponse, summaryResponse, recordResponse, matchPagesResponse, atpPlayersResponse, wtaPlayersResponse] = await Promise.allSettled([
+      const [liveResponse, summaryResponse, matchPagesResponse, atpPlayersResponse, wtaPlayersResponse] = await Promise.allSettled([
         fetch(`/api/live-data?ts=${Date.now()}`),
         fetch("/api/db/summary"),
-        fetch("/api/db/record"),
         fetch("/api/db/match-pages?limit=100"),
         fetch("/api/db/player-pages?tour=ATP&limit=500"),
         fetch("/api/db/player-pages?tour=WTA&limit=500"),
@@ -564,7 +555,6 @@ export default function TennisTipzApp() {
 
       const nextDbData = { ...initialDbData };
       if (summaryResponse.status === "fulfilled" && summaryResponse.value.ok) nextDbData.summary = await summaryResponse.value.json();
-      if (recordResponse.status === "fulfilled" && recordResponse.value.ok) { const payload = await recordResponse.value.json(); nextDbData.record = payload; nextDbData.recentResults = payload.recent || []; }
       if (matchPagesResponse.status === "fulfilled" && matchPagesResponse.value.ok) { const payload = await matchPagesResponse.value.json(); nextDbData.matchPages = payload.matches || []; }
       const players = [];
       if (atpPlayersResponse.status === "fulfilled" && atpPlayersResponse.value.ok) players.push(...((await atpPlayersResponse.value.json()).players || []));
@@ -583,5 +573,5 @@ export default function TennisTipzApp() {
   useEffect(() => { updateDocumentSeo(route, dbData); updateStructuredData(route, liveData, dbData); }, [route, liveData, dbData]);
   useEffect(() => { const onPopState = () => setRoute(getRoute(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
 
-  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "record" && <RecordPage dbData={dbData} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} />}{route.id === "betting" && <BettingHubPage />}</main><ResponsibleFooter /></div>;
+  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} />}{route.id === "betting" && <BettingHubPage />}</main><ResponsibleFooter /></div>;
 }
