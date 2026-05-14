@@ -1,6 +1,14 @@
 const SITE_URL = "https://www.tennistipz.win";
 const SITEMAP_URL = `${SITE_URL}/sitemap.xml`;
 const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters";
+const REFERRAL_LINKS = [
+  {
+    name: "Cloudbet",
+    url: "https://cldbt.cloud/go/en/landing/bitcoin-betting?af_token=ecea0a0896472c99ee3ff23d7fae8483&aftm_campaign=Tennis&aftm_source=tennistipz.win&aftm_medium=organic&aftm_content=Predictions&aftm_cid=4",
+  },
+  { name: "BC.Game", url: "https://bc.game/i-9767ib363b-n/" },
+  { name: "Stake", url: "https://stake.com/?c=NOYIoKcY" },
+];
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -91,13 +99,21 @@ function truncateTweet(text) {
   return text.length <= 275 ? text : `${text.slice(0, 272).trim()}...`;
 }
 
+function chooseReferralLink(match) {
+  if (match.predicted_odds) return REFERRAL_LINKS[0];
+  const key = String(match.prediction_id || match.match_id || "");
+  const total = [...key].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return REFERRAL_LINKS[total % REFERRAL_LINKS.length];
+}
+
 function composeTweet(match) {
   const url = `${SITE_URL}/predictions/${slugify(`${match.tour} ${match.player_a_name} vs ${match.player_b_name}`)}/`;
+  const referral = chooseReferralLink(match);
   const pick = match.predicted_winner_name || "value watch";
   const confidence = match.confidence ? `${match.confidence}%` : "model";
   const odds = match.predicted_odds ? ` Odds ${match.predicted_odds}.` : "";
-  const text = `${match.player_a_name} vs ${match.player_b_name}\n\nAI tennis prediction: ${pick} (${confidence} confidence).${odds}\n\n${url}\n\n18+ Bet responsibly. #TennisBetting #TennisTips #CryptoBetting`;
-  return { text: truncateTweet(text), url };
+  const text = `${match.player_a_name} vs ${match.player_b_name}\n\nAI tennis prediction: ${pick} (${confidence} confidence).${odds}\n\nPreview: ${url}\nBet: ${referral.url}\n\n18+ Bet responsibly. #TennisBetting #TennisTips #CryptoBetting`;
+  return { text: truncateTweet(text), url, referral };
 }
 
 async function ensureAutomationTable(db) {
@@ -190,12 +206,12 @@ async function promote(request, env) {
   for (const match of matches) {
     const tweet = composeTweet(match);
     if (dryRun) {
-      tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, text: tweet.text });
+      tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, text: tweet.text });
       continue;
     }
 
     const result = await postTweet(env, tweet.text);
-    tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, result });
+    tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, result });
 
     if (result.ok) {
       await db.prepare(`
