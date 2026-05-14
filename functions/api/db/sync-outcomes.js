@@ -121,6 +121,29 @@ async function findStoredRecentOutcome(db, prediction, daysBack) {
   return null;
 }
 
+async function findPlayerFixtureOutcome(env, prediction, daysBack) {
+  const playerKey = prediction.player_a_key || prediction.player_b_key;
+  if (!playerKey) return null;
+
+  const fixtures = await fetchApiTennis(env, "get_fixtures", {
+    player_key: playerKey,
+    date_start: todayIsoDate(-daysBack),
+    date_stop: todayIsoDate(),
+  });
+
+  const event = fixtures.filter(isFinishedEvent).find((candidate) => eventMatchesPrediction(candidate, prediction));
+  if (!event) return null;
+
+  const actualWinnerName = getApiTennisWinnerName(event);
+  const actualNormalized = normalizeName(actualWinnerName);
+  return {
+    winnerName: actualWinnerName,
+    winnerId: actualNormalized === normalizeName(prediction.player_a_name) ? prediction.player_a_id : actualNormalized === normalizeName(prediction.player_b_name) ? prediction.player_b_id : null,
+    score: getApiTennisScore(event),
+    source: "api-tennis-player-fixtures",
+  };
+}
+
 async function settlePrediction(db, prediction, outcome) {
   const actualNormalized = normalizeName(outcome.winnerName);
   const predictedNormalized = normalizeName(prediction.predicted_winner_name);
@@ -149,7 +172,7 @@ async function syncOutcomes(request, env) {
 
   const url = new URL(request.url);
   const daysBack = Math.min(Math.max(Number.parseInt(url.searchParams.get("days") || "14", 10), 1), 30);
-  const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "250", 10), 1), 500);
+  const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "75", 10), 1), 150);
   const db = env.TENNIS_DB;
 
   const pending = await db.prepare(`
@@ -163,10 +186,14 @@ async function syncOutcomes(request, env) {
       m.player_a_id,
       m.player_b_id,
       m.player_a_name,
-      m.player_b_name
+      m.player_b_name,
+      pa.player_key AS player_a_key,
+      pb.player_key AS player_b_key
     FROM prediction_outcomes po
     JOIN predictions p ON p.id = po.prediction_id
     JOIN matches m ON m.id = po.match_id
+    LEFT JOIN players pa ON pa.id = m.player_a_id
+    LEFT JOIN players pb ON pb.id = m.player_b_id
     WHERE po.result_status = 'pending'
     ORDER BY p.created_at ASC
     LIMIT ?
@@ -186,6 +213,7 @@ async function syncOutcomes(request, env) {
   let correct = 0;
   let settledFromRecentMatches = 0;
   let settledFromFixtures = 0;
+  let settledFromPlayerFixtures = 0;
   const missed = [];
 
   for (const prediction of predictions) {
@@ -205,6 +233,9 @@ async function syncOutcomes(request, env) {
           source: "api-tennis-fixtures",
         };
         settledFromFixtures += 1;
+      } else {
+        outcome = await findPlayerFixtureOutcome(env, prediction, daysBack);
+        if (outcome) settledFromPlayerFixtures += 1;
       }
     }
 
@@ -220,7 +251,7 @@ async function syncOutcomes(request, env) {
 
   return jsonResponse({
     ok: true,
-    source: "player_recent_matches plus API-Tennis get_fixtures fallback",
+    source: "player_recent_matches plus API-Tennis fixture fallbacks",
     daysBack,
     checked: predictions.length,
     finishedEvents: finishedEvents.length,
@@ -228,6 +259,7 @@ async function syncOutcomes(request, env) {
     correct,
     settledFromRecentMatches,
     settledFromFixtures,
+    settledFromPlayerFixtures,
     missed: missed.slice(0, 50),
   });
 }
