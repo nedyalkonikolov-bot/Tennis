@@ -39,19 +39,24 @@ function buildAiPrediction(row) {
   const bSeasonMatches = asNumber(row.player_b_season_wins) + asNumber(row.player_b_season_losses);
   const aRank = row.player_a_rank ? `#${row.player_a_rank}` : "unranked";
   const bRank = row.player_b_rank ? `#${row.player_b_rank}` : "unranked";
+  const aPoints = asNumber(row.player_a_points, 0);
+  const bPoints = asNumber(row.player_b_points, 0);
   const strength = confidence >= 78 ? "strong AI lean" : confidence >= 68 ? "positive AI lean" : "measured AI lean";
+  const edgeText = `${edge > 0 ? "+" : ""}${edge.toFixed(1)}`;
 
   const reasons = [
     `${row.player_a_name} is ${aRank} with ${wl(row.player_a_recent_wins, row.player_a_recent_losses)} over the last 100 days (${pct(aRate)}).`,
     `${row.player_b_name} is ${bRank} with ${wl(row.player_b_recent_wins, row.player_b_recent_losses)} over the last 100 days (${pct(bRate)}).`,
     `The 2026 singles season sample is ${aSeasonMatches || 0} matches for ${row.player_a_name} and ${bSeasonMatches || 0} matches for ${row.player_b_name}.`,
-    `The model edge is ${edge > 0 ? "+" : ""}${edge.toFixed(1)} with ${surface} listed as the playing surface.`,
+    `Ranking points are ${aPoints || "not available"} for ${row.player_a_name} and ${bPoints || "not available"} for ${row.player_b_name}.`,
+    `The model edge is ${edgeText} with ${surface} listed as the playing surface.`,
+    `The current Cloudbet-linked price recorded for the pick is ${row.predicted_odds || "not available"}.`,
   ];
 
-  const summary = `AI pick: ${pick}. This is a ${strength} at ${confidence || "pending"}% confidence, combining Cloudbet price, ranking context, 2026 season record, 100-day form and surface signal.`;
+  const summary = `AI pick: ${pick}. This ${row.tour || "tennis"} prediction is a ${strength} at ${confidence || "pending"}% confidence after combining the Cloudbet market price, ranking context, 2026 season record, last-100-days form and the listed ${surface} surface. The model currently rates the matchup at ${edgeText} edge, which means the pick is being driven by the full comparison rather than a single stat. ${row.player_a_name} enters with a 100-day profile of ${wl(row.player_a_recent_wins, row.player_a_recent_losses)} while ${row.player_b_name} enters with ${wl(row.player_b_recent_wins, row.player_b_recent_losses)}, so recent form is part of the signal but not the only input. Use this page as a pre-match research hub: compare the AI pick, odds, ranking position, recent match load and season sample before deciding whether the price still has value.`;
   const bettingAngle = confidence >= 75
-    ? `The market and data profile both support ${pick}, but tennis volatility still makes stake sizing important.`
-    : `The model sees value on ${pick}, but the edge is moderate and should be treated as research rather than a high-conviction play.`;
+    ? `The market and data profile both support ${pick}, but tennis volatility still makes stake sizing important. A strong AI lean is not a guaranteed result; it simply means the current model sees enough agreement between price, form and ranking signals to mark this as one of the better research spots.`
+    : `The model sees value on ${pick}, but the edge is moderate and should be treated as research rather than a high-conviction play. Recheck late odds movement, player news and match timing before using this tennis prediction for any bet.`;
 
   return { summary, reasons, bettingAngle, strength, generatedAt: new Date().toISOString(), model: "TennisTipz AI v2" };
 }
