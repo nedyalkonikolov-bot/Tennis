@@ -1,6 +1,7 @@
 const SITE_URL = "https://www.tennistipz.win";
 const SITEMAP_URL = `${SITE_URL}/sitemap.xml`;
 const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters";
+const X_TWEET_URL = "https://api.twitter.com/2/tweets";
 const REFERRAL_LINKS = [
   {
     name: "Cloudbet",
@@ -24,6 +25,14 @@ function isAuthorized(request, env) {
   return token && token === env.DATABASE_SYNC_TOKEN;
 }
 
+function hasOAuth1(env) {
+  return Boolean(env.X_API_KEY && env.X_API_SECRET && env.X_ACCESS_TOKEN && env.X_ACCESS_TOKEN_SECRET);
+}
+
+function hasTwitterAuth(env) {
+  return hasOAuth1(env) || Boolean(env.TWITTER_BEARER_TOKEN || env.X_BEARER_TOKEN || env.TWITTER_ACCESS_TOKEN || env.X_ACCESS_TOKEN);
+}
+
 function slugify(value = "") {
   return String(value)
     .toLowerCase()
@@ -34,11 +43,23 @@ function slugify(value = "") {
     .replace(/^-+|-+$/g, "") || "match";
 }
 
+function oauthEncode(value) {
+  return encodeURIComponent(String(value))
+    .replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
 function base64Url(input) {
   const bytes = input instanceof ArrayBuffer ? new Uint8Array(input) : new TextEncoder().encode(input);
   let binary = "";
   bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary);
 }
 
 function pemToArrayBuffer(pem) {
@@ -51,6 +72,47 @@ function pemToArrayBuffer(pem) {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return bytes.buffer;
+}
+
+async function signHmacSha1(secret, value) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-1" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
+  return arrayBufferToBase64(signature);
+}
+
+async function buildOAuth1Header(env, method, requestUrl) {
+  const oauthParams = {
+    oauth_consumer_key: env.X_API_KEY,
+    oauth_nonce: crypto.randomUUID().replace(/-/g, ""),
+    oauth_signature_method: "HMAC-SHA1",
+    oauth_timestamp: Math.floor(Date.now() / 1000),
+    oauth_token: env.X_ACCESS_TOKEN,
+    oauth_version: "1.0",
+  };
+
+  const url = new URL(requestUrl);
+  const signatureParams = [...url.searchParams.entries(), ...Object.entries(oauthParams)]
+    .map(([key, value]) => [oauthEncode(key), oauthEncode(value)])
+    .sort(([leftKey, leftValue], [rightKey, rightValue]) => leftKey === rightKey ? leftValue.localeCompare(rightValue) : leftKey.localeCompare(rightKey))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("&");
+
+  const baseUrl = `${url.protocol}//${url.host}${url.pathname}`;
+  const baseString = [method.toUpperCase(), oauthEncode(baseUrl), oauthEncode(signatureParams)].join("&");
+  const signingKey = `${oauthEncode(env.X_API_SECRET)}&${oauthEncode(env.X_ACCESS_TOKEN_SECRET)}`;
+  const oauthSignature = await signHmacSha1(signingKey, baseString);
+  const headerParams = { ...oauthParams, oauth_signature: oauthSignature };
+
+  return `OAuth ${Object.entries(headerParams)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${oauthEncode(key)}="${oauthEncode(value)}"`)
+    .join(", ")}`;
 }
 
 async function signJwt(env) {
@@ -155,20 +217,26 @@ async function getPostableMatches(db, limit) {
 }
 
 async function postTweet(env, text) {
-  const token = env.TWITTER_BEARER_TOKEN || env.X_BEARER_TOKEN || env.TWITTER_ACCESS_TOKEN || env.X_ACCESS_TOKEN;
-  if (!token) return { skipped: true, reason: "Missing TWITTER_BEARER_TOKEN or X_BEARER_TOKEN" };
+  const headers = { "content-type": "application/json" };
+  let authType = "bearer";
 
-  const response = await fetch("https://api.twitter.com/2/tweets", {
+  if (hasOAuth1(env)) {
+    headers.authorization = await buildOAuth1Header(env, "POST", X_TWEET_URL);
+    authType = "oauth1";
+  } else {
+    const token = env.TWITTER_BEARER_TOKEN || env.X_BEARER_TOKEN || env.TWITTER_ACCESS_TOKEN || env.X_ACCESS_TOKEN;
+    if (!token) return { skipped: true, reason: "Missing X OAuth 1.0a credentials or bearer token" };
+    headers.authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(X_TWEET_URL, {
     method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-    },
+    headers,
     body: JSON.stringify({ text }),
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) return { ok: false, status: response.status, payload };
-  return { ok: true, status: response.status, payload };
+  if (!response.ok) return { ok: false, authType, status: response.status, payload };
+  return { ok: true, authType, status: response.status, payload };
 }
 
 async function submitSitemapToGoogle(env) {
@@ -226,7 +294,7 @@ async function promote(request, env) {
     tweets,
     google,
     setupRequired: {
-      twitter: !(env.TWITTER_BEARER_TOKEN || env.X_BEARER_TOKEN || env.TWITTER_ACCESS_TOKEN || env.X_ACCESS_TOKEN),
+      twitter: !hasTwitterAuth(env),
       googleSearchConsole: !(env.GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN || env.GSC_ACCESS_TOKEN || ((env.GOOGLE_SERVICE_ACCOUNT_EMAIL || env.GSC_SERVICE_ACCOUNT_EMAIL) && (env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || env.GSC_SERVICE_ACCOUNT_PRIVATE_KEY))),
     },
   });
