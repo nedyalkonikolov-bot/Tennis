@@ -95,10 +95,6 @@ async function getGoogleAccessToken(env) {
   return { token: payload.access_token, source: "service-account" };
 }
 
-function truncateTweet(text) {
-  return text.length <= 275 ? text : `${text.slice(0, 272).trim()}...`;
-}
-
 function chooseReferralLink(match) {
   if (match.predicted_odds) return REFERRAL_LINKS[0];
   const key = String(match.prediction_id || match.match_id || "");
@@ -113,7 +109,7 @@ function composeTweet(match) {
   const confidence = match.confidence ? `${match.confidence}%` : "model";
   const odds = match.predicted_odds ? ` Odds ${match.predicted_odds}.` : "";
   const text = `${match.player_a_name} vs ${match.player_b_name}\n\nAI tennis prediction: ${pick} (${confidence} confidence).${odds}\n\nPreview: ${url}\nBet: ${referral.url}\n\n18+ Bet responsibly. #TennisBetting #TennisTips #CryptoBetting`;
-  return { text: truncateTweet(text), url, referral };
+  return { text, url, referral };
 }
 
 async function ensureAutomationTable(db) {
