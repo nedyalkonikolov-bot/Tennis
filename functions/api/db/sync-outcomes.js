@@ -13,7 +13,7 @@ function normalizeName(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/&/g, " and ")
-    .replace(/[^a-z\s/]+/g, " ")
+    .replace(/[^a-z\s]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -92,7 +92,10 @@ function getApiTennisScore(event) {
 
 function isFinishedEvent(event) {
   const status = String(event.event_status || "").toLowerCase();
-  return status.includes("finish") || status.includes("ended") || Boolean(event.event_final_result);
+  const finalResult = String(event.event_final_result || "").trim();
+  const hasRealFinalResult = /\d/.test(finalResult) && !/^[-\s]+$/.test(finalResult);
+  const hasWinner = Boolean(normalizeName(getApiTennisWinnerName(event)));
+  return hasWinner && (status.includes("finish") || status.includes("ended") || hasRealFinalResult);
 }
 
 function unorderedNameMatch(a1, b1, a2, b2) {
@@ -109,6 +112,39 @@ function predictionWinnerId(prediction, winnerName) {
   if (looseNameMatch(winnerName, prediction.player_a_name)) return prediction.player_a_id;
   if (looseNameMatch(winnerName, prediction.player_b_name)) return prediction.player_b_id;
   return null;
+}
+
+function isUsableOutcome(outcome) {
+  return Boolean(outcome && normalizeName(outcome.winnerName) && outcome.winnerId);
+}
+
+async function repairEmptySettlements(db) {
+  const repaired = await db.prepare(`
+    UPDATE prediction_outcomes
+    SET actual_winner_id = NULL,
+        actual_winner_name = NULL,
+        result_status = 'pending',
+        correct = NULL,
+        score = NULL,
+        settled_at = NULL,
+        updated_at = datetime('now')
+    WHERE result_status = 'settled'
+      AND (actual_winner_name IS NULL OR TRIM(actual_winner_name) = '')
+  `).run();
+
+  await db.prepare(`
+    UPDATE matches
+    SET status = 'Scheduled', live = 0, score = NULL, winner_player_id = NULL, winner_name = NULL, updated_at = datetime('now')
+    WHERE winner_name IS NULL
+      AND (score IS NULL OR TRIM(score) = '-' OR TRIM(score) = '')
+      AND id IN (
+        SELECT match_id FROM prediction_outcomes
+        WHERE result_status = 'pending'
+          AND actual_winner_name IS NULL
+      )
+  `).run();
+
+  return repaired.meta?.changes || 0;
 }
 
 async function findStoredRecentOutcome(db, prediction, daysBack) {
@@ -184,6 +220,7 @@ async function syncOutcomes(request, env) {
   const daysBack = Math.min(Math.max(Number.parseInt(url.searchParams.get("days") || "14", 10), 1), 30);
   const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "75", 10), 1), 150);
   const db = env.TENNIS_DB;
+  const repairedEmptySettlements = await repairEmptySettlements(db);
 
   const pending = await db.prepare(`
     SELECT
@@ -211,7 +248,7 @@ async function syncOutcomes(request, env) {
 
   const predictions = pending.results || [];
   if (!predictions.length) {
-    return jsonResponse({ ok: true, checked: 0, settled: 0, correct: 0, missed: [] });
+    return jsonResponse({ ok: true, checked: 0, settled: 0, correct: 0, repairedEmptySettlements, missed: [] });
   }
 
   const events = await fetchApiTennis(env, "get_fixtures", {
@@ -229,7 +266,7 @@ async function syncOutcomes(request, env) {
   for (const prediction of predictions) {
     let outcome = await findStoredRecentOutcome(db, prediction, daysBack);
 
-    if (outcome) {
+    if (isUsableOutcome(outcome)) {
       settledFromRecentMatches += 1;
     } else {
       const event = finishedEvents.find((candidate) => eventMatchesPrediction(candidate, prediction));
@@ -241,14 +278,16 @@ async function syncOutcomes(request, env) {
           score: getApiTennisScore(event),
           source: "api-tennis-fixtures",
         };
-        settledFromFixtures += 1;
-      } else {
+        if (isUsableOutcome(outcome)) settledFromFixtures += 1;
+      }
+
+      if (!isUsableOutcome(outcome)) {
         outcome = await findPlayerFixtureOutcome(env, prediction, daysBack);
-        if (outcome) settledFromPlayerFixtures += 1;
+        if (isUsableOutcome(outcome)) settledFromPlayerFixtures += 1;
       }
     }
 
-    if (!outcome) {
+    if (!isUsableOutcome(outcome)) {
       missed.push({ prediction_id: prediction.prediction_id, match_id: prediction.match_id, title: `${prediction.player_a_name} vs ${prediction.player_b_name}` });
       continue;
     }
@@ -266,6 +305,7 @@ async function syncOutcomes(request, env) {
     finishedEvents: finishedEvents.length,
     settled,
     correct,
+    repairedEmptySettlements,
     settledFromRecentMatches,
     settledFromFixtures,
     settledFromPlayerFixtures,
