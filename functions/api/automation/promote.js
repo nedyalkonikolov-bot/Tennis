@@ -63,6 +63,7 @@ async function getPostableMatches(db, limit) {
       m.start_time,
       m.player_a_name,
       m.player_b_name,
+      p.id AS prediction_id,
       p.predicted_winner_name,
       p.confidence,
       p.predicted_odds,
@@ -126,18 +127,18 @@ async function promote(request, env) {
   for (const match of matches) {
     const tweet = composeTweet(match);
     if (dryRun) {
-      tweets.push({ dryRun: true, matchId: match.match_id, url: tweet.url, text: tweet.text });
+      tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, text: tweet.text });
       continue;
     }
 
     const result = await postTweet(env, tweet.text);
-    tweets.push({ matchId: match.match_id, url: tweet.url, result });
+    tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, result });
 
     if (result.ok) {
       await db.prepare(`
         INSERT OR IGNORE INTO automation_posts (id, platform, target_type, target_id, url, status, response_json)
         VALUES (?, 'twitter', 'prediction', ?, ?, 'posted', ?)
-      `).bind(crypto.randomUUID(), `${match.match_id}:twitter`, tweet.url, JSON.stringify(result.payload)).run();
+      `).bind(crypto.randomUUID(), match.prediction_id, tweet.url, JSON.stringify(result.payload)).run();
     }
   }
 
