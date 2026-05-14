@@ -57,11 +57,6 @@ function getEventPlayer(event, side) {
   };
 }
 
-function getEventDate(event) {
-  const value = event.event_date || event.date || event.event_start_time || "";
-  return String(value).slice(0, 10);
-}
-
 function getApiTennisWinnerName(event) {
   const winner = String(event.event_winner || "").toLowerCase();
   if (winner.includes("first")) return getEventPlayer(event, "first").name;
@@ -93,13 +88,67 @@ function eventMatchesPrediction(event, prediction) {
   return unorderedNameMatch(first, second, prediction.player_a_name, prediction.player_b_name);
 }
 
+async function findStoredRecentOutcome(db, prediction, daysBack) {
+  const rows = await db.prepare(`
+    SELECT player_id, opponent_name, score, result, match_date
+    FROM player_recent_matches
+    WHERE match_date >= date('now', ?)
+      AND (
+        (player_id = ? AND LOWER(opponent_name) LIKE ?)
+        OR (player_id = ? AND LOWER(opponent_name) LIKE ?)
+      )
+    ORDER BY match_date DESC
+    LIMIT 10
+  `).bind(
+    `-${daysBack} days`,
+    prediction.player_a_id,
+    `%${normalizeName(prediction.player_b_name).replace(/ /g, "%")}%`,
+    prediction.player_b_id,
+    `%${normalizeName(prediction.player_a_name).replace(/ /g, "%")}%`
+  ).all();
+
+  for (const row of rows.results || []) {
+    const isPlayerARecord = row.player_id === prediction.player_a_id;
+    const expectedOpponent = isPlayerARecord ? prediction.player_b_name : prediction.player_a_name;
+    if (normalizeName(row.opponent_name) !== normalizeName(expectedOpponent)) continue;
+    const winnerName = row.result === "win"
+      ? (isPlayerARecord ? prediction.player_a_name : prediction.player_b_name)
+      : (isPlayerARecord ? prediction.player_b_name : prediction.player_a_name);
+    const winnerId = normalizeName(winnerName) === normalizeName(prediction.player_a_name) ? prediction.player_a_id : prediction.player_b_id;
+    return { winnerName, winnerId, score: row.score, source: "player_recent_matches" };
+  }
+
+  return null;
+}
+
+async function settlePrediction(db, prediction, outcome) {
+  const actualNormalized = normalizeName(outcome.winnerName);
+  const predictedNormalized = normalizeName(prediction.predicted_winner_name);
+  const isCorrect = actualNormalized && actualNormalized === predictedNormalized ? 1 : 0;
+
+  await db.batch([
+    db.prepare(`
+      UPDATE matches
+      SET status = 'Finished', live = 0, score = ?, winner_player_id = ?, winner_name = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).bind(safeText(outcome.score), outcome.winnerId, safeText(outcome.winnerName), prediction.match_id),
+    db.prepare(`
+      UPDATE prediction_outcomes
+      SET actual_winner_id = ?, actual_winner_name = ?, result_status = 'settled', correct = ?, score = ?, settled_at = datetime('now'), updated_at = datetime('now')
+      WHERE prediction_id = ?
+    `).bind(outcome.winnerId, safeText(outcome.winnerName), isCorrect, safeText(outcome.score), prediction.prediction_id),
+  ]);
+
+  return isCorrect;
+}
+
 async function syncOutcomes(request, env) {
   if (!env.TENNIS_DB) return jsonResponse({ error: "Missing TENNIS_DB D1 binding" }, 500);
   if (!isAuthorized(request, env)) return jsonResponse({ error: "Unauthorized" }, 401);
   if (!env.API_TENNIS_KEY) return jsonResponse({ error: "Missing API_TENNIS_KEY" }, 500);
 
   const url = new URL(request.url);
-  const daysBack = Math.min(Math.max(Number.parseInt(url.searchParams.get("days") || "7", 10), 1), 30);
+  const daysBack = Math.min(Math.max(Number.parseInt(url.searchParams.get("days") || "14", 10), 1), 30);
   const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "250", 10), 1), 500);
   const db = env.TENNIS_DB;
 
@@ -135,47 +184,50 @@ async function syncOutcomes(request, env) {
   const finishedEvents = events.filter(isFinishedEvent);
   let settled = 0;
   let correct = 0;
+  let settledFromRecentMatches = 0;
+  let settledFromFixtures = 0;
   const missed = [];
 
   for (const prediction of predictions) {
-    const event = finishedEvents.find((candidate) => eventMatchesPrediction(candidate, prediction));
-    if (!event) {
+    let outcome = await findStoredRecentOutcome(db, prediction, daysBack);
+
+    if (outcome) {
+      settledFromRecentMatches += 1;
+    } else {
+      const event = finishedEvents.find((candidate) => eventMatchesPrediction(candidate, prediction));
+      if (event) {
+        const actualWinnerName = getApiTennisWinnerName(event);
+        const actualNormalized = normalizeName(actualWinnerName);
+        outcome = {
+          winnerName: actualWinnerName,
+          winnerId: actualNormalized === normalizeName(prediction.player_a_name) ? prediction.player_a_id : actualNormalized === normalizeName(prediction.player_b_name) ? prediction.player_b_id : null,
+          score: getApiTennisScore(event),
+          source: "api-tennis-fixtures",
+        };
+        settledFromFixtures += 1;
+      }
+    }
+
+    if (!outcome) {
       missed.push({ prediction_id: prediction.prediction_id, match_id: prediction.match_id, title: `${prediction.player_a_name} vs ${prediction.player_b_name}` });
       continue;
     }
 
-    const actualWinnerName = getApiTennisWinnerName(event);
-    const actualNormalized = normalizeName(actualWinnerName);
-    const predictedNormalized = normalizeName(prediction.predicted_winner_name);
-    const actualWinnerId = actualNormalized === normalizeName(prediction.player_a_name) ? prediction.player_a_id : actualNormalized === normalizeName(prediction.player_b_name) ? prediction.player_b_id : null;
-    const isCorrect = actualNormalized && actualNormalized === predictedNormalized ? 1 : 0;
-    const score = getApiTennisScore(event);
-
-    await db.batch([
-      db.prepare(`
-        UPDATE matches
-        SET status = 'Finished', live = 0, score = ?, winner_player_id = ?, winner_name = ?, updated_at = datetime('now')
-        WHERE id = ?
-      `).bind(safeText(score), actualWinnerId, safeText(actualWinnerName), prediction.match_id),
-      db.prepare(`
-        UPDATE prediction_outcomes
-        SET actual_winner_id = ?, actual_winner_name = ?, result_status = 'settled', correct = ?, score = ?, settled_at = datetime('now'), updated_at = datetime('now')
-        WHERE prediction_id = ?
-      `).bind(actualWinnerId, safeText(actualWinnerName), isCorrect, safeText(score), prediction.prediction_id),
-    ]);
-
+    const isCorrect = await settlePrediction(db, prediction, outcome);
     settled += 1;
     correct += isCorrect;
   }
 
   return jsonResponse({
     ok: true,
-    source: "API-Tennis get_fixtures",
+    source: "player_recent_matches plus API-Tennis get_fixtures fallback",
     daysBack,
     checked: predictions.length,
     finishedEvents: finishedEvents.length,
     settled,
     correct,
+    settledFromRecentMatches,
+    settledFromFixtures,
     missed: missed.slice(0, 50),
   });
 }
