@@ -5,6 +5,8 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
+const SEASON_STATS_YEAR = "2026";
+
 function slugify(value = "") {
   return String(value)
     .toLowerCase()
@@ -70,16 +72,11 @@ export async function onRequestGet({ request, env }) {
       WHERE match_date >= date('now', '-100 days') AND source = 'api-tennis-fixtures'
       GROUP BY player_id
     ) r ON r.player_id = p.id
-    LEFT JOIN player_season_stats s ON s.id = (
-      SELECT id FROM player_season_stats
-      WHERE player_id = p.id AND type = 'singles'
-      ORDER BY CAST(season AS INTEGER) DESC
-      LIMIT 1
-    )
+    LEFT JOIN player_season_stats s ON s.player_id = p.id AND s.type = 'singles' AND s.season = ?
     ${where}
     ORDER BY p.tour ASC, COALESCE(p.current_rank, 999999) ASC, p.name ASC
     LIMIT ?
-  `).bind(...bindings, limit).all();
+  `).bind(SEASON_STATS_YEAR, ...bindings, limit).all();
 
   const players = (result.results || []).map((row) => ({
     ...row,
@@ -87,5 +84,5 @@ export async function onRequestGet({ request, env }) {
     url: `/players/${String(row.tour || "atp").toLowerCase()}/${slugify(row.name)}/`,
   }));
 
-  return jsonResponse({ ok: true, generatedAt: new Date().toISOString(), statSource: "API-Tennis standings, get_players season stats, and 100-day fixture results", players });
+  return jsonResponse({ ok: true, generatedAt: new Date().toISOString(), statSource: "API-Tennis standings, 2026 get_players season stats, and 100-day fixture results", seasonStatsYear: SEASON_STATS_YEAR, players });
 }
