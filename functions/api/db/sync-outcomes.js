@@ -18,6 +18,28 @@ function normalizeName(value = "") {
     .trim();
 }
 
+function nameTokens(value) {
+  return normalizeName(value).split(" ").filter((token) => token.length > 1);
+}
+
+function looseNameMatch(left, right) {
+  const leftNorm = normalizeName(left);
+  const rightNorm = normalizeName(right);
+  if (!leftNorm || !rightNorm) return false;
+  if (leftNorm === rightNorm) return true;
+  if (leftNorm.includes(rightNorm) || rightNorm.includes(leftNorm)) return true;
+
+  const leftTokens = nameTokens(left);
+  const rightTokens = nameTokens(right);
+  if (!leftTokens.length || !rightTokens.length) return false;
+
+  const leftSurname = leftTokens[0];
+  const rightSurname = rightTokens[rightTokens.length - 1];
+  if (leftSurname === rightSurname) return true;
+
+  return leftTokens.some((token) => token.length >= 4 && rightTokens.includes(token));
+}
+
 function safeText(value) {
   return value === undefined || value === null || value === "" ? null : String(value);
 }
@@ -74,12 +96,7 @@ function isFinishedEvent(event) {
 }
 
 function unorderedNameMatch(a1, b1, a2, b2) {
-  const leftA = normalizeName(a1);
-  const leftB = normalizeName(b1);
-  const rightA = normalizeName(a2);
-  const rightB = normalizeName(b2);
-  if (!leftA || !leftB || !rightA || !rightB) return false;
-  return (leftA === rightA && leftB === rightB) || (leftA === rightB && leftB === rightA);
+  return (looseNameMatch(a1, a2) && looseNameMatch(b1, b2)) || (looseNameMatch(a1, b2) && looseNameMatch(b1, a2));
 }
 
 function eventMatchesPrediction(event, prediction) {
@@ -88,34 +105,30 @@ function eventMatchesPrediction(event, prediction) {
   return unorderedNameMatch(first, second, prediction.player_a_name, prediction.player_b_name);
 }
 
+function predictionWinnerId(prediction, winnerName) {
+  if (looseNameMatch(winnerName, prediction.player_a_name)) return prediction.player_a_id;
+  if (looseNameMatch(winnerName, prediction.player_b_name)) return prediction.player_b_id;
+  return null;
+}
+
 async function findStoredRecentOutcome(db, prediction, daysBack) {
   const rows = await db.prepare(`
     SELECT player_id, opponent_name, score, result, match_date
     FROM player_recent_matches
     WHERE match_date >= date('now', ?)
-      AND (
-        (player_id = ? AND LOWER(opponent_name) LIKE ?)
-        OR (player_id = ? AND LOWER(opponent_name) LIKE ?)
-      )
+      AND player_id IN (?, ?)
     ORDER BY match_date DESC
-    LIMIT 10
-  `).bind(
-    `-${daysBack} days`,
-    prediction.player_a_id,
-    `%${normalizeName(prediction.player_b_name).replace(/ /g, "%")}%`,
-    prediction.player_b_id,
-    `%${normalizeName(prediction.player_a_name).replace(/ /g, "%")}%`
-  ).all();
+    LIMIT 50
+  `).bind(`-${daysBack} days`, prediction.player_a_id, prediction.player_b_id).all();
 
   for (const row of rows.results || []) {
     const isPlayerARecord = row.player_id === prediction.player_a_id;
     const expectedOpponent = isPlayerARecord ? prediction.player_b_name : prediction.player_a_name;
-    if (normalizeName(row.opponent_name) !== normalizeName(expectedOpponent)) continue;
+    if (!looseNameMatch(row.opponent_name, expectedOpponent)) continue;
     const winnerName = row.result === "win"
       ? (isPlayerARecord ? prediction.player_a_name : prediction.player_b_name)
       : (isPlayerARecord ? prediction.player_b_name : prediction.player_a_name);
-    const winnerId = normalizeName(winnerName) === normalizeName(prediction.player_a_name) ? prediction.player_a_id : prediction.player_b_id;
-    return { winnerName, winnerId, score: row.score, source: "player_recent_matches" };
+    return { winnerName, winnerId: predictionWinnerId(prediction, winnerName), score: row.score, source: "player_recent_matches" };
   }
 
   return null;
@@ -135,19 +148,16 @@ async function findPlayerFixtureOutcome(env, prediction, daysBack) {
   if (!event) return null;
 
   const actualWinnerName = getApiTennisWinnerName(event);
-  const actualNormalized = normalizeName(actualWinnerName);
   return {
     winnerName: actualWinnerName,
-    winnerId: actualNormalized === normalizeName(prediction.player_a_name) ? prediction.player_a_id : actualNormalized === normalizeName(prediction.player_b_name) ? prediction.player_b_id : null,
+    winnerId: predictionWinnerId(prediction, actualWinnerName),
     score: getApiTennisScore(event),
     source: "api-tennis-player-fixtures",
   };
 }
 
 async function settlePrediction(db, prediction, outcome) {
-  const actualNormalized = normalizeName(outcome.winnerName);
-  const predictedNormalized = normalizeName(prediction.predicted_winner_name);
-  const isCorrect = actualNormalized && actualNormalized === predictedNormalized ? 1 : 0;
+  const isCorrect = looseNameMatch(outcome.winnerName, prediction.predicted_winner_name) ? 1 : 0;
 
   await db.batch([
     db.prepare(`
@@ -225,10 +235,9 @@ async function syncOutcomes(request, env) {
       const event = finishedEvents.find((candidate) => eventMatchesPrediction(candidate, prediction));
       if (event) {
         const actualWinnerName = getApiTennisWinnerName(event);
-        const actualNormalized = normalizeName(actualWinnerName);
         outcome = {
           winnerName: actualWinnerName,
-          winnerId: actualNormalized === normalizeName(prediction.player_a_name) ? prediction.player_a_id : actualNormalized === normalizeName(prediction.player_b_name) ? prediction.player_b_id : null,
+          winnerId: predictionWinnerId(prediction, actualWinnerName),
           score: getApiTennisScore(event),
           source: "api-tennis-fixtures",
         };
