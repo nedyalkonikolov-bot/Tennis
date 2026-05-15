@@ -331,7 +331,10 @@ async function promote(request, env) {
 
   const url = new URL(request.url);
   const dryRun = url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
-  const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "3", 10), 1), 10);
+  const platform = ["twitter", "threads", "all"].includes(url.searchParams.get("platform")) ? url.searchParams.get("platform") : "all";
+  const postTwitterEnabled = platform === "all" || platform === "twitter";
+  const postThreadsEnabled = platform === "all" || platform === "threads";
+  const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "3", 10), 1), 25);
   const db = env.TENNIS_DB;
   await ensureAutomationTable(db);
 
@@ -373,6 +376,7 @@ async function promote(request, env) {
   return jsonResponse({
     ok: true,
     dryRun,
+    platform,
     checked: matches.length,
     tweets,
     threads,
