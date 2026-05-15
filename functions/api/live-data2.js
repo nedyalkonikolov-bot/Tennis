@@ -6,8 +6,9 @@ const DEFAULT_NEWS_IMAGE = "https://images.tennis.com/image/upload/t_q-best/tenn
 const PLAYER_CACHE_KEY = "players:standings:v1";
 const PLAYER_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PLAYER_LIMIT = 500;
+const CLOUDBET_MARKETS_QUERY = "?markets=tennis.winner&markets=tennis.winner_and_total";
 const RECENT_FORM_DAYS = 100;
-const BLOCKED_RE = /\b(simulated|simulation|virtual|srl|reality league|itf|utr|challenger|exhibition|junior|boys|girls|college|davis|billie|hopman)\b/i;
+const BLOCKED_RE = /\b(simulated|simulation|virtual|srl|reality league|itf|utr|exhibition|junior|boys|girls|college|davis|billie|hopman)\b/i;
 
 const fallbackPlayers = [
   { id: "demo-1", playerKey: "", name: "Jannik Sinner", sex: "ATP", tour: "ATP", rank: 1, points: 10550, country: "Italy", movement: "same", form: 88, hold: 91, breakRate: 28, clay: 84, hard: 92, grass: 79, trend: "+6" },
@@ -186,19 +187,23 @@ function normalizeMatch(event, odds, players, betUrl) {
 }
 async function getCloudbetMatches(env, players, betUrl, diagnostics) {
   const sport = await fetchCloudbet(env, "/sports/tennis");
-  const competitions = (sport?.categories || [])
+  const allCompetitions = (sport?.categories || [])
     .flatMap((category) => (category.competitions || []).map((competition) => ({ ...competition, category })))
-    .filter((competition) => competition.eventCount > 0)
+    .filter((competition) => competition.eventCount > 0);
+  const rejectedCompetitions = allCompetitions.filter((competition) => BLOCKED_RE.test(competitionText(competition)));
+  const competitions = allCompetitions
     .filter((competition) => !BLOCKED_RE.test(competitionText(competition)))
     .filter((competition) => /\b(atp|wta)\b/i.test(competitionText(competition)))
     .sort((a, b) => (/singles/i.test(competitionText(b)) ? 1 : 0) - (/singles/i.test(competitionText(a)) ? 1 : 0) || (b.eventCount || 0) - (a.eventCount || 0))
     .slice(0, 500);
   diagnostics.cloudbetSportEventCount = sport?.eventCount || 0;
   diagnostics.cloudbetScannedCompetitionCount = competitions.length;
+  diagnostics.cloudbetRejectedCompetitionCount = rejectedCompetitions.length;
+  diagnostics.cloudbetRejectedCompetitionSamples = rejectedCompetitions.slice(0, 12).map(competitionText);
   diagnostics.cloudbetCompetitionSamples = competitions.slice(0, 12).map(competitionText);
   const payloads = [];
   for (let i = 0; i < competitions.length; i += 25) {
-    payloads.push(...await Promise.all(competitions.slice(i, i + 25).map(async (competition) => ({ competition, payload: await fetchCloudbet(env, `/competitions/${competition.key}`).catch(() => null) }))));
+    payloads.push(...await Promise.all(competitions.slice(i, i + 25).map(async (competition) => ({ competition, payload: await fetchCloudbet(env, `/competitions/${competition.key}${CLOUDBET_MARKETS_QUERY}`).catch(() => fetchCloudbet(env, `/competitions/${competition.key}`).catch(() => null)) }))));
   }
   const rawEvents = payloads.flatMap(({ competition, payload }) => (payload?.events || []).map((event) => ({ ...event, competition: event.competition || competition })));
   diagnostics.cloudbetPayloadEventCount = rawEvents.length;
