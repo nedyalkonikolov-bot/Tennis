@@ -338,7 +338,8 @@ async function promote(request, env) {
   const db = env.TENNIS_DB;
   await ensureAutomationTable(db);
 
-  const matches = await getPostableMatches(db, limit * 4);
+  const scanLimit = Math.min(Math.max(limit * 20, 50), 150);
+  const matches = await getPostableMatches(db, scanLimit);
   const tweets = [];
   const threads = [];
 
