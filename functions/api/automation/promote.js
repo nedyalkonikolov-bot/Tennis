@@ -290,7 +290,8 @@ async function postThreads(env, text) {
 
     const subcode = publishPayload?.error?.error_subcode;
     const code = publishPayload?.error?.code;
-    if (!(code === 24 || subcode === 4279009)) break;
+    const transient = publishPayload?.error?.is_transient === true;
+    if (!(transient || code === 2 || code === 24 || subcode === 4279009)) break;
   }
 
   const last = attempts[attempts.length - 1] || { status: 0, payload: {} };
