@@ -2,6 +2,7 @@ const SITE_URL = "https://www.tennistipz.win";
 const SITEMAP_URL = `${SITE_URL}/sitemap.xml`;
 const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters";
 const X_TWEET_URL = "https://api.twitter.com/2/tweets";
+const THREADS_API_URL = "https://graph.threads.net/v1.0";
 const REFERRAL_LINKS = [
   {
     name: "Cloudbet",
@@ -31,6 +32,10 @@ function hasOAuth1(env) {
 
 function hasTwitterAuth(env) {
   return hasOAuth1(env) || Boolean(env.TWITTER_BEARER_TOKEN || env.X_BEARER_TOKEN || env.TWITTER_ACCESS_TOKEN || env.X_ACCESS_TOKEN);
+}
+
+function hasThreadsAuth(env) {
+  return Boolean(env.THREADS_ACCESS_TOKEN);
 }
 
 function slugify(value = "") {
@@ -164,14 +169,23 @@ function chooseReferralLink(match) {
   return REFERRAL_LINKS[total % REFERRAL_LINKS.length];
 }
 
-function composeTweet(match) {
-  const url = `${SITE_URL}/predictions/${slugify(`${match.tour} ${match.player_a_name} vs ${match.player_b_name}`)}/`;
+function composeSocialPost(match) {
+  const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
+  const url = SITE_URL + "/predictions/" + slug + "/";
   const referral = chooseReferralLink(match);
   const pick = match.predicted_winner_name || "value watch";
-  const confidence = match.confidence ? `${match.confidence}%` : "model";
-  const odds = match.predicted_odds ? ` Odds ${match.predicted_odds}.` : "";
-  const text = `${match.player_a_name} vs ${match.player_b_name}\n\nAI tennis prediction: ${pick} (${confidence} confidence).${odds}\n\nPreview: ${url}\nBet: ${referral.url}\n\n18+ Bet responsibly. #TennisBetting #TennisTips #CryptoBetting`;
+  const confidence = match.confidence ? String(match.confidence) + "%" : "model";
+  const odds = match.predicted_odds ? " Odds " + match.predicted_odds + "." : "";
+  const text = match.player_a_name + " vs " + match.player_b_name + "\n\nAI tennis prediction: " + pick + " (" + confidence + " confidence)." + odds + "\n\nPreview: " + url + "\nBet: " + referral.url + "\n\n18+ Bet responsibly. #TennisBetting #TennisTips #CryptoBetting";
   return { text, url, referral };
+}
+
+function composeTweet(match) {
+  return composeSocialPost(match);
+}
+
+function composeThreadsPost(match) {
+  return composeSocialPost(match);
 }
 
 async function ensureAutomationTable(db) {
@@ -206,9 +220,7 @@ async function getPostableMatches(db, limit) {
       p.created_at
     FROM matches m
     JOIN predictions p ON p.match_id = m.id
-    LEFT JOIN automation_posts ap ON ap.platform = 'twitter' AND ap.target_id = p.id
     WHERE m.tour IN ('ATP', 'WTA')
-      AND ap.id IS NULL
       AND p.predicted_winner_name IS NOT NULL
     ORDER BY m.live DESC, p.created_at DESC, m.start_time ASC
     LIMIT ?
@@ -239,6 +251,53 @@ async function postTweet(env, text) {
   return { ok: true, authType, status: response.status, payload };
 }
 
+async function getThreadsUser(env) {
+  if (env.THREADS_USER_ID) return { id: env.THREADS_USER_ID, source: "env" };
+  if (!env.THREADS_ACCESS_TOKEN) return null;
+
+  const response = await fetch(`${THREADS_API_URL}/me?fields=id,username&access_token=${encodeURIComponent(env.THREADS_ACCESS_TOKEN)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.id) return { error: true, status: response.status, payload };
+  return { id: payload.id, username: payload.username || null, source: "me" };
+}
+
+async function postThreads(env, text) {
+  if (!env.THREADS_ACCESS_TOKEN) return { skipped: true, reason: "Missing THREADS_ACCESS_TOKEN" };
+
+  const user = await getThreadsUser(env);
+  if (!user) return { skipped: true, reason: "Missing THREADS_USER_ID or usable Threads token" };
+  if (user.error) return { ok: false, phase: "me", status: user.status, payload: user.payload };
+
+  const createResponse = await fetch(`${THREADS_API_URL}/${encodeURIComponent(user.id)}/threads`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ media_type: "TEXT", text, access_token: env.THREADS_ACCESS_TOKEN }),
+  });
+  const createPayload = await createResponse.json().catch(() => ({}));
+  if (!createResponse.ok || !createPayload.id) return { ok: false, phase: "create", user, status: createResponse.status, payload: createPayload };
+
+  const publishResponse = await fetch(`${THREADS_API_URL}/${encodeURIComponent(user.id)}/threads_publish`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ creation_id: createPayload.id, access_token: env.THREADS_ACCESS_TOKEN }),
+  });
+  const publishPayload = await publishResponse.json().catch(() => ({}));
+  if (!publishResponse.ok) return { ok: false, phase: "publish", user, status: publishResponse.status, payload: publishPayload, creation: createPayload };
+  return { ok: true, phase: "publish", user, status: publishResponse.status, payload: publishPayload, creation: createPayload };
+}
+
+async function isAlreadyPosted(db, platform, targetId) {
+  const result = await db.prepare("SELECT id FROM automation_posts WHERE platform = ? AND target_id = ? LIMIT 1").bind(platform, targetId).first();
+  return Boolean(result);
+}
+
+async function recordAutomationPost(db, platform, targetId, url, payload) {
+  await db.prepare(`
+    INSERT OR IGNORE INTO automation_posts (id, platform, target_type, target_id, url, status, response_json)
+    VALUES (?, ?, 'prediction', ?, ?, 'posted', ?)
+  `).bind(crypto.randomUUID(), platform, targetId, url, JSON.stringify(payload)).run();
+}
+
 async function submitSitemapToGoogle(env) {
   const tokenResult = await getGoogleAccessToken(env);
   if (!tokenResult) return { skipped: true, reason: "Missing GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN or service account env vars" };
@@ -264,25 +323,37 @@ async function promote(request, env) {
   const db = env.TENNIS_DB;
   await ensureAutomationTable(db);
 
-  const matches = await getPostableMatches(db, limit);
+  const matches = await getPostableMatches(db, limit * 4);
   const tweets = [];
+  const threads = [];
 
   for (const match of matches) {
     const tweet = composeTweet(match);
-    if (dryRun) {
-      tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, text: tweet.text });
-      continue;
+    const threadsPost = composeThreadsPost(match);
+    const twitterPosted = await isAlreadyPosted(db, "twitter", match.prediction_id);
+    const threadsPosted = await isAlreadyPosted(db, "threads", match.prediction_id);
+
+    if (!twitterPosted && tweets.length < limit) {
+      if (dryRun) {
+        tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, text: tweet.text });
+      } else {
+        const result = await postTweet(env, tweet.text);
+        tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, result });
+        if (result.ok) await recordAutomationPost(db, "twitter", match.prediction_id, tweet.url, result.payload);
+      }
     }
 
-    const result = await postTweet(env, tweet.text);
-    tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, result });
-
-    if (result.ok) {
-      await db.prepare(`
-        INSERT OR IGNORE INTO automation_posts (id, platform, target_type, target_id, url, status, response_json)
-        VALUES (?, 'twitter', 'prediction', ?, ?, 'posted', ?)
-      `).bind(crypto.randomUUID(), match.prediction_id, tweet.url, JSON.stringify(result.payload)).run();
+    if (!threadsPosted && threads.length < limit) {
+      if (dryRun) {
+        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, text: threadsPost.text });
+      } else {
+        const result = await postThreads(env, threadsPost.text);
+        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, result });
+        if (result.ok) await recordAutomationPost(db, "threads", match.prediction_id, threadsPost.url, result.payload);
+      }
     }
+
+    if (tweets.length >= limit && threads.length >= limit) break;
   }
 
   const google = dryRun ? { dryRun: true, sitemap: SITEMAP_URL } : await submitSitemapToGoogle(env);
@@ -292,9 +363,11 @@ async function promote(request, env) {
     dryRun,
     checked: matches.length,
     tweets,
+    threads,
     google,
     setupRequired: {
       twitter: !hasTwitterAuth(env),
+      threads: !hasThreadsAuth(env),
       googleSearchConsole: !(env.GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN || env.GSC_ACCESS_TOKEN || ((env.GOOGLE_SERVICE_ACCOUNT_EMAIL || env.GSC_SERVICE_ACCOUNT_EMAIL) && (env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || env.GSC_SERVICE_ACCOUNT_PRIVATE_KEY))),
     },
   });
