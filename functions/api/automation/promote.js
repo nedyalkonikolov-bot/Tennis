@@ -345,7 +345,7 @@ async function promote(request, env) {
     const twitterPosted = await isAlreadyPosted(db, "twitter", match.prediction_id);
     const threadsPosted = await isAlreadyPosted(db, "threads", match.prediction_id);
 
-    if (!twitterPosted && tweets.length < limit) {
+    if (postTwitterEnabled && !twitterPosted && tweets.length < limit) {
       if (dryRun) {
         tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, text: tweet.text });
       } else {
@@ -355,7 +355,7 @@ async function promote(request, env) {
       }
     }
 
-    if (!threadsPosted && threads.length < limit) {
+    if (postThreadsEnabled && !threadsPosted && threads.length < limit) {
       if (dryRun) {
         threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, text: threadsPost.text });
       } else {
@@ -365,7 +365,7 @@ async function promote(request, env) {
       }
     }
 
-    if (tweets.length >= limit && threads.length >= limit) break;
+    if ((!postTwitterEnabled || tweets.length >= limit) && (!postThreadsEnabled || threads.length >= limit)) break;
   }
 
   const google = dryRun ? { dryRun: true, sitemap: SITEMAP_URL } : await submitSitemapToGoogle(env);
