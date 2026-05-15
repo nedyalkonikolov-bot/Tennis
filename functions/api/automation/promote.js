@@ -162,22 +162,50 @@ async function getGoogleAccessToken(env) {
   return { token: payload.access_token, source: "service-account" };
 }
 
-function chooseReferralLink(match) {
-  if (match.predicted_odds) return REFERRAL_LINKS[0];
-  const key = String(match.prediction_id || match.match_id || "");
+const HASHTAG_SETS = [
+  ["#TennisBetting", "#TennisTips", "#CryptoBetting"],
+  ["#TennisPredictions", "#ATP", "#WTA"],
+  ["#TennisPicks", "#BettingTips", "#Tennis"],
+  ["#LiveTennis", "#SportsBetting", "#TennisOdds"],
+  ["#TennisPreview", "#CryptoSportsbook", "#TennisTipz"],
+];
+
+function rotationIndex(match, modulo, salt = "") {
+  const key = String(match.prediction_id || match.match_id || "match") + salt;
   const total = [...key].reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return REFERRAL_LINKS[total % REFERRAL_LINKS.length];
+  return total % modulo;
+}
+
+function chooseReferralLink(match) {
+  return REFERRAL_LINKS[rotationIndex(match, REFERRAL_LINKS.length, "ref")];
+}
+
+function chooseHashtags(match) {
+  return HASHTAG_SETS[rotationIndex(match, HASHTAG_SETS.length, "tags")].join(" ");
 }
 
 function composeSocialPost(match) {
   const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
   const url = SITE_URL + "/predictions/" + slug + "/";
   const referral = chooseReferralLink(match);
+  const hashtags = chooseHashtags(match);
   const pick = match.predicted_winner_name || "value watch";
   const confidence = match.confidence ? String(match.confidence) + "%" : "model";
-  const odds = match.predicted_odds ? " Odds " + match.predicted_odds + "." : "";
-  const text = match.player_a_name + " vs " + match.player_b_name + "\n\nAI tennis prediction: " + pick + " (" + confidence + " confidence)." + odds + "\n\nPreview: " + url + "\nBet: " + referral.url + "\n\n18+ Bet responsibly. #TennisBetting #TennisTips #CryptoBetting";
-  return { text, url, referral };
+  const odds = match.predicted_odds ? String(match.predicted_odds) : null;
+  const matchTitle = match.player_a_name + " vs " + match.player_b_name;
+  const tourLine = [match.tour, match.tournament].filter(Boolean).join(" - ");
+  const template = rotationIndex(match, 5, "copy");
+  let lead;
+
+  if (template === 0) lead = "Match preview: " + matchTitle + "\n" + tourLine + "\n\nModel pick: " + pick + " (" + confidence + ").";
+  else if (template === 1) lead = matchTitle + "\n\nTennisTipz model leans " + pick + " with " + confidence + " confidence.";
+  else if (template === 2) lead = "On the board: " + matchTitle + "\n\nPrediction edge: " + pick + " (" + confidence + ").";
+  else if (template === 3) lead = matchTitle + "\n" + tourLine + "\n\nAI call: " + pick + ". Confidence: " + confidence + ".";
+  else lead = "Tennis prediction watch\n\n" + matchTitle + "\nPick: " + pick + "\nConfidence: " + confidence + ".";
+
+  const oddsLine = odds ? "\nOdds tracked: " + odds + "." : "";
+  const text = lead + oddsLine + "\n\nFull preview: " + url + "\nPartner offer: " + referral.url + "\n\n18+ Bet responsibly. " + hashtags;
+  return { text, url, referral, hashtags };
 }
 
 function composeTweet(match) {
