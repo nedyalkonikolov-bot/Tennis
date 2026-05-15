@@ -170,6 +170,14 @@ const HASHTAG_SETS = [
   ["#TennisPreview", "#CryptoSportsbook", "#TennisTipz"],
 ];
 
+const FOLLOW_PROMPTS = [
+  "Follow TennisTipz for more tennis picks.",
+  "Follow us for daily tennis predictions.",
+  "Follow TennisTipz for more ATP and WTA edges.",
+  "Follow for fresh tennis betting previews.",
+  "Follow the account for the next match card.",
+];
+
 function rotationIndex(match, modulo, salt = "") {
   const key = String(match.prediction_id || match.match_id || "match") + salt;
   const total = [...key].reduce((sum, char) => sum + char.charCodeAt(0), 0);
@@ -187,11 +195,16 @@ function chooseHashtags(match) {
   return HASHTAG_SETS[rotationIndex(match, HASHTAG_SETS.length, "tags")].join(" ");
 }
 
+function chooseFollowPrompt(match) {
+  return FOLLOW_PROMPTS[rotationIndex(match, FOLLOW_PROMPTS.length, "follow")];
+}
+
 function composeSocialPost(match, options = {}) {
   const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
   const url = SITE_URL + "/predictions/" + slug + "/";
   const referral = chooseReferralLink(match, options.referral);
   const hashtags = chooseHashtags(match);
+  const followPrompt = chooseFollowPrompt(match);
   const pick = match.predicted_winner_name || "value watch";
   const confidence = match.confidence ? String(match.confidence) + "%" : "model";
   const odds = match.predicted_odds ? String(match.predicted_odds) : null;
@@ -207,7 +220,7 @@ function composeSocialPost(match, options = {}) {
   else lead = "Tennis prediction watch\n\n" + matchTitle + "\nPick: " + pick + "\nConfidence: " + confidence + ".";
 
   const oddsLine = odds ? "\nOdds tracked: " + odds + "." : "";
-  const text = lead + oddsLine + "\n\nFull preview: " + url + "\nPartner offer: " + referral.url + "\n\n18+ Bet responsibly. " + hashtags;
+  const text = lead + oddsLine + "\n\nFull preview: " + url + "\nPartner offer: " + referral.url + "\n\n" + followPrompt + "\n18+ Bet responsibly. " + hashtags;
   return { text, url, referral, hashtags };
 }
 
