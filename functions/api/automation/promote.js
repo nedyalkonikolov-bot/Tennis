@@ -176,7 +176,10 @@ function rotationIndex(match, modulo, salt = "") {
   return total % modulo;
 }
 
-function chooseReferralLink(match) {
+function chooseReferralLink(match, preferredReferral) {
+  const preferred = String(preferredReferral || "").toLowerCase();
+  const forced = REFERRAL_LINKS.find((link) => link.name.toLowerCase().replace(/[^a-z0-9]/g, "") === preferred.replace(/[^a-z0-9]/g, ""));
+  if (forced) return forced;
   return REFERRAL_LINKS[rotationIndex(match, REFERRAL_LINKS.length, "ref")];
 }
 
@@ -184,10 +187,10 @@ function chooseHashtags(match) {
   return HASHTAG_SETS[rotationIndex(match, HASHTAG_SETS.length, "tags")].join(" ");
 }
 
-function composeSocialPost(match) {
+function composeSocialPost(match, options = {}) {
   const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
   const url = SITE_URL + "/predictions/" + slug + "/";
-  const referral = chooseReferralLink(match);
+  const referral = chooseReferralLink(match, options.referral);
   const hashtags = chooseHashtags(match);
   const pick = match.predicted_winner_name || "value watch";
   const confidence = match.confidence ? String(match.confidence) + "%" : "model";
@@ -208,12 +211,12 @@ function composeSocialPost(match) {
   return { text, url, referral, hashtags };
 }
 
-function composeTweet(match) {
-  return composeSocialPost(match);
+function composeTweet(match, options = {}) {
+  return composeSocialPost(match, options);
 }
 
-function composeThreadsPost(match) {
-  return composeSocialPost(match);
+function composeThreadsPost(match, options = {}) {
+  return composeSocialPost(match, options);
 }
 
 async function ensureAutomationTable(db) {
@@ -360,6 +363,7 @@ async function promote(request, env) {
   const url = new URL(request.url);
   const dryRun = url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
   const platform = ["twitter", "threads", "all"].includes(url.searchParams.get("platform")) ? url.searchParams.get("platform") : "all";
+  const referralOverride = url.searchParams.get("ref") || url.searchParams.get("referral") || null;
   const postTwitterEnabled = platform === "all" || platform === "twitter";
   const postThreadsEnabled = platform === "all" || platform === "threads";
   const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "3", 10), 1), 25);
@@ -372,8 +376,8 @@ async function promote(request, env) {
   const threads = [];
 
   for (const match of matches) {
-    const tweet = composeTweet(match);
-    const threadsPost = composeThreadsPost(match);
+    const tweet = composeTweet(match, { referral: referralOverride });
+    const threadsPost = composeThreadsPost(match, { referral: referralOverride });
     const twitterPosted = await isAlreadyPosted(db, "twitter", match.prediction_id);
     const threadsPosted = await isAlreadyPosted(db, "threads", match.prediction_id);
 
