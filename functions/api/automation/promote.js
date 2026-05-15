@@ -276,14 +276,25 @@ async function postThreads(env, text) {
   const createPayload = await createResponse.json().catch(() => ({}));
   if (!createResponse.ok || !createPayload.id) return { ok: false, phase: "create", user, status: createResponse.status, payload: createPayload };
 
-  const publishResponse = await fetch(`${THREADS_API_URL}/${encodeURIComponent(user.id)}/threads_publish`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ creation_id: createPayload.id, access_token: env.THREADS_ACCESS_TOKEN }),
-  });
-  const publishPayload = await publishResponse.json().catch(() => ({}));
-  if (!publishResponse.ok) return { ok: false, phase: "publish", user, status: publishResponse.status, payload: publishPayload, creation: createPayload };
-  return { ok: true, phase: "publish", user, status: publishResponse.status, payload: publishPayload, creation: createPayload };
+  const attempts = [];
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (attempt > 1) await new Promise((resolve) => setTimeout(resolve, 3500));
+    const publishResponse = await fetch(`${THREADS_API_URL}/${encodeURIComponent(user.id)}/threads_publish`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ creation_id: createPayload.id, access_token: env.THREADS_ACCESS_TOKEN }),
+    });
+    const publishPayload = await publishResponse.json().catch(() => ({}));
+    attempts.push({ attempt, status: publishResponse.status, payload: publishPayload });
+    if (publishResponse.ok) return { ok: true, phase: "publish", user, status: publishResponse.status, payload: publishPayload, creation: createPayload, attempts };
+
+    const subcode = publishPayload?.error?.error_subcode;
+    const code = publishPayload?.error?.code;
+    if (!(code === 24 || subcode === 4279009)) break;
+  }
+
+  const last = attempts[attempts.length - 1] || { status: 0, payload: {} };
+  return { ok: false, phase: "publish", user, status: last.status, payload: last.payload, creation: createPayload, attempts };
 }
 
 async function isAlreadyPosted(db, platform, targetId) {
