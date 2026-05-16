@@ -11,8 +11,9 @@ const THREADS_LOCALES = {
     preview: "Preview",
     offer: "Offer",
     follow: "Follow TennisTipz.",
+    engage: "Comment your pick and repost for more tennis predictions.",
     responsible: "18+ Bet responsibly.",
-    hashtags: ["#TennisPredictions", "#CryptoBetting"],
+    hashtags: ["#TennisPredictions", "#TennisBetting"],
   },
   hi: {
     label: "Hindi",
@@ -21,8 +22,9 @@ const THREADS_LOCALES = {
     preview: "प्रीव्यू",
     offer: "ऑफर",
     follow: "TennisTipz को फॉलो करें.",
+    engage: "अपना पिक कमेंट करें और ज्यादा टेनिस भविष्यवाणियों के लिए रीपोस्ट करें.",
     responsible: "18+ जिम्मेदारी से बेट करें.",
-    hashtags: ["#TennisPredictions", "#CryptoBetting"],
+    hashtags: ["#टेनिसभविष्यवाणी", "#टेनिसबेटिंग"],
   },
   pt_br: {
     label: "Brazilian Portuguese",
@@ -31,8 +33,9 @@ const THREADS_LOCALES = {
     preview: "Previa",
     offer: "Oferta",
     follow: "Siga o TennisTipz.",
+    engage: "Comente seu palpite e reposte para mais previsoes de tenis.",
     responsible: "18+ Aposte com responsabilidade.",
-    hashtags: ["#PalpitesTenis", "#ApostasCrypto"],
+    hashtags: ["#PalpitesDeTenis", "#ApostasTenis"],
   },
   es: {
     label: "Spanish",
@@ -41,8 +44,9 @@ const THREADS_LOCALES = {
     preview: "Previa",
     offer: "Oferta",
     follow: "Sigue a TennisTipz.",
+    engage: "Comenta tu pronostico y repostealo para mas picks de tenis.",
     responsible: "18+ Apuesta con responsabilidad.",
-    hashtags: ["#PronosticosTenis", "#ApuestasCrypto"],
+    hashtags: ["#PronosticosTenis", "#ApuestasTenis"],
   },
   tr: {
     label: "Turkish",
@@ -51,8 +55,9 @@ const THREADS_LOCALES = {
     preview: "Analiz",
     offer: "Teklif",
     follow: "TennisTipz'i takip edin.",
+    engage: "Tahminini yorumlara yaz ve daha fazla tenis tahmini icin repost et.",
     responsible: "18+ Sorumlu bahis oynayın.",
-    hashtags: ["#TenisTahminleri", "#KriptoBahis"],
+    hashtags: ["#TenisTahminleri", "#TenisBahisleri"],
   },
 };
 function normalizeThreadsLanguage(value = "en") {
@@ -307,15 +312,16 @@ function composeThreadsPost(match, options = {}) {
   const confidence = match.confidence ? String(match.confidence) + "%" : "model";
   const odds = match.predicted_odds ? ` | ${locale.odds} ${String(match.predicted_odds)}` : "";
   const matchTitle = match.player_a_name + " vs " + match.player_b_name;
+  const engage = locale.engage || "Comment your pick and repost.";
   let lead = `${matchTitle}\n${locale.pick}: ${pick} (${confidence})${odds}`;
-  let text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${locale.responsible} ${hashtags}`;
+  let text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible} ${hashtags}`;
   if (text.length > 500) {
-    lead = trimToLimit(lead, 500 - (`\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${locale.responsible}`).length);
-    text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${locale.responsible}`;
+    lead = trimToLimit(lead, 500 - (`\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible}`).length);
+    text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible}`;
   }
   if (text.length > 500) {
-    lead = trimToLimit(`${matchTitle}\n${locale.pick}: ${pick}`, 500 - (`\n${locale.offer}: ${referral.url}\n\n${locale.follow}`).length);
-    text = `${lead}\n${locale.offer}: ${referral.url}\n\n${locale.follow}`;
+    lead = trimToLimit(`${matchTitle}\n${locale.pick}: ${pick}`, 500 - (`\n${locale.offer}: ${referral.url}\n\n${engage}`).length);
+    text = `${lead}\n${locale.offer}: ${referral.url}\n\n${engage}`;
   }
   return { text, url, referral, hashtags, language, languageLabel: locale.label };
 }
