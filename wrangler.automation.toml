@@ -1,0 +1,13 @@
+name = "tennistipz-automation-cron"
+main = "workers/automation-cron.js"
+compatibility_date = "2026-05-16"
+
+[triggers]
+crons = [
+  "*/15 * * * *",
+  "7 * * * *",
+  "23 2 * * *"
+]
+
+[vars]
+SITE_ORIGIN = "https://tennistipz.win"
