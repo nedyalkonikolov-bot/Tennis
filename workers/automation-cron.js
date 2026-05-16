@@ -50,10 +50,12 @@ async function syncDatabase(env) {
   };
 }
 
-async function postThreadsPrediction(env) {
-  const result = await callSite(env, "/api/automation/promote?platform=threads&limit=1", { method: "POST", authenticated: true });
+async function postThreadsPrediction(env, language = "en") {
+  const lang = encodeURIComponent(language);
+  const result = await callSite(env, `/api/automation/promote?platform=threads&limit=1&lang=${lang}`, { method: "POST", authenticated: true });
   return {
     task: "threads-autopost",
+    language,
     ok: result.payload?.ok === true,
     posted: result.payload?.threads?.filter((item) => item.result?.ok).length || 0,
     skipped: result.payload?.threads?.filter((item) => item.skipped).length || 0,
@@ -78,7 +80,10 @@ async function runScheduled(controller, env) {
   const cron = controller.cron;
   const results = [];
   if (cron === "*/15 * * * *") results.push(await refreshPredictions(env));
-  if (cron === "7 * * * *") results.push(await postThreadsPrediction(env, "hi"));`n  if (cron === "22 * * * *") results.push(await postThreadsPrediction(env, "pt-BR"));`n  if (cron === "37 * * * *") results.push(await postThreadsPrediction(env, "es"));`n  if (cron === "52 * * * *") results.push(await postThreadsPrediction(env, "tr"));
+  if (cron === "7 * * * *") results.push(await postThreadsPrediction(env, "hi"));
+  if (cron === "22 * * * *") results.push(await postThreadsPrediction(env, "pt-BR"));
+  if (cron === "37 * * * *") results.push(await postThreadsPrediction(env, "es"));
+  if (cron === "52 * * * *") results.push(await postThreadsPrediction(env, "tr"));
   if (cron === "23 2 * * *") results.push(await syncDatabase(env));
   return { ok: true, cron, ranAt: new Date().toISOString(), results };
 }
