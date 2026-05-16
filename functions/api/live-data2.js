@@ -76,7 +76,13 @@ function isDoubles(event = {}) { const text = eventText(event).toLowerCase(); re
 function isFinished(event = {}) { const status = String(event.status || "").toLowerCase(); return /finished|ended|complete|retired|walkover|cancelled|canceled|abandoned|settled/.test(status); }
 function isLive(event = {}) { const status = String(event.status || "").toLowerCase(); return status.includes("live") || status.includes("in_progress"); }
 function isUpcoming(event = {}) { const status = String(event.status || "").toLowerCase(); return !isFinished(event) && (isLive(event) || !status || /trading|scheduled|pre_trading|not started|upcoming/.test(status)); }
-function inferSurface(event = {}) { const text = eventText(event).toLowerCase(); if (/grass|wimbledon|halle|queens/.test(text)) return "Grass"; if (/clay|rome|madrid|roland|monte|parma|paris/.test(text)) return "Clay"; return "Hard"; }
+function inferSurface(event = {}) {
+  const text = eventText(event).toLowerCase();
+  if (/\b(wimbledon|halle|queen'?s|stuttgart|mallorca|s-hertogenbosch|nottingham|eastbourne|bad homburg|berlin)\b/.test(text)) return "Grass";
+  if (/\b(roland|french open|rome|madrid|monte carlo|barcelona|munich|hamburg|geneva|strasbourg|rabat|parma|bordeaux|tunis|valencia|cordoba|oeiras|zagreb|paris, france|wta 125k paris)\b/.test(text)) return "Clay";
+  if (/\b(bengaluru|australian open|indian wells|miami|cincinnati|canada|toronto|montreal|us open|doha|dubai|tokyo|beijing|shanghai|vienna|basel|stockholm|rotterdam|acapulco|delray|washington|atlanta|brisbane|adelaide|auckland|singapore|hong kong)\b/.test(text)) return "Hard";
+  return "Hard";
+}
 function selectionsFromMarket(market) { const submarkets = market?.submarkets || market?.subMarkets || {}; const grouped = Object.values(submarkets).flatMap((group) => group?.selections || []); return grouped.length ? grouped : market?.selections || []; }
 function enabled(selection) { const price = asFloat(selection?.price || selection?.odds); return price && (!selection.status || selection.status === "SELECTION_ENABLED") && (!selection.side || selection.side === "BACK"); }
 function selectionMatches(selection, side, playerName) { const value = [selection.outcome, selection.name, selection.label, selection.params].filter(Boolean).join(" ").toLowerCase(); const sideTerms = side === "home" ? /\b(home|player1|player_1|competitor1|competitor_1|1)\b/ : /\b(away|player2|player_2|competitor2|competitor_2|2)\b/; return sideTerms.test(value) || normalizeName(value) === normalizeName(playerName); }
@@ -88,7 +94,10 @@ function syntheticOddsFromWinnerAndTotal(market, event) {
   const homeRaw = homeSelections.reduce((sum, selection) => sum + 1 / asFloat(selection.price || selection.odds), 0);
   const awayRaw = awaySelections.reduce((sum, selection) => sum + 1 / asFloat(selection.price || selection.odds), 0);
   if (!homeRaw || !awayRaw) return null;
-  return { home: (1 / homeRaw).toFixed(2), away: (1 / awayRaw).toFixed(2), marketKey: "tennis.winner_and_total", marketType: "derived winner side from winner_and_total", marketUrlHome: "tennis.winner_and_total/home", marketUrlAway: "tennis.winner_and_total/away", eventId: event.id, eventKey: event.key, eventName: event.name, homeName: event.home.name, awayName: event.away.name };
+  const home = 1 / homeRaw;
+  const away = 1 / awayRaw;
+  if (home < 1.01 || away < 1.01) return null;
+  return { home: home.toFixed(2), away: away.toFixed(2), marketKey: "tennis.winner_and_total", marketType: "derived winner side from winner_and_total", marketUrlHome: "tennis.winner_and_total/home", marketUrlAway: "tennis.winner_and_total/away", eventId: event.id, eventKey: event.key, eventName: event.name, homeName: event.home.name, awayName: event.away.name };
 }
 function extractOdds(event) {
   if (!event?.home?.name || !event?.away?.name || isFinished(event)) return null;
@@ -106,7 +115,7 @@ function extractOdds(event) {
     if ((!homeSelection || !awaySelection) && selections.length === 2) [homeSelection, awaySelection] = selections;
     const home = asFloat(homeSelection?.price || homeSelection?.odds);
     const away = asFloat(awaySelection?.price || awaySelection?.odds);
-    if (home && away) return { eventId: event.id, eventKey: event.key, eventName: event.name, homeName: event.home.name, awayName: event.away.name, home: home.toFixed(2), away: away.toFixed(2), marketKey, marketType: "match winner", marketUrlHome: `${marketKey}/home`, marketUrlAway: `${marketKey}/away` };
+    if (home >= 1.01 && away >= 1.01) return { eventId: event.id, eventKey: event.key, eventName: event.name, homeName: event.home.name, awayName: event.away.name, home: home.toFixed(2), away: away.toFixed(2), marketKey, marketType: "match winner", marketUrlHome: `${marketKey}/home`, marketUrlAway: `${marketKey}/away` };
   }
   if (markets["tennis.winner_and_total"]) return syntheticOddsFromWinnerAndTotal(markets["tennis.winner_and_total"], event);
   return null;
