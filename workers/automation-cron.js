@@ -60,14 +60,14 @@ async function postThreadsPrediction(env) {
   };
 }
 
-async function runTask(task, env) {
+async function runTask(task, env, request) {
   if (task === "refresh") return refreshPredictions(env);
   if (task === "db-sync") return syncDatabase(env);
-  if (task === "threads") return postThreadsPrediction(env);
+  if (task === "threads") return postThreadsPrediction(env, new URL(request.url).searchParams.get("lang") || "en");
   if (task === "all") {
     const results = [];
     results.push(await refreshPredictions(env));
-    results.push(await postThreadsPrediction(env));
+    results.push(await postThreadsPrediction(env, "en"));
     results.push(await syncDatabase(env));
     return { task: "all", results };
   }
@@ -78,7 +78,7 @@ async function runScheduled(controller, env) {
   const cron = controller.cron;
   const results = [];
   if (cron === "*/15 * * * *") results.push(await refreshPredictions(env));
-  if (cron === "7 * * * *") results.push(await postThreadsPrediction(env));
+  if (cron === "7 * * * *") results.push(await postThreadsPrediction(env, "hi"));`n  if (cron === "22 * * * *") results.push(await postThreadsPrediction(env, "pt-BR"));`n  if (cron === "37 * * * *") results.push(await postThreadsPrediction(env, "es"));`n  if (cron === "52 * * * *") results.push(await postThreadsPrediction(env, "tr"));
   if (cron === "23 2 * * *") results.push(await syncDatabase(env));
   return { ok: true, cron, ranAt: new Date().toISOString(), results };
 }
@@ -94,7 +94,7 @@ export default {
     if (!env.SYNC_TOKEN || token !== env.SYNC_TOKEN) return json({ ok: false, error: "Unauthorized" }, 401);
     const task = url.searchParams.get("task") || "refresh";
     try {
-      return json({ ok: true, ...(await runTask(task, env)) });
+      return json({ ok: true, ...(await runTask(task, env, request)) });
     } catch (error) {
       return json({ ok: false, task, error: error.message }, 500);
     }
