@@ -228,8 +228,31 @@ function composeTweet(match, options = {}) {
   return composeSocialPost(match, options);
 }
 
+function trimToLimit(text, maxLength) {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, Math.max(0, maxLength - 1)).trimEnd() + "…";
+}
+
 function composeThreadsPost(match, options = {}) {
-  return composeSocialPost(match, options);
+  const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
+  const url = SITE_URL + "/predictions/" + slug + "/";
+  const referral = chooseReferralLink(match, options.referral);
+  const hashtags = chooseHashtags(match).split(" ").slice(0, 2).join(" ");
+  const pick = match.predicted_winner_name || "value watch";
+  const confidence = match.confidence ? String(match.confidence) + "%" : "model";
+  const odds = match.predicted_odds ? " | Odds " + String(match.predicted_odds) : "";
+  const matchTitle = match.player_a_name + " vs " + match.player_b_name;
+  let lead = `${matchTitle}\nPick: ${pick} (${confidence})${odds}`;
+  let text = `${lead}\nPreview: ${url}\nOffer: ${referral.url}\n\nFollow TennisTipz. 18+ Bet responsibly. ${hashtags}`;
+  if (text.length > 500) {
+    lead = trimToLimit(lead, 500 - (`\nPreview: ${url}\nOffer: ${referral.url}\n\nFollow TennisTipz. 18+ Bet responsibly.`).length);
+    text = `${lead}\nPreview: ${url}\nOffer: ${referral.url}\n\nFollow TennisTipz. 18+ Bet responsibly.`;
+  }
+  if (text.length > 500) {
+    lead = trimToLimit(`${matchTitle}\nPick: ${pick}`, 500 - (`\nOffer: ${referral.url}\n\nFollow TennisTipz. 18+`).length);
+    text = `${lead}\nOffer: ${referral.url}\n\nFollow TennisTipz. 18+`;
+  }
+  return { text, url, referral, hashtags };
 }
 
 async function ensureAutomationTable(db) {
