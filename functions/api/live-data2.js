@@ -25,6 +25,7 @@ function asFloat(value, fallback = null) { const parsed = Number.parseFloat(valu
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
 function cleanText(value = "") { return String(value).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim(); }
 function normalizeName(value = "") { return String(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim(); }
+function safeText(value = "") { return String(value || "").trim(); }
 function namesLookSimilar(a, b) { const left = normalizeName(a).split(" ").filter(Boolean); const right = normalizeName(b).split(" ").filter(Boolean); if (!left.length || !right.length) return false; const rightSet = new Set(right); const shared = left.filter((part) => rightSet.has(part)); return left.at(-1) === right.at(-1) && (shared.length >= 2 || left.length === 1 || right.length === 1); }
 function getPlayerCache(env) { return env.TENNIS_PLAYERS_CACHE || env.PLAYER_STATS_KV || env.PLAYERS_KV || null; }
 
@@ -222,6 +223,129 @@ async function getCloudbetMatches(env, players, betUrl, diagnostics) {
   return enrichMatchesWithRecentForm(env, matches, diagnostics);
 }
 
+function dbSlug(value = "") { return normalizeName(value).replace(/\s+/g, "-") || "unknown"; }
+function makeDbPlayerId(tour, name) { return `${tour.toLowerCase()}:${dbSlug(name)}`; }
+function makeDbMatchId(source, sourceEventId) { return `${source}:${String(sourceEventId || "unknown")}`; }
+function makeDbPredictionId(matchId) { return `${matchId}:v1`; }
+async function ensureDbMatchPlayer(db, name, tour, playerKey = "") {
+  const normalized = normalizeName(name);
+  const found = await db.prepare("SELECT id FROM players WHERE tour = ? AND normalized_name = ? LIMIT 1").bind(tour, normalized).first();
+  if (found?.id) {
+    if (playerKey) await db.prepare("UPDATE players SET player_key = COALESCE(NULLIF(player_key, ''), ?), updated_at = datetime('now') WHERE id = ?").bind(String(playerKey), found.id).run();
+    return found.id;
+  }
+  const id = playerKey ? `${tour.toLowerCase()}:${playerKey}` : makeDbPlayerId(tour, name);
+  await db.prepare(`
+    INSERT INTO players (id, player_key, name, normalized_name, tour, source, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'live-prediction-sync', datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      player_key = COALESCE(NULLIF(excluded.player_key, ''), player_key),
+      name = excluded.name,
+      normalized_name = excluded.normalized_name,
+      updated_at = datetime('now')
+  `).bind(id, safeText(playerKey), safeText(name), normalized, tour).run();
+  return id;
+}
+async function upsertLivePrediction(db, match) {
+  const tour = match.tour === "WTA" ? "WTA" : "ATP";
+  const source = match.oddsSource === "Cloudbet" ? "cloudbet" : "live-data";
+  const matchId = makeDbMatchId(source, match.id);
+  const playerAId = await ensureDbMatchPlayer(db, match.playerA, tour, match.playerAKey);
+  const playerBId = await ensureDbMatchPlayer(db, match.playerB, tour, match.playerBKey);
+  await db.prepare(`
+    INSERT INTO matches (
+      id, source, source_event_id, tour, tournament, start_time, status, live, surface,
+      player_a_id, player_b_id, player_a_name, player_b_name, normalized_player_a, normalized_player_b,
+      score, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(source, source_event_id) DO UPDATE SET
+      tour = excluded.tour,
+      tournament = excluded.tournament,
+      start_time = excluded.start_time,
+      status = excluded.status,
+      live = excluded.live,
+      surface = excluded.surface,
+      player_a_id = excluded.player_a_id,
+      player_b_id = excluded.player_b_id,
+      player_a_name = excluded.player_a_name,
+      player_b_name = excluded.player_b_name,
+      normalized_player_a = excluded.normalized_player_a,
+      normalized_player_b = excluded.normalized_player_b,
+      score = excluded.score,
+      updated_at = datetime('now')
+  `).bind(
+    matchId,
+    source,
+    String(match.id),
+    tour,
+    safeText(match.tournament),
+    safeText(match.startTime),
+    match.status || (match.live ? "Live" : "Scheduled"),
+    match.live ? 1 : 0,
+    safeText(match.surface),
+    playerAId,
+    playerBId,
+    safeText(match.playerA),
+    safeText(match.playerB),
+    normalizeName(match.playerA),
+    normalizeName(match.playerB),
+    safeText(match.score)
+  ).run();
+  const predictedWinnerName = match.predictedWinner || match.market || "Value watch";
+  const predictedWinnerId = normalizeName(predictedWinnerName) === normalizeName(match.playerA) ? playerAId : normalizeName(predictedWinnerName) === normalizeName(match.playerB) ? playerBId : null;
+  const predictionId = makeDbPredictionId(matchId);
+  await db.prepare(`
+    INSERT INTO predictions (
+      id, match_id, model_version, source, predicted_winner_id, predicted_winner_name,
+      predicted_side, confidence, predicted_odds, model_edge, factors_json
+    ) VALUES (?, ?, 'v1', 'tennistipz-live', ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(match_id, model_version) DO UPDATE SET
+      predicted_winner_id = excluded.predicted_winner_id,
+      predicted_winner_name = excluded.predicted_winner_name,
+      predicted_side = excluded.predicted_side,
+      confidence = excluded.confidence,
+      predicted_odds = excluded.predicted_odds,
+      model_edge = excluded.model_edge,
+      factors_json = excluded.factors_json
+  `).bind(
+    predictionId,
+    matchId,
+    predictedWinnerId,
+    safeText(predictedWinnerName),
+    safeText(match.predictedSide),
+    asInt(match.confidence, 0),
+    safeText(match.predictedWinnerOdds || match.odds),
+    match.modelEdge === undefined ? null : Number(match.modelEdge),
+    JSON.stringify(match.predictionFactors || {})
+  ).run();
+  await db.prepare(`
+    INSERT INTO prediction_outcomes (prediction_id, match_id, result_status)
+    VALUES (?, ?, 'pending')
+    ON CONFLICT(prediction_id) DO NOTHING
+  `).bind(predictionId, matchId).run();
+  return { matchId, predictionId };
+}
+async function syncLivePredictionsToDb(env, matches, diagnostics) {
+  if (!env.TENNIS_DB || !matches.length) {
+    diagnostics.dbPredictionSync = env.TENNIS_DB ? "no matches" : "missing D1";
+    diagnostics.dbPredictionsUpserted = 0;
+    return;
+  }
+  let upserted = 0;
+  const errors = [];
+  for (const match of matches) {
+    if (!match?.id || !match.playerA || !match.playerB || !["ATP", "WTA"].includes(match.tour)) continue;
+    try {
+      await upsertLivePrediction(env.TENNIS_DB, match);
+      upserted += 1;
+    } catch (error) {
+      errors.push(`${match.id}: ${error.message}`);
+    }
+  }
+  diagnostics.dbPredictionSync = errors.length ? "partial" : "success";
+  diagnostics.dbPredictionsUpserted = upserted;
+  if (errors.length) diagnostics.dbPredictionSyncErrors = errors.slice(0, 5);
+}
 function rssTag(item, tag) { return cleanText(item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`, "i"))?.[1] || ""); }
 function rssImage(item) { return item.match(/<media:content[^>]+url=["']([^"']+)/i)?.[1] || item.match(/<enclosure[^>]+url=["']([^"']+)/i)?.[1] || DEFAULT_NEWS_IMAGE; }
 async function getNews() {
@@ -246,6 +370,7 @@ export async function onRequestGet({ env }) {
   try { players = await getPlayers(env); } catch (error) { errors.push(`player stats: ${error.message}`); }
   try { matches = await getCloudbetMatches(env, players, betUrl, diagnostics); } catch (error) { errors.push(`cloudbet predictions: ${error.message}`); }
   try { news = await getNews(); } catch (error) { errors.push(`news: ${error.message}`); }
+  try { await syncLivePredictionsToDb(env, matches, diagnostics); } catch (error) { errors.push(`db prediction sync: ${error.message}`); diagnostics.dbPredictionSync = "error"; }
   diagnostics.playerCount = players.length;
   diagnostics.matchCount = matches.length;
   diagnostics.liveMatchCount = matches.filter((match) => match.live).length;
