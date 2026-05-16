@@ -3,6 +3,69 @@ const SITEMAP_URL = `${SITE_URL}/sitemap.xml`;
 const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters";
 const X_TWEET_URL = "https://api.twitter.com/2/tweets";
 const THREADS_API_URL = "https://graph.threads.net/v1.0";
+const THREADS_LOCALES = {
+  en: {
+    label: "English",
+    pick: "Pick",
+    odds: "Odds",
+    preview: "Preview",
+    offer: "Offer",
+    follow: "Follow TennisTipz.",
+    responsible: "18+ Bet responsibly.",
+    hashtags: ["#TennisPredictions", "#CryptoBetting"],
+  },
+  hi: {
+    label: "Hindi",
+    pick: "पिक",
+    odds: "ऑड्स",
+    preview: "प्रीव्यू",
+    offer: "ऑफर",
+    follow: "TennisTipz को फॉलो करें.",
+    responsible: "18+ जिम्मेदारी से बेट करें.",
+    hashtags: ["#TennisPredictions", "#CryptoBetting"],
+  },
+  pt_br: {
+    label: "Brazilian Portuguese",
+    pick: "Palpite",
+    odds: "Odds",
+    preview: "Previa",
+    offer: "Oferta",
+    follow: "Siga o TennisTipz.",
+    responsible: "18+ Aposte com responsabilidade.",
+    hashtags: ["#PalpitesTenis", "#ApostasCrypto"],
+  },
+  es: {
+    label: "Spanish",
+    pick: "Pronostico",
+    odds: "Cuota",
+    preview: "Previa",
+    offer: "Oferta",
+    follow: "Sigue a TennisTipz.",
+    responsible: "18+ Apuesta con responsabilidad.",
+    hashtags: ["#PronosticosTenis", "#ApuestasCrypto"],
+  },
+  tr: {
+    label: "Turkish",
+    pick: "Tahmin",
+    odds: "Oran",
+    preview: "Analiz",
+    offer: "Teklif",
+    follow: "TennisTipz'i takip edin.",
+    responsible: "18+ Sorumlu bahis oynayın.",
+    hashtags: ["#TenisTahminleri", "#KriptoBahis"],
+  },
+};
+function normalizeThreadsLanguage(value = "en") {
+  const key = String(value || "en").toLowerCase().replace(/[-\s]/g, "_");
+  if (["pt", "br", "ptbr", "pt_br", "brazilian"].includes(key)) return "pt_br";
+  if (["hindi", "hin"].includes(key)) return "hi";
+  if (["spanish", "spa"].includes(key)) return "es";
+  if (["turkish", "tur"].includes(key)) return "tr";
+  return THREADS_LOCALES[key] ? key : "en";
+}
+function threadsPlatformKey(language) {
+  return language === "en" ? "threads" : `threads:${language}`;
+}
 const REFERRAL_LINKS = [
   {
     name: "Cloudbet",
@@ -234,25 +297,27 @@ function trimToLimit(text, maxLength) {
 }
 
 function composeThreadsPost(match, options = {}) {
+  const language = normalizeThreadsLanguage(options.language);
+  const locale = THREADS_LOCALES[language] || THREADS_LOCALES.en;
   const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
   const url = SITE_URL + "/predictions/" + slug + "/";
   const referral = chooseReferralLink(match, options.referral);
-  const hashtags = chooseHashtags(match).split(" ").slice(0, 2).join(" ");
+  const hashtags = (locale.hashtags || chooseHashtags(match).split(" ").slice(0, 2)).join(" ");
   const pick = match.predicted_winner_name || "value watch";
   const confidence = match.confidence ? String(match.confidence) + "%" : "model";
-  const odds = match.predicted_odds ? " | Odds " + String(match.predicted_odds) : "";
+  const odds = match.predicted_odds ? ` | ${locale.odds} ${String(match.predicted_odds)}` : "";
   const matchTitle = match.player_a_name + " vs " + match.player_b_name;
-  let lead = `${matchTitle}\nPick: ${pick} (${confidence})${odds}`;
-  let text = `${lead}\nPreview: ${url}\nOffer: ${referral.url}\n\nFollow TennisTipz. 18+ Bet responsibly. ${hashtags}`;
+  let lead = `${matchTitle}\n${locale.pick}: ${pick} (${confidence})${odds}`;
+  let text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${locale.responsible} ${hashtags}`;
   if (text.length > 500) {
-    lead = trimToLimit(lead, 500 - (`\nPreview: ${url}\nOffer: ${referral.url}\n\nFollow TennisTipz. 18+ Bet responsibly.`).length);
-    text = `${lead}\nPreview: ${url}\nOffer: ${referral.url}\n\nFollow TennisTipz. 18+ Bet responsibly.`;
+    lead = trimToLimit(lead, 500 - (`\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${locale.responsible}`).length);
+    text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${locale.responsible}`;
   }
   if (text.length > 500) {
-    lead = trimToLimit(`${matchTitle}\nPick: ${pick}`, 500 - (`\nOffer: ${referral.url}\n\nFollow TennisTipz. 18+`).length);
-    text = `${lead}\nOffer: ${referral.url}\n\nFollow TennisTipz. 18+`;
+    lead = trimToLimit(`${matchTitle}\n${locale.pick}: ${pick}`, 500 - (`\n${locale.offer}: ${referral.url}\n\n${locale.follow}`).length);
+    text = `${lead}\n${locale.offer}: ${referral.url}\n\n${locale.follow}`;
   }
-  return { text, url, referral, hashtags };
+  return { text, url, referral, hashtags, language, languageLabel: locale.label };
 }
 
 async function ensureAutomationTable(db) {
@@ -400,6 +465,8 @@ async function promote(request, env) {
   const dryRun = url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
   const platform = ["twitter", "threads", "all"].includes(url.searchParams.get("platform")) ? url.searchParams.get("platform") : "all";
   const referralOverride = url.searchParams.get("ref") || url.searchParams.get("referral") || null;
+  const threadsLanguage = normalizeThreadsLanguage(url.searchParams.get("lang") || url.searchParams.get("language") || "en");
+  const threadsPlatform = threadsPlatformKey(threadsLanguage);
   const postTwitterEnabled = platform === "all" || platform === "twitter";
   const postThreadsEnabled = platform === "all" || platform === "threads";
   const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "3", 10), 1), 25);
@@ -413,9 +480,9 @@ async function promote(request, env) {
 
   for (const match of matches) {
     const tweet = composeTweet(match, { referral: referralOverride });
-    const threadsPost = composeThreadsPost(match, { referral: referralOverride });
+    const threadsPost = composeThreadsPost(match, { referral: referralOverride, language: threadsLanguage });
     const twitterPosted = await isAlreadyPosted(db, "twitter", match.prediction_id);
-    const threadsPosted = await isAlreadyPosted(db, "threads", match.prediction_id);
+    const threadsPosted = await isAlreadyPosted(db, threadsPlatform, match.prediction_id);
 
     if (postTwitterEnabled && !twitterPosted && tweets.length < limit) {
       if (dryRun) {
@@ -429,11 +496,11 @@ async function promote(request, env) {
 
     if (postThreadsEnabled && !threadsPosted && threads.length < limit) {
       if (dryRun) {
-        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, text: threadsPost.text });
+        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, language: threadsPost.language, languageLabel: threadsPost.languageLabel, text: threadsPost.text });
       } else {
         const result = await postThreads(env, threadsPost.text);
-        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, result });
-        if (result.ok) await recordAutomationPost(db, "threads", match.prediction_id, threadsPost.url, result.payload);
+        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, language: threadsPost.language, languageLabel: threadsPost.languageLabel, result });
+        if (result.ok) await recordAutomationPost(db, threadsPlatform, match.prediction_id, threadsPost.url, result.payload);
       }
     }
 
