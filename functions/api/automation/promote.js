@@ -258,6 +258,14 @@ const HASHTAG_SETS = [
   ["#TennisPreview", "#CryptoSportsbook", "#TennisTipz"],
 ];
 
+const THREADS_TOPIC_TAGS = {
+  en: ["#Tennis", "#TennisPredictions", "#TennisBetting", "#SportsBetting", "#ATP", "#WTA"],
+  hi: ["#Tennis", "#TennisPredictions", "#TennisBetting", "#ATP", "#WTA"],
+  pt_br: ["#Tenis", "#PalpitesDeTenis", "#ApostasTenis", "#ATP", "#WTA"],
+  es: ["#Tenis", "#PronosticosTenis", "#ApuestasTenis", "#ATP", "#WTA"],
+  tr: ["#Tenis", "#TenisTahminleri", "#TenisBahisleri", "#ATP", "#WTA"],
+};
+
 const FOLLOW_PROMPTS = [
   "Follow TennisTipz for more tennis picks.",
   "Follow us for daily tennis predictions.",
@@ -281,6 +289,20 @@ function chooseReferralLink(match, preferredReferral) {
 
 function chooseHashtags(match) {
   return HASHTAG_SETS[rotationIndex(match, HASHTAG_SETS.length, "tags")].join(" ");
+}
+
+function chooseTopicTags(match, language = "en", platform = "threads") {
+  const normalizedLanguage = normalizeThreadsLanguage(language);
+  const baseTags = platform === "threads"
+    ? (THREADS_TOPIC_TAGS[normalizedLanguage] || THREADS_TOPIC_TAGS.en)
+    : HASHTAG_SETS[rotationIndex(match, HASHTAG_SETS.length, "tags")];
+  const tour = String(match.tour || "").toUpperCase();
+  const tags = [...baseTags];
+  if (tour && !tags.includes(`#${tour}`)) tags.push(`#${tour}`);
+  const start = rotationIndex(match, tags.length, `topic:${platform}:${normalizedLanguage}`);
+  const rotated = [...tags.slice(start), ...tags.slice(0, start)];
+  const selected = rotated.filter((tag, index, list) => list.indexOf(tag) === index).slice(0, 4);
+  return selected.length >= 2 ? selected : ["#Tennis", "#TennisPredictions", "#TennisBetting"];
 }
 
 function socialPreviewIndex(match, salt = "") {
@@ -409,7 +431,26 @@ function trimToLimit(text, maxLength) {
   return text.slice(0, Math.max(0, maxLength - 1)).trimEnd() + "…";
 }
 
-function sanitizeAiPost(text, maxLength, requiredLinks = []) {
+function extractHashtags(text) {
+  return String(text || "").match(/#[\p{L}\p{N}_]+/gu) || [];
+}
+
+function appendTopicTags(text, topicTags = [], maxLength = 500) {
+  const existing = new Set(extractHashtags(text).map((tag) => tag.toLowerCase()));
+  const missing = topicTags.filter((tag) => !existing.has(String(tag).toLowerCase()));
+  const currentCount = existing.size;
+  if (currentCount >= 2) return text;
+
+  let clean = String(text || "").trim();
+  const needed = missing.slice(0, Math.max(0, 2 - currentCount) || 2);
+  for (const tag of needed) {
+    const candidate = `${clean}${clean ? " " : ""}${tag}`.trim();
+    if (candidate.length <= maxLength) clean = candidate;
+  }
+  return clean;
+}
+
+function sanitizeAiPost(text, maxLength, requiredLinks = [], topicTags = []) {
   let clean = String(text || "")
     .replace(/\s+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -419,9 +460,11 @@ function sanitizeAiPost(text, maxLength, requiredLinks = []) {
   for (const link of requiredLinks) {
     if (link) clean += `\n${link}`;
   }
+  clean = appendTopicTags(clean, topicTags, maxLength);
   clean = clean.replace(/\bguaranteed\b/gi, "model-backed").replace(/\bsure win\b/gi, "prediction");
   if (clean.length <= maxLength) return clean;
-  const suffix = requiredLinks.filter(Boolean).join("\n") + "\n18+ Bet responsibly. Follow, comment and repost.";
+  const tagSuffix = topicTags.slice(0, 3).join(" ");
+  const suffix = requiredLinks.filter(Boolean).join("\n") + `\n18+ Bet responsibly. Follow, comment and repost. ${tagSuffix}`.trimEnd();
   const lead = trimToLimit(clean.split(/\n{2,}/)[0] || clean, Math.max(40, maxLength - suffix.length - 2));
   return `${lead}\n${suffix}`;
 }
@@ -436,7 +479,7 @@ async function callOpenAiPost(env, payload, fallbackText, maxLength) {
       input: [
         {
           role: "system",
-          content: "You write short, catchy tennis prediction social posts for TennisTipz. Use only supplied facts. Always include both supplied links exactly once: the prediction link and the affiliate/referral link. Choose 2 to 4 popular, relevant hashtags for the platform, language, tour, and betting context; do not rely on a fixed hashtag list. Never guarantee results. Mention 18+ and responsible betting. Urge users to follow, comment, and repost. Match the requested language. Return only the final post text.",
+          content: "You write short, catchy tennis prediction social posts for TennisTipz. Use only supplied facts. Always include both supplied links exactly once: the prediction link and the affiliate/referral link. For Threads, end with 2 to 4 popular topic tags/hashtags selected from the supplied suggestedPopularTopicTags list when possible. For other platforms, include 2 to 4 popular, relevant hashtags for the platform, language, tour, and betting context. Never guarantee results. Mention 18+ and responsible betting. Urge users to follow, comment, and repost. Match the requested language. Return only the final post text.",
         },
         { role: "user", content: JSON.stringify(payload) },
       ],
@@ -447,7 +490,7 @@ async function callOpenAiPost(env, payload, fallbackText, maxLength) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) return { text: fallbackText, source: "template", reason: `openai-${response.status}`, payload: data };
   const raw = data.output_text || data.output?.flatMap((item) => item.content || []).map((part) => part.text).filter(Boolean).join("\n") || "";
-  const text = sanitizeAiPost(raw, maxLength, [payload.predictionUrl, payload.referral?.url]);
+  const text = sanitizeAiPost(raw, maxLength, [payload.predictionUrl, payload.referral?.url], payload.suggestedPopularTopicTags || []);
   if (!text || !payload.predictionUrl || !payload.referral?.url || !text.includes(payload.predictionUrl) || !text.includes(payload.referral.url)) {
     return { text: fallbackText, source: "template", reason: "openai-missing-required-links" };
   }
@@ -460,6 +503,9 @@ async function composeAiSocialPost(env, match, options = {}) {
   const locale = THREADS_LOCALES[language] || THREADS_LOCALES.en;
   const base = platform === "threads" ? composeThreadsPost(match, options) : composeSocialPost(match, options);
   const maxLength = platform === "twitter" ? 280 : 500;
+  const topicTags = platform === "threads"
+    ? chooseTopicTags(match, language, platform)
+    : chooseHashtags(match).split(" ");
   const payload = {
     platform,
     language: locale.label || "English",
@@ -477,7 +523,10 @@ async function composeAiSocialPost(env, match, options = {}) {
     },
     newsHook: base.news ? { title: base.news.title, source: base.news.source, url: base.news.url } : null,
     requiredCallToAction: locale.engage || "Comment your pick and repost for more tennis predictions.",
-    hashtagInstruction: "Choose 2 to 4 popular, relevant hashtags for this post in the requested language and platform.",
+    suggestedPopularTopicTags: topicTags,
+    hashtagInstruction: platform === "threads"
+      ? "End the post with 2 to 4 popular Threads topic tags from suggestedPopularTopicTags. Keep them visible in the final text."
+      : "Choose 2 to 4 popular, relevant hashtags for this post in the requested language and platform.",
   };
   const ai = await callOpenAiPost(env, payload, base.text, maxLength);
   return { ...base, language, languageLabel: locale.label, text: ai.text, ai };
@@ -488,7 +537,8 @@ function composeThreadsPost(match, options = {}) {
   const locale = THREADS_LOCALES[language] || THREADS_LOCALES.en;
   const url = predictionUrl(match, `threads:${language}`);
   const referral = chooseReferralLink(match, options.referral);
-  const hashtags = (locale.hashtags || chooseHashtags(match).split(" ").slice(0, 2)).join(" ");
+  const topicTags = chooseTopicTags(match, language, "threads");
+  const hashtags = topicTags.join(" ");
   const postStyle = options.postStyle || "prediction";
   const news = postStyle === "news" ? options.newsHook : null;
   const pick = match.predicted_winner_name || "value watch";
@@ -498,15 +548,17 @@ function composeThreadsPost(match, options = {}) {
   const engage = locale.engage || "Comment your pick and repost.";
   const newsLine = news ? `${locale.news || "News angle"}: ${trimToLimit(news.title, 118)}\n\n` : "";
   let lead = `${newsLine}${matchTitle}\n${locale.pick}: ${pick} (${confidence})${odds}`;
-  let text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible} ${hashtags}`;
+  const suffix = `${locale.follow} ${engage} ${locale.responsible} ${hashtags}`;
+  let text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${suffix}`;
   if (text.length > 500) {
     if (news) lead = `${locale.news || "News angle"}: ${trimToLimit(news.title, 72)}\n${locale.pick}: ${pick} (${confidence})${odds}`;
-    lead = trimToLimit(lead, 500 - (`\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible}`).length);
-    text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible}`;
+    lead = trimToLimit(lead, 500 - (`\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${suffix}`).length);
+    text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${suffix}`;
   }
   if (text.length > 500) {
-    lead = trimToLimit(`${matchTitle}\n${locale.pick}: ${pick}`, 500 - (`\n${locale.offer}: ${referral.url}\n\n${engage}`).length);
-    text = `${lead}\n${locale.offer}: ${referral.url}\n\n${engage}`;
+    const compactSuffix = `${engage} ${locale.responsible} ${hashtags}`;
+    lead = trimToLimit(`${matchTitle}\n${locale.pick}: ${pick}`, 500 - (`\n${locale.offer}: ${referral.url}\n\n${compactSuffix}`).length);
+    text = `${lead}\n${locale.offer}: ${referral.url}\n\n${compactSuffix}`;
   }
   return { text, url, referral, hashtags, language, languageLabel: locale.label, news, postStyle };
 }
