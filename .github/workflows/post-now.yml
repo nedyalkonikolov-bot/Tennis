@@ -1,0 +1,36 @@
+name: TennisTipz post now
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      language:
+        description: "Threads post language"
+        required: false
+        default: "en"
+      style:
+        description: "Post style"
+        required: false
+        default: "prediction"
+
+jobs:
+  post:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[post-now]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post one TennisTipz prediction to Threads
+        env:
+          SYNC_TOKEN: ${{ secrets.TENNISTIPZ_DATABASE_SYNC_TOKEN }}
+          LANGUAGE: ${{ github.event.inputs.language || 'en' }}
+          STYLE: ${{ github.event.inputs.style || 'prediction' }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "Missing TENNISTIPZ_DATABASE_SYNC_TOKEN secret"
+            exit 1
+          fi
+
+          curl --fail-with-body -X POST \
+            "https://tennistipz.win/api/automation/promote?platform=threads&limit=1&lang=${LANGUAGE}&style=${STYLE}" \
+            -H "x-sync-token: $SYNC_TOKEN"
