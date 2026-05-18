@@ -1,0 +1,53 @@
+.side-banner {
+  position: fixed;
+  top: 50%;
+  z-index: 30;
+  display: none;
+  width: 120px;
+  height: 450px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #020617;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.35);
+  transform: translateY(-50%);
+}
+
+.side-banner img {
+  display: block;
+  width: 120px;
+  height: 450px;
+  object-fit: cover;
+}
+
+.side-banner-left {
+  left: 12px;
+}
+
+.side-banner-right {
+  right: 12px;
+}
+
+@media (min-width: 1280px) and (min-height: 600px) {
+  body {
+    box-sizing: border-box;
+    padding-right: 132px;
+    padding-left: 132px;
+  }
+
+  .side-banner {
+    display: block;
+  }
+}
+
+@media (min-width: 1600px) and (min-height: 700px) {
+  body {
+    padding-right: 184px;
+    padding-left: 184px;
+  }
+
+  .side-banner,
+  .side-banner img {
+    width: 160px;
+    height: 600px;
+  }
+}
