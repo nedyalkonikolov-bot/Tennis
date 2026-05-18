@@ -394,7 +394,7 @@ async function ensureDbMatchPlayer(db, name, tour, playerKey = "") {
   await db.prepare(`
     INSERT INTO players (id, player_key, name, normalized_name, tour, source, updated_at)
     VALUES (?, ?, ?, ?, ?, 'live-prediction-sync', datetime('now'))
-    ON CONFLICT(id) DO UPDATE SET
+    ON CONFLICT(tour, normalized_name) DO UPDATE SET
       player_key = COALESCE(NULLIF(excluded.player_key, ''), player_key),
       name = excluded.name,
       normalized_name = excluded.normalized_name,
