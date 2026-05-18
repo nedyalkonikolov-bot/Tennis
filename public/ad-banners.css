@@ -1,9 +1,17 @@
+html,
+body {
+  background: #020617;
+}
+
 .site-ad-shell {
   width: 100%;
+  min-height: 100vh;
+  background: #020617;
 }
 
 .side-banner-rail {
   display: none;
+  background: #020617;
 }
 
 .side-banner {
@@ -49,7 +57,7 @@
     top: 92px;
     display: block;
     padding-top: 28px;
-    background: transparent;
+    background: #020617;
   }
 }
 
