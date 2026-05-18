@@ -9,18 +9,16 @@
 .side-banner {
   display: block;
   overflow: clip;
-  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.94);
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.28);
+  background: #111c2d;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.22);
   color: #e5edf7;
   text-decoration: none;
-  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  transition: box-shadow 180ms ease, transform 180ms ease;
 }
 
 .side-banner:hover {
-  border-color: rgba(190, 242, 100, 0.45);
-  box-shadow: 0 24px 70px rgba(132, 204, 22, 0.16), 0 22px 60px rgba(0, 0, 0, 0.34);
+  box-shadow: 0 24px 70px rgba(132, 204, 22, 0.13), 0 22px 60px rgba(0, 0, 0, 0.28);
   transform: translateY(-2px);
 }
 
@@ -41,7 +39,6 @@
 }
 
 .side-banner-note {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
   color: #94a3b8;
 }
 
