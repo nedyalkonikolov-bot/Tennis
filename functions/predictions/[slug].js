@@ -28,6 +28,12 @@ function wl(wins, losses) {
   return `${asNumber(wins)}-${asNumber(losses)}`;
 }
 
+function isoDateOrUndefined(value) {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
 function buildAiPrediction(row) {
   const confidence = asNumber(row.confidence, 0);
   const edge = asNumber(row.model_edge, 0);
@@ -92,6 +98,7 @@ function html(match, slug) {
   const title = `${match.player_a_name} vs ${match.player_b_name}`;
   const canonical = `${SITE_URL}/predictions/${slug}/`;
   const ai = buildAiPrediction(match);
+  const startDate = isoDateOrUndefined(match.start_time);
   const description = `${title} prediction: ${match.predicted_winner_name || "AI pick"}, ${match.confidence || "model"}% confidence, ${match.surface || "tennis"} surface, Cloudbet odds ${match.predicted_odds || "available"}.`;
   const schema = {
     "@context": "https://schema.org",
@@ -99,7 +106,7 @@ function html(match, slug) {
     name: title,
     url: canonical,
     sport: "Tennis",
-    startDate: match.start_time || undefined,
+    startDate,
     eventStatus: match.live ? "https://schema.org/EventInProgress" : "https://schema.org/EventScheduled",
     competitor: [{ "@type": "Person", name: match.player_a_name }, { "@type": "Person", name: match.player_b_name }],
     location: { "@type": "Place", name: match.tournament || "Tennis tournament" },

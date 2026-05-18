@@ -187,13 +187,19 @@ function makePrediction(event, odds, profileA, profileB) {
   const confidence = clamp(Math.round(54 + Math.abs(modelEdge) * 0.78 + (profileA && profileB ? 4 : 1)), 52, 86);
   return { predictedWinner: winner, predictedSide: side, predictedWinnerOdds: side === "home" ? odds.home : odds.away, confidence, modelEdge: Math.round(modelEdge * 10) / 10, factors: { marketProbability: prob, rankEdge: Math.round(rankEdge * 10) / 10, pointsEdge: Math.round(pointsEdge * 10) / 10, surfaceEdge: Math.round(surfaceEdge * 10) / 10, dataPoints: [odds.home, profileA?.rank && profileB?.rank, profileA?.points && profileB?.points].filter(Boolean).length } };
 }
+function toIsoDate(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+}
 function normalizeMatch(event, odds, players, betUrl) {
   const tour = tourFromText(eventText(event));
   const profileA = profileFor(players, event.home.name, tour);
   const profileB = profileFor(players, event.away.name, tour);
   const prediction = makePrediction(event, odds, profileA, profileB);
   const startDate = event.startTime || event.cutoffTime || "";
-  return { id: String(event.id || event.key), tournament: event.competition?.name || event.name || "Cloudbet Tennis", startTime: startDate ? new Date(startDate).toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Available now", playerA: event.home.name, playerB: event.away.name, playerAKey: profileA?.playerKey || "", playerBKey: profileB?.playerKey || "", surface: inferSurface(event), market: `${prediction.predictedWinner} to Win`, formA: 50, formB: 50, recentA: emptyRecentForm(), recentB: emptyRecentForm(), rankA: profileA?.rank || null, rankB: profileB?.rank || null, pointsA: profileA?.points || 0, pointsB: profileB?.points || 0, serveHoldA: profileA?.hold || 75, serveHoldB: profileB?.hold || 75, returnEdge: 0, h2hEdge: 0, odds: prediction.predictedWinnerOdds, oddsSource: "Cloudbet", cloudbetOdds: odds, predictedWinner: prediction.predictedWinner, predictedSide: prediction.predictedSide, predictedWinnerOdds: prediction.predictedWinnerOdds, confidence: prediction.confidence, modelEdge: prediction.modelEdge, predictionFactors: prediction.factors, status: isLive(event) ? "Live" : "Scheduled", score: "", live: isLive(event), tour, doubles: isDoubles(event), betUrl };
+  const startIso = toIsoDate(startDate);
+  return { id: String(event.id || event.key), tournament: event.competition?.name || event.name || "Cloudbet Tennis", startTime: startIso ? new Date(startIso).toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Available now", startIso, playerA: event.home.name, playerB: event.away.name, playerAKey: profileA?.playerKey || "", playerBKey: profileB?.playerKey || "", surface: inferSurface(event), market: `${prediction.predictedWinner} to Win`, formA: 50, formB: 50, recentA: emptyRecentForm(), recentB: emptyRecentForm(), rankA: profileA?.rank || null, rankB: profileB?.rank || null, pointsA: profileA?.points || 0, pointsB: profileB?.points || 0, serveHoldA: profileA?.hold || 75, serveHoldB: profileB?.hold || 75, returnEdge: 0, h2hEdge: 0, odds: prediction.predictedWinnerOdds, oddsSource: "Cloudbet", cloudbetOdds: odds, predictedWinner: prediction.predictedWinner, predictedSide: prediction.predictedSide, predictedWinnerOdds: prediction.predictedWinnerOdds, confidence: prediction.confidence, modelEdge: prediction.modelEdge, predictionFactors: prediction.factors, status: isLive(event) ? "Live" : "Scheduled", score: "", live: isLive(event), tour, doubles: isDoubles(event), betUrl };
 }
 async function getCloudbetMatches(env, players, betUrl, diagnostics) {
   const sport = await fetchCloudbet(env, "/sports/tennis");
@@ -288,7 +294,7 @@ async function upsertLivePrediction(db, match) {
     String(match.id),
     tour,
     safeText(match.tournament),
-    safeText(match.startTime),
+    safeText(match.startIso || match.startTime),
     match.status || (match.live ? "Live" : "Scheduled"),
     match.live ? 1 : 0,
     safeText(match.surface),

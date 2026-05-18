@@ -82,12 +82,13 @@ async function runScheduled(controller, env) {
   const results = [];
   if (cron === "*/15 * * * *") {
     results.push(await refreshPredictions(env));
+    const minute = scheduledAt.getUTCMinutes();
+    if (minute === 0) results.push(await postThreadsPrediction(env, "hi"));
+    if (minute === 15) results.push(await postThreadsPrediction(env, "pt-BR"));
+    if (minute === 30) results.push(await postThreadsPrediction(env, "es"));
+    if (minute === 45) results.push(await postThreadsPrediction(env, "tr"));
     if (scheduledAt.getUTCHours() === 2 && scheduledAt.getUTCMinutes() === 15) results.push(await syncDatabase(env));
   }
-  if (cron === "7 * * * *") results.push(await postThreadsPrediction(env, "hi"));
-  if (cron === "22 * * * *") results.push(await postThreadsPrediction(env, "pt-BR"));
-  if (cron === "37 * * * *") results.push(await postThreadsPrediction(env, "es"));
-  if (cron === "52 * * * *") results.push(await postThreadsPrediction(env, "tr"));
   return { ok: true, cron, ranAt: new Date().toISOString(), results };
 }
 

@@ -218,7 +218,7 @@ async function upsertMatchAndPrediction(db, match) {
     String(match.id),
     tour,
     safeText(match.tournament),
-    safeText(match.startTime),
+    safeText(match.startIso || match.startTime),
     match.status || (match.live ? "Live" : "Scheduled"),
     match.live ? 1 : 0,
     safeText(match.surface),

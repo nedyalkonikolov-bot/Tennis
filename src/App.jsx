@@ -95,6 +95,12 @@ function slugify(value = "") {
     .replace(/^-+|-+$/g, "") || "item";
 }
 
+function isoDateOrUndefined(value) {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
 function normalizePlayer(player) {
   const recentMatches = Number(player.recent_matches ?? player.stored_matches ?? 0);
   const recentWins = Number(player.recent_wins ?? player.stored_wins ?? 0);
@@ -260,7 +266,7 @@ function updateStructuredData(route, liveData, dbData) {
         url: `${siteUrl}${match.url}`,
         sport: "Tennis",
         eventStatus: match.live ? "https://schema.org/EventInProgress" : "https://schema.org/EventScheduled",
-        startDate: match.start_time || undefined,
+        startDate: isoDateOrUndefined(match.start_time),
         location: { "@type": "Place", name: match.tournament || "Tennis tournament" },
         competitor: [
           { "@type": "SportsTeam", name: match.player_a_name },
