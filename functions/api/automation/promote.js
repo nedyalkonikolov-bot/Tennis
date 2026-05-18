@@ -340,7 +340,7 @@ function composeSocialPost(match, options = {}) {
   const template = rotationIndex(match, 5, "copy");
   let lead;
 
-  if (news) lead = `Tennis news hook: ${trimToLimit(news.title, 96)}\n\n${matchTitle}\nAI pick: ${pick} (${confidence}).`;
+  if (news) lead = `Tennis news hook: ${trimToLimit(news.title, 72)}\n${matchTitle}\nAI pick: ${pick} (${confidence}).`;
   else if (template === 0) lead = "Match preview: " + matchTitle + "\n" + tourLine + "\n\nModel pick: " + pick + " (" + confidence + ").";
   else if (template === 1) lead = matchTitle + "\n\nTennisTipz model leans " + pick + " with " + confidence + " confidence.";
   else if (template === 2) lead = "On the board: " + matchTitle + "\n\nPrediction edge: " + pick + " (" + confidence + ").";
@@ -349,7 +349,10 @@ function composeSocialPost(match, options = {}) {
 
   const oddsLine = odds ? "\nOdds tracked: " + odds + "." : "";
   let text = lead + oddsLine + "\n\nFull prediction: " + url + "\nBetting offer: " + referral.url + "\n\n" + followPrompt + "\nComment your pick. 18+ Bet responsibly. " + hashtags;
-  text = trimToLimit(text, 275);
+  if (text.length > 520) {
+    const compactLead = `${matchTitle}\nAI pick: ${pick} (${confidence}).${oddsLine}`;
+    text = compactLead + "\n\nPrediction: " + url + "\nOffer: " + referral.url + "\n\n18+ Bet responsibly. " + hashtags;
+  }
   return { text, url, referral, hashtags, news, postStyle };
 }
 
@@ -380,6 +383,7 @@ function composeThreadsPost(match, options = {}) {
   let lead = `${newsLine}${matchTitle}\n${locale.pick}: ${pick} (${confidence})${odds}`;
   let text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible} ${hashtags}`;
   if (text.length > 500) {
+    if (news) lead = `${locale.news || "News angle"}: ${trimToLimit(news.title, 72)}\n${locale.pick}: ${pick} (${confidence})${odds}`;
     lead = trimToLimit(lead, 500 - (`\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible}`).length);
     text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible}`;
   }
