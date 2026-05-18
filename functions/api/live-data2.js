@@ -1,6 +1,9 @@
 const TENNIS_API_BASE = "https://api.api-tennis.com/tennis/";
 const CLOUDBET_API_BASE = "https://sports-api.cloudbet.com/pub/v2/odds";
-const TENNIS_RSS = "https://www.tennis.com/roots/rss-feeds/news/";
+const NEWS_FEEDS = [
+  { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
+  { name: "TennisHead", url: "https://tennishead.net/feed" },
+];
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_BET_URL = "https://www.cloudbet.com/en/sports/tennis";
 const DEFAULT_NEWS_IMAGE = "https://images.tennis.com/image/upload/t_q-best/tenniscom-prd/colectyfnidvc41bazww.jpg";
@@ -501,16 +504,26 @@ async function syncLivePredictionsToDb(env, matches, diagnostics) {
 }
 function rssTag(item, tag) { return cleanText(item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`, "i"))?.[1] || ""); }
 function rssImage(item) { return item.match(/<media:content[^>]+url=["']([^"']+)/i)?.[1] || item.match(/<enclosure[^>]+url=["']([^"']+)/i)?.[1] || DEFAULT_NEWS_IMAGE; }
-async function getNews() {
-  const response = await fetch(TENNIS_RSS, { headers: { accept: "application/rss+xml, application/xml, text/xml" } });
-  if (!response.ok) throw new Error(`Tennis.com returned ${response.status}`);
+async function getNewsFromFeed(feed) {
+  const response = await fetch(feed.url, { headers: { accept: "application/rss+xml, application/xml, text/xml" } });
+  if (!response.ok) throw new Error(`${feed.name} returned ${response.status}`);
   return [...(await response.text()).matchAll(/<item[\s\S]*?<\/item>/gi)].slice(0, 16).map((match, index) => {
     const item = match[0];
     const title = rssTag(item, "title");
     const url = rssTag(item, "link") || rssTag(item, "guid") || "#";
     const published = new Date(rssTag(item, "pubDate"));
-    return { id: url || `news-${index}`, title, category: /rank|stat/i.test(title) ? "Trend" : /open|masters|draw|schedule/i.test(title) ? "Tournament" : "News", time: Number.isNaN(published.getTime()) ? "Latest" : published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }), summary: rssTag(item, "description") || "Read the latest tennis update.", url, imageUrl: rssImage(item), source: "Tennis.com" };
+    return { id: url || `${feed.name}-${index}`, title, category: /rank|stat/i.test(title) ? "Trend" : /open|masters|draw|schedule/i.test(title) ? "Tournament" : "News", time: Number.isNaN(published.getTime()) ? "Latest" : published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }), publishedAt: Number.isNaN(published.getTime()) ? "" : published.toISOString(), summary: rssTag(item, "description") || "Read the latest tennis update.", url, imageUrl: rssImage(item), source: feed.name };
   });
+}
+
+async function getNews() {
+  const settled = await Promise.allSettled(NEWS_FEEDS.map(getNewsFromFeed));
+  const news = settled.flatMap((item) => item.status === "fulfilled" ? item.value : []);
+  const seen = new Set();
+  return news
+    .filter((item) => item.title && item.url && !seen.has(item.url) && seen.add(item.url))
+    .sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0))
+    .slice(0, 16);
 }
 
 async function enhanceNewsWithOpenAi(env, news, diagnostics) {
@@ -548,7 +561,7 @@ async function enhanceNewsWithOpenAi(env, news, diagnostics) {
     required: ["news"],
   };
   const result = await callOpenAiJson(env, "tennis_news", schema, [
-    { role: "system", content: "You are TennisTipz AI. Rewrite the supplied tennis RSS headlines into original, concise betting-research news cards. Use only supplied facts. Do not copy article wording. Do not invent injuries, rumors, or match results. Return JSON only." },
+    { role: "system", content: "You are TennisTipz AI. Rewrite the supplied ESPN and TennisHead tennis RSS headlines into original, concise betting-research news cards. Use only supplied facts. Do not copy article wording. Do not invent injuries, rumors, or match results. Return JSON only." },
     { role: "user", content: JSON.stringify({ generatedAt: new Date().toISOString(), articles: news.slice(0, 8).map(({ id, title, summary, url, source }) => ({ id, title, summary, url, source })) }) },
   ], 1800);
   const byId = new Map((result?.news || []).map((item) => [String(item.id), item]));
@@ -573,7 +586,7 @@ async function enhanceNewsWithOpenAi(env, news, diagnostics) {
 export async function onRequestGet({ env }) {
   const betUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_BET_URL).trim();
   const errors = [];
-  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasOpenAiKey: Boolean(env.OPENAI_API_KEY), openAiModel: getOpenAiModel(env), hasPlayerCache: Boolean(getPlayerCache(env)), hasD1: Boolean(env.TENNIS_DB), predictionSource: hasOpenAi(env) ? "OpenAI structured prediction layer using Cloudbet odds, API-Tennis/player DB form, rankings and surface data" : "Cloudbet ATP/WTA match markets. Direct tennis.winner when available; derived winner side from tennis.winner_and_total when direct winner is absent.", playerStats: "Top 500 ATP + Top 500 WTA", newsProvider: hasOpenAi(env) ? "OpenAI summaries from Tennis.com RSS" : "Tennis.com RSS" };
+  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasOpenAiKey: Boolean(env.OPENAI_API_KEY), openAiModel: getOpenAiModel(env), hasPlayerCache: Boolean(getPlayerCache(env)), hasD1: Boolean(env.TENNIS_DB), predictionSource: hasOpenAi(env) ? "OpenAI structured prediction layer using Cloudbet odds, API-Tennis/player DB form, rankings and surface data" : "Cloudbet ATP/WTA match markets. Direct tennis.winner when available; derived winner side from tennis.winner_and_total when direct winner is absent.", playerStats: "Top 500 ATP + Top 500 WTA", newsProvider: hasOpenAi(env) ? "OpenAI summaries from ESPN + TennisHead RSS" : "ESPN + TennisHead RSS" };
   let players = [];
   let matches = [];
   let news = [];
@@ -589,5 +602,5 @@ export async function onRequestGet({ env }) {
   diagnostics.upcomingMatchCount = matches.filter((match) => !match.live).length;
   diagnostics.newsCount = news.length;
   diagnostics.newsWithImagesCount = news.filter((article) => article.imageUrl).length;
-  return json({ generatedAt: new Date().toISOString(), source: { tennis: players.length ? "API-Tennis" : "fallback", odds: env.CLOUDBET_API_KEY && !errors.some((error) => error.startsWith("cloudbet")) ? "Cloudbet" : "fallback", news: news.length ? (diagnostics.openAiNews === "success" || diagnostics.openAiNews === "cached" ? "OpenAI + Tennis.com" : "Tennis.com") : "fallback" }, betUrl, matches, players: players.length ? players : fallbackPlayers, news: news.length ? news : fallbackNews, errors, diagnostics });
+  return json({ generatedAt: new Date().toISOString(), source: { tennis: players.length ? "API-Tennis" : "fallback", odds: env.CLOUDBET_API_KEY && !errors.some((error) => error.startsWith("cloudbet")) ? "Cloudbet" : "fallback", news: news.length ? (diagnostics.openAiNews === "success" || diagnostics.openAiNews === "cached" ? "OpenAI + ESPN/TennisHead" : "ESPN/TennisHead") : "fallback" }, betUrl, matches, players: players.length ? players : fallbackPlayers, news: news.length ? news : fallbackNews, errors, diagnostics });
 }

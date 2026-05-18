@@ -3,7 +3,10 @@ const SITEMAP_URL = `${SITE_URL}/sitemap.xml`;
 const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters";
 const X_TWEET_URL = "https://api.twitter.com/2/tweets";
 const THREADS_API_URL = "https://graph.threads.net/v1.0";
-const TENNIS_RSS = "https://www.tennis.com/roots/rss-feeds/news/";
+const NEWS_FEEDS = [
+  { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
+  { name: "TennisHead", url: "https://tennishead.net/feed" },
+];
 const THREADS_LOCALES = {
   en: {
     label: "English",
@@ -290,9 +293,9 @@ function rssTag(item, tag) {
   return decodeHtml(item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] || "");
 }
 
-async function getRecentNewsHooks(limit = 8) {
-  const response = await fetch(TENNIS_RSS, { headers: { accept: "application/rss+xml, application/xml, text/xml" } });
-  if (!response.ok) throw new Error(`Tennis news returned ${response.status}`);
+async function getNewsHooksFromFeed(feed, limit = 8) {
+  const response = await fetch(feed.url, { headers: { accept: "application/rss+xml, application/xml, text/xml" } });
+  if (!response.ok) throw new Error(`${feed.name} news returned ${response.status}`);
   const xml = await response.text();
   return xml
     .split(/<item\b/i)
@@ -301,9 +304,20 @@ async function getRecentNewsHooks(limit = 8) {
       const title = rssTag(item, "title");
       const summary = rssTag(item, "description");
       const url = rssTag(item, "link") || rssTag(item, "guid") || "";
-      return title ? { id: url || `news-${index}`, title, summary, url } : null;
+      const published = new Date(rssTag(item, "pubDate"));
+      return title ? { id: url || `${feed.name}-${index}`, title, summary, url, source: feed.name, publishedAt: Number.isNaN(published.getTime()) ? "" : published.toISOString() } : null;
     })
     .filter(Boolean);
+}
+
+async function getRecentNewsHooks(limit = 8) {
+  const settled = await Promise.allSettled(NEWS_FEEDS.map((feed) => getNewsHooksFromFeed(feed, limit)));
+  const seen = new Set();
+  return settled
+    .flatMap((item) => item.status === "fulfilled" ? item.value : [])
+    .filter((item) => item.url && !seen.has(item.url) && seen.add(item.url))
+    .sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0))
+    .slice(0, limit);
 }
 
 function chooseNewsHook(match, newsHooks = []) {
