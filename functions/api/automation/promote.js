@@ -404,9 +404,11 @@ function sanitizeAiPost(text, maxLength, requiredLinks = []) {
   let clean = String(text || "")
     .replace(/\s+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[ \t]{2,}/g, " ")
     .trim();
   for (const link of requiredLinks) {
-    if (link && !clean.includes(link)) clean += `\n${link}`;
+    if (link) clean += `\n${link}`;
   }
   clean = clean.replace(/\bguaranteed\b/gi, "model-backed").replace(/\bsure win\b/gi, "prediction");
   if (clean.length <= maxLength) return clean;
