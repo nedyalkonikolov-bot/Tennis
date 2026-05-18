@@ -481,26 +481,136 @@ async function upsertLivePrediction(db, match) {
   `).bind(predictionId, matchId).run();
   return { matchId, predictionId };
 }
+function livePlayerId(tour, name, playerKey = "", playerIdByName) {
+  const normalized = normalizeName(name);
+  const key = `${tour}:${normalized}`;
+  if (!playerIdByName.has(key)) {
+    playerIdByName.set(key, playerKey ? `${tour.toLowerCase()}:${playerKey}` : makeDbPlayerId(tour, name));
+  }
+  return playerIdByName.get(key);
+}
+function livePredictionStatements(db, match, playerIdByName, queuedPlayers) {
+  const tour = match.tour === "WTA" ? "WTA" : "ATP";
+  const source = match.oddsSource === "Cloudbet" ? "cloudbet" : "live-data";
+  const matchId = makeDbMatchId(source, match.id);
+  const playerAId = livePlayerId(tour, match.playerA, match.playerAKey, playerIdByName);
+  const playerBId = livePlayerId(tour, match.playerB, match.playerBKey, playerIdByName);
+  const statements = [];
+  [
+    { id: playerAId, name: match.playerA, key: match.playerAKey },
+    { id: playerBId, name: match.playerB, key: match.playerBKey },
+  ].forEach((player) => {
+    const normalized = normalizeName(player.name);
+    const queueKey = `${tour}:${normalized}`;
+    if (queuedPlayers.has(queueKey)) return;
+    queuedPlayers.add(queueKey);
+    statements.push(db.prepare(`
+      INSERT INTO players (id, player_key, name, normalized_name, tour, source, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'live-prediction-sync', datetime('now'))
+      ON CONFLICT(tour, normalized_name) DO UPDATE SET
+        player_key = COALESCE(NULLIF(excluded.player_key, ''), player_key),
+        name = excluded.name,
+        updated_at = datetime('now')
+    `).bind(player.id, safeText(player.key), safeText(player.name), normalized, tour));
+  });
+  statements.push(db.prepare(`
+    INSERT INTO matches (
+      id, source, source_event_id, tour, tournament, start_time, status, live, surface,
+      player_a_id, player_b_id, player_a_name, player_b_name, normalized_player_a, normalized_player_b,
+      score, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(source, source_event_id) DO UPDATE SET
+      tour = excluded.tour,
+      tournament = excluded.tournament,
+      start_time = excluded.start_time,
+      status = excluded.status,
+      live = excluded.live,
+      surface = excluded.surface,
+      player_a_id = excluded.player_a_id,
+      player_b_id = excluded.player_b_id,
+      player_a_name = excluded.player_a_name,
+      player_b_name = excluded.player_b_name,
+      normalized_player_a = excluded.normalized_player_a,
+      normalized_player_b = excluded.normalized_player_b,
+      score = excluded.score,
+      updated_at = datetime('now')
+  `).bind(
+    matchId,
+    source,
+    String(match.id),
+    tour,
+    safeText(match.tournament),
+    safeText(match.startIso || match.startTime),
+    match.status || (match.live ? "Live" : "Scheduled"),
+    match.live ? 1 : 0,
+    safeText(match.surface),
+    playerAId,
+    playerBId,
+    safeText(match.playerA),
+    safeText(match.playerB),
+    normalizeName(match.playerA),
+    normalizeName(match.playerB),
+    safeText(match.score)
+  ));
+  const predictedWinnerName = match.predictedWinner || match.market || "Value watch";
+  const predictedWinnerId = normalizeName(predictedWinnerName) === normalizeName(match.playerA) ? playerAId : normalizeName(predictedWinnerName) === normalizeName(match.playerB) ? playerBId : null;
+  const predictionId = makeDbPredictionId(matchId);
+  statements.push(db.prepare(`
+    INSERT INTO predictions (
+      id, match_id, model_version, source, predicted_winner_id, predicted_winner_name,
+      predicted_side, confidence, predicted_odds, model_edge, factors_json
+    ) VALUES (?, ?, 'v1', 'tennistipz-live', ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(match_id, model_version) DO UPDATE SET
+      predicted_winner_id = excluded.predicted_winner_id,
+      predicted_winner_name = excluded.predicted_winner_name,
+      predicted_side = excluded.predicted_side,
+      confidence = excluded.confidence,
+      predicted_odds = excluded.predicted_odds,
+      model_edge = excluded.model_edge,
+      factors_json = excluded.factors_json
+  `).bind(
+    predictionId,
+    matchId,
+    predictedWinnerId,
+    safeText(predictedWinnerName),
+    safeText(match.predictedSide),
+    asInt(match.confidence, 0),
+    safeText(match.predictedWinnerOdds || match.odds),
+    match.modelEdge === undefined ? null : Number(match.modelEdge),
+    JSON.stringify(match.predictionFactors || {})
+  ));
+  statements.push(db.prepare(`
+    INSERT INTO prediction_outcomes (prediction_id, match_id, result_status)
+    VALUES (?, ?, 'pending')
+    ON CONFLICT(prediction_id) DO NOTHING
+  `).bind(predictionId, matchId));
+  return statements;
+}
+async function runDbBatches(db, statements, batchSize = 80) {
+  for (let index = 0; index < statements.length; index += batchSize) {
+    await db.batch(statements.slice(index, index + batchSize));
+  }
+}
 async function syncLivePredictionsToDb(env, matches, diagnostics) {
   if (!env.TENNIS_DB || !matches.length) {
     diagnostics.dbPredictionSync = env.TENNIS_DB ? "no matches" : "missing D1";
     diagnostics.dbPredictionsUpserted = 0;
     return;
   }
-  let upserted = 0;
-  const errors = [];
+  const db = env.TENNIS_DB;
+  const validMatches = [];
+  const statements = [];
+  const queuedPlayers = new Set();
+  const existingPlayers = await db.prepare("SELECT id, tour, normalized_name FROM players").all();
+  const playerIdByName = new Map((existingPlayers.results || []).map((player) => [`${player.tour}:${player.normalized_name}`, player.id]));
   for (const match of matches) {
     if (!match?.id || !match.playerA || !match.playerB || !["ATP", "WTA"].includes(match.tour)) continue;
-    try {
-      await upsertLivePrediction(env.TENNIS_DB, match);
-      upserted += 1;
-    } catch (error) {
-      errors.push(`${match.id}: ${error.message}`);
-    }
+    validMatches.push(match);
+    statements.push(...livePredictionStatements(db, match, playerIdByName, queuedPlayers));
   }
-  diagnostics.dbPredictionSync = errors.length ? "partial" : "success";
-  diagnostics.dbPredictionsUpserted = upserted;
-  if (errors.length) diagnostics.dbPredictionSyncErrors = errors.slice(0, 5);
+  await runDbBatches(db, statements);
+  diagnostics.dbPredictionSync = "success";
+  diagnostics.dbPredictionsUpserted = validMatches.length;
 }
 function rssTag(item, tag) { return cleanText(item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`, "i"))?.[1] || ""); }
 function rssImage(item) { return item.match(/<media:content[^>]+url=["']([^"']+)/i)?.[1] || item.match(/<enclosure[^>]+url=["']([^"']+)/i)?.[1] || DEFAULT_NEWS_IMAGE; }
