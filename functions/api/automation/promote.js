@@ -3,6 +3,7 @@ const SITEMAP_URL = `${SITE_URL}/sitemap.xml`;
 const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters";
 const X_TWEET_URL = "https://api.twitter.com/2/tweets";
 const THREADS_API_URL = "https://graph.threads.net/v1.0";
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const MIN_PUBLIC_PICK_ODDS = 1.4;
 const NEWS_FEEDS = [
   { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
@@ -114,6 +115,14 @@ function hasTwitterAuth(env) {
 
 function hasThreadsAuth(env) {
   return Boolean(env.THREADS_ACCESS_TOKEN);
+}
+
+function hasOpenAi(env) {
+  return Boolean(env.OPENAI_API_KEY) && env.ENABLE_OPENAI_AI !== "false";
+}
+
+function getOpenAiModel(env) {
+  return env.OPENAI_MODEL || "gpt-4o-mini";
 }
 
 function slugify(value = "") {
@@ -391,6 +400,78 @@ function trimToLimit(text, maxLength) {
   return text.slice(0, Math.max(0, maxLength - 1)).trimEnd() + "…";
 }
 
+function sanitizeAiPost(text, maxLength, requiredLinks = []) {
+  let clean = String(text || "")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  for (const link of requiredLinks) {
+    if (link && !clean.includes(link)) clean += `\n${link}`;
+  }
+  clean = clean.replace(/\bguaranteed\b/gi, "model-backed").replace(/\bsure win\b/gi, "prediction");
+  if (clean.length <= maxLength) return clean;
+  const suffix = requiredLinks.filter(Boolean).join("\n") + "\n18+ Bet responsibly. Follow, comment and repost.";
+  const lead = trimToLimit(clean.split(/\n{2,}/)[0] || clean, Math.max(40, maxLength - suffix.length - 2));
+  return `${lead}\n${suffix}`;
+}
+
+async function callOpenAiPost(env, payload, fallbackText, maxLength) {
+  if (!hasOpenAi(env)) return { text: fallbackText, source: "template", reason: "missing-openai" };
+  const response = await fetch(OPENAI_RESPONSES_URL, {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: getOpenAiModel(env),
+      input: [
+        {
+          role: "system",
+          content: "You write short, catchy tennis prediction social posts for TennisTipz. Use only supplied facts. Always include both supplied links exactly once: the prediction link and the affiliate/referral link. Never guarantee results. Mention 18+ and responsible betting. Urge users to follow, comment, and repost. Match the requested language. Return only the final post text.",
+        },
+        { role: "user", content: JSON.stringify(payload) },
+      ],
+      text: { format: { type: "text" } },
+      max_output_tokens: 260,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) return { text: fallbackText, source: "template", reason: `openai-${response.status}`, payload: data };
+  const raw = data.output_text || data.output?.flatMap((item) => item.content || []).map((part) => part.text).filter(Boolean).join("\n") || "";
+  const text = sanitizeAiPost(raw, maxLength, [payload.predictionUrl, payload.referral?.url]);
+  if (!text || !payload.predictionUrl || !payload.referral?.url || !text.includes(payload.predictionUrl) || !text.includes(payload.referral.url)) {
+    return { text: fallbackText, source: "template", reason: "openai-missing-required-links" };
+  }
+  return { text, source: "openai", model: getOpenAiModel(env) };
+}
+
+async function composeAiSocialPost(env, match, options = {}) {
+  const platform = options.platform || "threads";
+  const language = options.language ? normalizeThreadsLanguage(options.language) : "en";
+  const locale = THREADS_LOCALES[language] || THREADS_LOCALES.en;
+  const base = platform === "threads" ? composeThreadsPost(match, options) : composeSocialPost(match, options);
+  const maxLength = platform === "twitter" ? 280 : 500;
+  const payload = {
+    platform,
+    language: locale.label || "English",
+    postStyle: base.postStyle,
+    predictionUrl: base.url,
+    referral: base.referral,
+    match: {
+      tour: match.tour,
+      tournament: match.tournament,
+      startTime: match.start_time,
+      players: [match.player_a_name, match.player_b_name],
+      pick: match.predicted_winner_name,
+      confidence: match.confidence,
+      odds: match.predicted_odds,
+    },
+    newsHook: base.news ? { title: base.news.title, source: base.news.source, url: base.news.url } : null,
+    requiredCallToAction: locale.engage || "Comment your pick and repost for more tennis predictions.",
+    hashtags: options.platform === "twitter" ? chooseHashtags(match) : (locale.hashtags || []).join(" "),
+  };
+  const ai = await callOpenAiPost(env, payload, base.text, maxLength);
+  return { ...base, language, languageLabel: locale.label, text: ai.text, ai };
+}
+
 function composeThreadsPost(match, options = {}) {
   const language = normalizeThreadsLanguage(options.language);
   const locale = THREADS_LOCALES[language] || THREADS_LOCALES.en;
@@ -567,6 +648,7 @@ async function promote(request, env) {
   const platform = ["twitter", "threads", "all"].includes(url.searchParams.get("platform")) ? url.searchParams.get("platform") : "all";
   const referralOverride = url.searchParams.get("ref") || url.searchParams.get("referral") || null;
   const requestedPostStyle = normalizePostStyle(url.searchParams.get("style") || url.searchParams.get("postStyle") || "mixed");
+  const useAiPosts = url.searchParams.get("ai") !== "0" && url.searchParams.get("ai") !== "false";
   const threadsLanguage = normalizeThreadsLanguage(url.searchParams.get("lang") || url.searchParams.get("language") || "en");
   const threadsPlatform = threadsPlatformKey(threadsLanguage);
   const postTwitterEnabled = platform === "all" || platform === "twitter";
@@ -584,27 +666,31 @@ async function promote(request, env) {
   for (const match of matches) {
     const postStyle = choosePostStyle(match, requestedPostStyle);
     const newsHook = postStyle === "news" ? chooseNewsHook(match, newsHooks) : null;
-    const tweet = composeTweet(match, { referral: referralOverride, newsHook, postStyle });
-    const threadsPost = composeThreadsPost(match, { referral: referralOverride, language: threadsLanguage, newsHook, postStyle });
+    const tweet = useAiPosts
+      ? await composeAiSocialPost(env, match, { platform: "twitter", referral: referralOverride, newsHook, postStyle })
+      : composeTweet(match, { referral: referralOverride, newsHook, postStyle });
+    const threadsPost = useAiPosts
+      ? await composeAiSocialPost(env, match, { platform: "threads", referral: referralOverride, language: threadsLanguage, newsHook, postStyle })
+      : composeThreadsPost(match, { referral: referralOverride, language: threadsLanguage, newsHook, postStyle });
     const twitterPosted = await isAlreadyPosted(db, "twitter", match.prediction_id);
     const threadsPosted = await isAlreadyPosted(db, threadsPlatform, match.prediction_id);
 
     if (postTwitterEnabled && !twitterPosted && tweets.length < limit) {
       if (dryRun) {
-        tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, postStyle: tweet.postStyle, url: tweet.url, referral: tweet.referral, news: tweet.news, text: tweet.text });
+        tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, postStyle: tweet.postStyle, url: tweet.url, referral: tweet.referral, news: tweet.news, ai: tweet.ai, text: tweet.text });
       } else {
         const result = await postTweet(env, tweet.text);
-        tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, postStyle: tweet.postStyle, url: tweet.url, referral: tweet.referral, news: tweet.news, result });
+        tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, postStyle: tweet.postStyle, url: tweet.url, referral: tweet.referral, news: tweet.news, ai: tweet.ai, result });
         if (result.ok) await recordAutomationPost(db, "twitter", match.prediction_id, tweet.url, result.payload);
       }
     }
 
     if (postThreadsEnabled && !threadsPosted && threads.length < limit) {
       if (dryRun) {
-        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, text: threadsPost.text });
+        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, text: threadsPost.text });
       } else {
         const result = await postThreads(env, threadsPost.text);
-        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, result });
+        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, result });
         if (result.ok) await recordAutomationPost(db, threadsPlatform, match.prediction_id, threadsPost.url, result.payload);
       }
     }
@@ -619,6 +705,7 @@ async function promote(request, env) {
     dryRun,
     platform,
     requestedPostStyle,
+    aiPosts: useAiPosts && hasOpenAi(env) ? "enabled" : useAiPosts ? "fallback-template" : "disabled",
     newsHooks: newsHooks.length,
     checked: matches.length,
     tweets,
