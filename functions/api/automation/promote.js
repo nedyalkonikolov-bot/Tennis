@@ -3,6 +3,7 @@ const SITEMAP_URL = `${SITE_URL}/sitemap.xml`;
 const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters";
 const X_TWEET_URL = "https://api.twitter.com/2/tweets";
 const THREADS_API_URL = "https://graph.threads.net/v1.0";
+const MIN_PUBLIC_PICK_ODDS = 1.4;
 const NEWS_FEEDS = [
   { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
   { name: "TennisHead", url: "https://r.jina.ai/http://https://tennishead.net/feed", type: "jinaMarkdown" },
@@ -453,6 +454,7 @@ async function getPostableMatches(db, limit) {
     JOIN predictions p ON p.match_id = m.id
     WHERE m.tour IN ('ATP', 'WTA')
       AND p.predicted_winner_name IS NOT NULL
+      AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) > ${MIN_PUBLIC_PICK_ODDS}
     ORDER BY m.live DESC, p.created_at DESC, m.start_time ASC
     LIMIT ?
   `).bind(limit).all();

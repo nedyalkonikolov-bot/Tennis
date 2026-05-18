@@ -5,6 +5,8 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
+const MIN_PUBLIC_PICK_ODDS = 1.4;
+
 function slugify(value = "") {
   return String(value)
     .toLowerCase()
@@ -140,7 +142,7 @@ export async function onRequestGet({ request, env }) {
     LEFT JOIN predictions p ON p.match_id = m.id
     LEFT JOIN prediction_outcomes po ON po.prediction_id = p.id
     WHERE m.tour IN ('ATP', 'WTA')
-      AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) >= 1.01
+      AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) > ${MIN_PUBLIC_PICK_ODDS}
     ORDER BY m.live DESC, p.created_at DESC, m.start_time ASC
     LIMIT ?
   `).bind(limit).all();

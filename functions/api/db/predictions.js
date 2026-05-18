@@ -5,13 +5,15 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
+const MIN_PUBLIC_PICK_ODDS = 1.4;
+
 export async function onRequestGet({ request, env }) {
   if (!env.TENNIS_DB) return jsonResponse({ ok: false, error: "Missing TENNIS_DB D1 binding" }, 500);
   const url = new URL(request.url);
   const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "50", 10), 1), 200);
   const status = url.searchParams.get("status");
 
-  const where = status ? "WHERE po.result_status = ?" : "";
+  const where = `WHERE CAST(COALESCE(p.predicted_odds, '0') AS REAL) > ${MIN_PUBLIC_PICK_ODDS}${status ? " AND po.result_status = ?" : ""}`;
   const statement = env.TENNIS_DB.prepare(`
     SELECT
       p.id,

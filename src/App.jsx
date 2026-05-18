@@ -22,6 +22,7 @@ const defaultBetUrl = "https://www.cloudbet.com/en/sports/tennis";
 const cloudbetUrl = "https://cldbt.cloud/go/en/landing/bitcoin-betting?af_token=ecea0a0896472c99ee3ff23d7fae8483&aftm_campaign=Tennis&aftm_source=tennistipz.win&aftm_medium=organic&aftm_content=Predictions&aftm_cid=4";
 const bcGameUrl = "https://bc.game/i-9767ib363b-n/";
 const stakeUrl = "https://stake.com/?c=NOYIoKcY";
+const minPublicPickOdds = 1.4;
 
 const navPages = [
   { id: "home", label: "Home", path: "/", icon: Home },
@@ -326,6 +327,10 @@ function getAnticipationScore(match) {
   return (Number(match.confidence) || 0) + Math.min(recentMatches, 30) * 0.7 + (hasCloudbetOdds ? 15 : 0) + (match.live ? 8 : 0) + (["ATP", "WTA"].includes(match.tour) ? 4 : 0);
 }
 
+function pickOdds(match) {
+  return Number(match.predictedWinnerOdds || match.predicted_odds || match.odds || 0);
+}
+
 function formatUpdatedAt(value) {
   if (!value) return "Using fallback data";
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
@@ -440,7 +445,7 @@ function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
   const [surface, setSurface] = useState("All");
   const [category, setCategory] = useState("upcoming");
   const [modelRun, setModelRun] = useState(0);
-  const scopedMatches = useMemo(() => matches.filter((match) => !route.tour || match.tour === route.tour), [matches, route.tour]);
+  const scopedMatches = useMemo(() => matches.filter((match) => (!route.tour || match.tour === route.tour) && pickOdds(match) > minPublicPickOdds), [matches, route.tour]);
   const categoryCounts = useMemo(() => ({ live: scopedMatches.filter((match) => match.live).length, upcoming: scopedMatches.filter((match) => !match.live).length }), [scopedMatches]);
   const effectiveCategory = categoryCounts[category] ? category : categoryCounts.upcoming ? "upcoming" : "live";
   const filteredMatches = useMemo(() => scopedMatches
@@ -453,7 +458,7 @@ function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
       <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-        <div><p className="text-sm font-semibold uppercase text-lime-300">Cloudbet ATP/WTA markets</p><h1 className="mt-2 text-4xl font-black">{heading}</h1><p className="mt-3 max-w-2xl text-slate-400">Live and upcoming tennis betting matches are separated, with the most anticipated predictions ranked first using odds, form, status and confidence.</p></div>
+        <div><p className="text-sm font-semibold uppercase text-lime-300">Cloudbet ATP/WTA value markets</p><h1 className="mt-2 text-4xl font-black">{heading}</h1><p className="mt-3 max-w-2xl text-slate-400">Live and upcoming tennis betting matches are separated, with a higher-risk value model showing only picks priced above 1.40 and ranking them by odds, form, status and confidence.</p></div>
         <button type="button" onClick={() => setModelRun((value) => (value === 3 ? -2 : value + 1))} className="inline-flex w-fit items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300"><Gauge size={18} /> Re-run Model</button>
       </div>
       <div className="mt-8 flex flex-wrap gap-3">{matchCategories.map((item) => <button key={item.id} type="button" onClick={() => setCategory(item.id)} className={`rounded-xl px-5 py-2 text-sm font-bold ${effectiveCategory === item.id ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{item.label} ({categoryCounts[item.id] || 0})</button>)}</div>
@@ -461,14 +466,14 @@ function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
       <div className="mt-8 grid gap-5 md:grid-cols-2">
         {filteredMatches.map((match) => <article key={match.id} className="border border-white/10 bg-white/[0.04] p-6">
           <div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-sm text-slate-400">{match.tournament} - {match.startTime}</p><h2 className="mt-2 text-2xl font-black"><a href={`/predictions/${match.slug}/`} onClick={(event) => { event.preventDefault(); onNavigate(`/predictions/${match.slug}/`); }} className="hover:text-lime-300">{match.playerA} vs {match.playerB}</a></h2></div><span className="rounded-full bg-lime-400/10 px-3 py-1 text-sm font-bold text-lime-300">{match.prediction.confidence}%</span></div>
-          <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-3 py-1 text-xs font-bold ${match.live ? "bg-red-500/15 text-red-200" : "bg-sky-400/10 text-sky-200"}`}>{match.live ? "Live" : "Upcoming"}</span><span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">Anticipation {Math.round(match.anticipation)}</span><a href={`/predictions/${match.slug}/`} onClick={(event) => { event.preventDefault(); onNavigate(`/predictions/${match.slug}/`); }} className="rounded-full bg-white/5 px-3 py-1 text-xs font-bold text-lime-300 hover:bg-white/10">Match page</a></div>
+          <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-3 py-1 text-xs font-bold ${match.live ? "bg-red-500/15 text-red-200" : "bg-sky-400/10 text-sky-200"}`}>{match.live ? "Live" : "Upcoming"}</span><span className="rounded-full bg-amber-400/10 px-3 py-1 text-xs font-bold text-amber-200">Value odds &gt; 1.40</span><span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">Anticipation {Math.round(match.anticipation)}</span><a href={`/predictions/${match.slug}/`} onClick={(event) => { event.preventDefault(); onNavigate(`/predictions/${match.slug}/`); }} className="rounded-full bg-white/5 px-3 py-1 text-xs font-bold text-lime-300 hover:bg-white/10">Match page</a></div>
           <p className="mt-5 text-slate-300">Predicted winner: <span className="font-bold text-white">{match.prediction.pick}</span></p>
           <div className="mt-5 grid gap-4 sm:grid-cols-3"><OddsLink match={match} fallbackBetUrl={betUrl} /><Metric label={`${match.playerA} 100d`} value={`${match.recentA?.wins || 0}-${match.recentA?.losses || 0}`} helper={`${match.recentA?.winRate || 50}% win rate`} /><Metric label={`${match.playerB} 100d`} value={`${match.recentB?.wins || 0}-${match.recentB?.losses || 0}`} helper={`${match.recentB?.winRate || 50}% win rate`} /></div>
           <div className="mt-5 space-y-3 text-sm text-slate-300"><p>Surface: {match.surface} | Status: {match.live ? "Live" : match.status}</p><StatBar value={match.prediction.confidence} /></div>
         </article>)}
       </div>
       <MatchPageLinks matchPages={dbData.matchPages} onNavigate={onNavigate} />
-      {!filteredMatches.length && <div className="mt-8 border border-white/10 bg-white/[0.04] p-8 text-slate-400">No Cloudbet tennis betting matches found right now.</div>}
+      {!filteredMatches.length && <div className="mt-8 border border-white/10 bg-white/[0.04] p-8 text-slate-400">No Cloudbet ATP/WTA value picks above 1.40 found right now.</div>}
     </section>
   );
 }

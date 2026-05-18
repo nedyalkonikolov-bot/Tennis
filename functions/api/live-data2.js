@@ -14,6 +14,7 @@ const AI_CACHE_TTL_SECONDS = 30 * 60;
 const AI_NEWS_CACHE_TTL_SECONDS = 60 * 60;
 const CLOUDBET_MARKETS_QUERY = "?markets=tennis.winner&markets=tennis.winner_and_total";
 const RECENT_FORM_DAYS = 100;
+const MIN_PUBLIC_PICK_ODDS = 1.4;
 const BLOCKED_RE = /\b(simulated|simulation|virtual|srl|reality league|itf|utr|exhibition|junior|boys|girls|college|davis|billie|hopman)\b/i;
 
 const fallbackPlayers = [
@@ -129,6 +130,7 @@ function extractOdds(event) {
   return null;
 }
 function implied(odds) { const homeOdds = asFloat(odds?.home); const awayOdds = asFloat(odds?.away); if (!homeOdds || !awayOdds) return { home: 50, away: 50, edge: 0 }; const homeRaw = 1 / homeOdds; const awayRaw = 1 / awayOdds; const total = homeRaw + awayRaw; const home = Math.round((homeRaw / total) * 1000) / 10; const away = Math.round((awayRaw / total) * 1000) / 10; return { home, away, edge: Math.round((home - away) * 10) / 10 }; }
+function riskPriceBoost(odds) { const price = asFloat(odds, 0); if (!price) return -10; if (price <= MIN_PUBLIC_PICK_ODDS) return -8; return clamp((price - MIN_PUBLIC_PICK_ODDS) * 4.5, 0, 8); }
 function profileFor(players, name, tour) { return players.find((player) => player.tour === tour && namesLookSimilar(player.name, name)) || null; }
 function surfaceRating(profile, surface) { if (!profile) return 50; return asInt(profile[String(surface).toLowerCase()], profile.form || 50); }
 function emptyRecentForm() { return { wins: 0, losses: 0, matches: 0, winRate: 50 }; }
@@ -219,7 +221,7 @@ async function enhancePredictionsWithOpenAi(env, matches, diagnostics) {
   const cache = getPlayerCache(env);
   const limit = Math.min(Math.max(asInt(env.OPENAI_PREDICTION_LIMIT, 12), 1), 25);
   const target = matches.slice(0, limit);
-  const cacheKey = `ai:predictions:v1:${target.map((match) => match.id).join(":")}`;
+  const cacheKey = `ai:predictions:risk-v2:${target.map((match) => match.id).join(":")}`;
   const cached = cache ? await cache.get(cacheKey, "json").catch(() => null) : null;
   if (cached?.predictions?.length) {
     diagnostics.openAiPredictions = "cached";
@@ -253,7 +255,7 @@ async function enhancePredictionsWithOpenAi(env, matches, diagnostics) {
     required: ["predictions"],
   };
   const result = await callOpenAiJson(env, "tennis_predictions", schema, [
-    { role: "system", content: "You are TennisTipz AI. Generate tennis match winner predictions from supplied current data only. Do not invent injuries, scores, private information, or guaranteed outcomes. Use cautious betting language and include risk context. Return JSON only." },
+    { role: "system", content: "You are TennisTipz AI. Generate tennis match winner predictions from supplied current data only. Use a higher risk appetite than a favorite-only model: actively prefer value-priced picks when the available player data supports them, and avoid very short prices unless the evidence edge is clearly dominant. Public TennisTipz picks should focus on odds above 1.40. Do not invent injuries, scores, private information, or guaranteed outcomes. Use cautious betting language and include risk context. Return JSON only." },
     { role: "user", content: JSON.stringify({ generatedAt: new Date().toISOString(), matches: target.map(aiPredictionInput) }) },
   ], 2200);
   const predictions = result?.predictions || [];
@@ -321,12 +323,15 @@ function makePrediction(event, odds, profileA, profileB) {
   const rankEdge = profileA?.rank && profileB?.rank ? clamp((profileB.rank - profileA.rank) * 0.18, -12, 12) : 0;
   const pointsEdge = profileA?.points && profileB?.points ? clamp(((profileA.points - profileB.points) / Math.max(profileA.points, profileB.points)) * 10, -6, 6) : 0;
   const surfaceEdge = (surfaceRating(profileA, surface) - surfaceRating(profileB, surface)) * 0.16;
-  const marketEdge = prob.edge * 0.42;
-  const modelEdge = marketEdge + rankEdge + pointsEdge + surfaceEdge + (isLive(event) ? 1.5 : 0);
-  const side = modelEdge >= 0 ? "home" : "away";
+  const marketEdge = prob.edge * 0.22;
+  const dataEdge = rankEdge + pointsEdge + surfaceEdge + (isLive(event) ? 1.5 : 0);
+  const homeScore = dataEdge + marketEdge + riskPriceBoost(odds.home);
+  const awayScore = -dataEdge - marketEdge + riskPriceBoost(odds.away);
+  const side = homeScore >= awayScore ? "home" : "away";
+  const modelEdge = side === "home" ? homeScore - awayScore : awayScore - homeScore;
   const winner = side === "home" ? event.home.name : event.away.name;
-  const confidence = clamp(Math.round(54 + Math.abs(modelEdge) * 0.78 + (profileA && profileB ? 4 : 1)), 52, 86);
-  return { predictedWinner: winner, predictedSide: side, predictedWinnerOdds: side === "home" ? odds.home : odds.away, confidence, modelEdge: Math.round(modelEdge * 10) / 10, factors: { marketProbability: prob, rankEdge: Math.round(rankEdge * 10) / 10, pointsEdge: Math.round(pointsEdge * 10) / 10, surfaceEdge: Math.round(surfaceEdge * 10) / 10, dataPoints: [odds.home, profileA?.rank && profileB?.rank, profileA?.points && profileB?.points].filter(Boolean).length } };
+  const confidence = clamp(Math.round(53 + Math.abs(modelEdge) * 0.62 + (profileA && profileB ? 3 : 1)), 51, 84);
+  return { predictedWinner: winner, predictedSide: side, predictedWinnerOdds: side === "home" ? odds.home : odds.away, confidence, modelEdge: Math.round(modelEdge * 10) / 10, factors: { marketProbability: prob, rankEdge: Math.round(rankEdge * 10) / 10, pointsEdge: Math.round(pointsEdge * 10) / 10, surfaceEdge: Math.round(surfaceEdge * 10) / 10, riskAppetite: "value-priced picks above 1.40 preferred", dataPoints: [odds.home, profileA?.rank && profileB?.rank, profileA?.points && profileB?.points].filter(Boolean).length } };
 }
 function toIsoDate(value) {
   if (!value) return "";

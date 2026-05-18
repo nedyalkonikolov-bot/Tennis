@@ -1,5 +1,6 @@
 const SITE_URL = "https://www.tennistipz.win";
 const CLOUDBET_URL = "https://cldbt.cloud/go/en/landing/bitcoin-betting?af_token=ecea0a0896472c99ee3ff23d7fae8483&aftm_campaign=Tennis&aftm_source=tennistipz.win&aftm_medium=organic&aftm_content=Predictions&aftm_cid=4";
+const MIN_PUBLIC_PICK_ODDS = 1.4;
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
@@ -97,7 +98,7 @@ async function findMatchBySlug(db, slug) {
     LEFT JOIN player_season_stats sb ON sb.player_id = m.player_b_id AND sb.type = 'singles' AND sb.season = '2026'
     LEFT JOIN predictions p ON p.match_id = m.id
     LEFT JOIN prediction_outcomes po ON po.prediction_id = p.id
-    WHERE m.tour IN ('ATP', 'WTA') AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) >= 1.01
+    WHERE m.tour IN ('ATP', 'WTA') AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) > ${MIN_PUBLIC_PICK_ODDS}
     ORDER BY m.live DESC, p.created_at DESC, m.start_time ASC
     LIMIT 500
   `).all();
