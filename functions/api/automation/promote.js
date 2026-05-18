@@ -3,6 +3,7 @@ const SITEMAP_URL = `${SITE_URL}/sitemap.xml`;
 const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters";
 const X_TWEET_URL = "https://api.twitter.com/2/tweets";
 const THREADS_API_URL = "https://graph.threads.net/v1.0";
+const TENNIS_RSS = "https://www.tennis.com/roots/rss-feeds/news/";
 const THREADS_LOCALES = {
   en: {
     label: "English",
@@ -10,6 +11,7 @@ const THREADS_LOCALES = {
     odds: "Odds",
     preview: "Preview",
     offer: "Offer",
+    news: "News angle",
     follow: "Follow TennisTipz.",
     engage: "Comment your pick and repost for more tennis predictions.",
     responsible: "18+ Bet responsibly.",
@@ -21,6 +23,7 @@ const THREADS_LOCALES = {
     odds: "ऑड्स",
     preview: "प्रीव्यू",
     offer: "ऑफर",
+    news: "न्यूज एंगल",
     follow: "TennisTipz को फॉलो करें.",
     engage: "अपना पिक कमेंट करें और ज्यादा टेनिस भविष्यवाणियों के लिए रीपोस्ट करें.",
     responsible: "18+ जिम्मेदारी से बेट करें.",
@@ -32,6 +35,7 @@ const THREADS_LOCALES = {
     odds: "Odds",
     preview: "Previa",
     offer: "Oferta",
+    news: "Gancho da noticia",
     follow: "Siga o TennisTipz.",
     engage: "Comente seu palpite e reposte para mais previsoes de tenis.",
     responsible: "18+ Aposte com responsabilidade.",
@@ -43,6 +47,7 @@ const THREADS_LOCALES = {
     odds: "Cuota",
     preview: "Previa",
     offer: "Oferta",
+    news: "Angulo de noticia",
     follow: "Sigue a TennisTipz.",
     engage: "Comenta tu pronostico y repostealo para mas picks de tenis.",
     responsible: "18+ Apuesta con responsabilidad.",
@@ -54,6 +59,7 @@ const THREADS_LOCALES = {
     odds: "Oran",
     preview: "Analiz",
     offer: "Teklif",
+    news: "Haber acisi",
     follow: "TennisTipz'i takip edin.",
     engage: "Tahminini yorumlara yaz ve daha fazla tenis tahmini icin repost et.",
     responsible: "18+ Sorumlu bahis oynayın.",
@@ -267,12 +273,51 @@ function chooseFollowPrompt(match) {
   return FOLLOW_PROMPTS[rotationIndex(match, FOLLOW_PROMPTS.length, "follow")];
 }
 
+function decodeHtml(value = "") {
+  return String(value)
+    .replace(/<!\[CDATA\[|\]\]>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function rssTag(item, tag) {
+  return decodeHtml(item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] || "");
+}
+
+async function getRecentNewsHooks(limit = 8) {
+  const response = await fetch(TENNIS_RSS, { headers: { accept: "application/rss+xml, application/xml, text/xml" } });
+  if (!response.ok) throw new Error(`Tennis news returned ${response.status}`);
+  const xml = await response.text();
+  return xml
+    .split(/<item\b/i)
+    .slice(1, limit + 1)
+    .map((item, index) => {
+      const title = rssTag(item, "title");
+      const summary = rssTag(item, "description");
+      const url = rssTag(item, "link") || rssTag(item, "guid") || "";
+      return title ? { id: url || `news-${index}`, title, summary, url } : null;
+    })
+    .filter(Boolean);
+}
+
+function chooseNewsHook(match, newsHooks = []) {
+  if (!newsHooks.length) return null;
+  return newsHooks[rotationIndex(match, newsHooks.length, "news")];
+}
+
 function composeSocialPost(match, options = {}) {
   const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
   const url = SITE_URL + "/predictions/" + slug + "/";
   const referral = chooseReferralLink(match, options.referral);
   const hashtags = chooseHashtags(match);
   const followPrompt = chooseFollowPrompt(match);
+  const news = options.newsHook;
   const pick = match.predicted_winner_name || "value watch";
   const confidence = match.confidence ? String(match.confidence) + "%" : "model";
   const odds = match.predicted_odds ? String(match.predicted_odds) : null;
@@ -281,15 +326,17 @@ function composeSocialPost(match, options = {}) {
   const template = rotationIndex(match, 5, "copy");
   let lead;
 
-  if (template === 0) lead = "Match preview: " + matchTitle + "\n" + tourLine + "\n\nModel pick: " + pick + " (" + confidence + ").";
+  if (news) lead = `Tennis news hook: ${trimToLimit(news.title, 96)}\n\n${matchTitle}\nAI pick: ${pick} (${confidence}).`;
+  else if (template === 0) lead = "Match preview: " + matchTitle + "\n" + tourLine + "\n\nModel pick: " + pick + " (" + confidence + ").";
   else if (template === 1) lead = matchTitle + "\n\nTennisTipz model leans " + pick + " with " + confidence + " confidence.";
   else if (template === 2) lead = "On the board: " + matchTitle + "\n\nPrediction edge: " + pick + " (" + confidence + ").";
   else if (template === 3) lead = matchTitle + "\n" + tourLine + "\n\nAI call: " + pick + ". Confidence: " + confidence + ".";
   else lead = "Tennis prediction watch\n\n" + matchTitle + "\nPick: " + pick + "\nConfidence: " + confidence + ".";
 
   const oddsLine = odds ? "\nOdds tracked: " + odds + "." : "";
-  const text = lead + oddsLine + "\n\nFull preview: " + url + "\nPartner offer: " + referral.url + "\n\n" + followPrompt + "\n18+ Bet responsibly. " + hashtags;
-  return { text, url, referral, hashtags };
+  let text = lead + oddsLine + "\n\nFull prediction: " + url + "\nBetting offer: " + referral.url + "\n\n" + followPrompt + "\nComment your pick. 18+ Bet responsibly. " + hashtags;
+  text = trimToLimit(text, 275);
+  return { text, url, referral, hashtags, news };
 }
 
 function composeTweet(match, options = {}) {
@@ -308,12 +355,14 @@ function composeThreadsPost(match, options = {}) {
   const url = SITE_URL + "/predictions/" + slug + "/";
   const referral = chooseReferralLink(match, options.referral);
   const hashtags = (locale.hashtags || chooseHashtags(match).split(" ").slice(0, 2)).join(" ");
+  const news = options.newsHook;
   const pick = match.predicted_winner_name || "value watch";
   const confidence = match.confidence ? String(match.confidence) + "%" : "model";
   const odds = match.predicted_odds ? ` | ${locale.odds} ${String(match.predicted_odds)}` : "";
   const matchTitle = match.player_a_name + " vs " + match.player_b_name;
   const engage = locale.engage || "Comment your pick and repost.";
-  let lead = `${matchTitle}\n${locale.pick}: ${pick} (${confidence})${odds}`;
+  const newsLine = news ? `${locale.news || "News angle"}: ${trimToLimit(news.title, 118)}\n\n` : "";
+  let lead = `${newsLine}${matchTitle}\n${locale.pick}: ${pick} (${confidence})${odds}`;
   let text = `${lead}\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible} ${hashtags}`;
   if (text.length > 500) {
     lead = trimToLimit(lead, 500 - (`\n${locale.preview}: ${url}\n${locale.offer}: ${referral.url}\n\n${locale.follow} ${engage} ${locale.responsible}`).length);
@@ -323,7 +372,7 @@ function composeThreadsPost(match, options = {}) {
     lead = trimToLimit(`${matchTitle}\n${locale.pick}: ${pick}`, 500 - (`\n${locale.offer}: ${referral.url}\n\n${engage}`).length);
     text = `${lead}\n${locale.offer}: ${referral.url}\n\n${engage}`;
   }
-  return { text, url, referral, hashtags, language, languageLabel: locale.label };
+  return { text, url, referral, hashtags, language, languageLabel: locale.label, news };
 }
 
 async function ensureAutomationTable(db) {
@@ -481,31 +530,33 @@ async function promote(request, env) {
 
   const scanLimit = Math.min(Math.max(limit * 20, 50), 150);
   const matches = await getPostableMatches(db, scanLimit);
+  const newsHooks = await getRecentNewsHooks(10).catch(() => []);
   const tweets = [];
   const threads = [];
 
   for (const match of matches) {
-    const tweet = composeTweet(match, { referral: referralOverride });
-    const threadsPost = composeThreadsPost(match, { referral: referralOverride, language: threadsLanguage });
+    const newsHook = chooseNewsHook(match, newsHooks);
+    const tweet = composeTweet(match, { referral: referralOverride, newsHook });
+    const threadsPost = composeThreadsPost(match, { referral: referralOverride, language: threadsLanguage, newsHook });
     const twitterPosted = await isAlreadyPosted(db, "twitter", match.prediction_id);
     const threadsPosted = await isAlreadyPosted(db, threadsPlatform, match.prediction_id);
 
     if (postTwitterEnabled && !twitterPosted && tweets.length < limit) {
       if (dryRun) {
-        tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, text: tweet.text });
+        tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, news: tweet.news, text: tweet.text });
       } else {
         const result = await postTweet(env, tweet.text);
-        tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, result });
+        tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, news: tweet.news, result });
         if (result.ok) await recordAutomationPost(db, "twitter", match.prediction_id, tweet.url, result.payload);
       }
     }
 
     if (postThreadsEnabled && !threadsPosted && threads.length < limit) {
       if (dryRun) {
-        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, language: threadsPost.language, languageLabel: threadsPost.languageLabel, text: threadsPost.text });
+        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, text: threadsPost.text });
       } else {
         const result = await postThreads(env, threadsPost.text);
-        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, language: threadsPost.language, languageLabel: threadsPost.languageLabel, result });
+        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, result });
         if (result.ok) await recordAutomationPost(db, threadsPlatform, match.prediction_id, threadsPost.url, result.payload);
       }
     }
@@ -519,6 +570,7 @@ async function promote(request, env) {
     ok: true,
     dryRun,
     platform,
+    newsHooks: newsHooks.length,
     checked: matches.length,
     tweets,
     threads,
