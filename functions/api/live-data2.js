@@ -532,7 +532,7 @@ async function enhanceNewsWithOpenAi(env, news, diagnostics) {
     return news;
   }
   const cache = getPlayerCache(env);
-  const cacheKey = `ai:news:v1:${news.slice(0, 8).map((item) => item.id).join("|").slice(0, 700)}`;
+  const cacheKey = `ai:news:espn-tennishead:v2:${news.slice(0, 8).map((item) => item.id).join("|").slice(0, 700)}`;
   const cached = cache ? await cache.get(cacheKey, "json").catch(() => null) : null;
   if (cached?.news?.length) {
     diagnostics.openAiNews = "cached";
