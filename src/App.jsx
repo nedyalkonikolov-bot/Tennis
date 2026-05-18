@@ -549,7 +549,7 @@ export default function TennisTipzApp() {
     setError("");
     try {
       const [liveResponse, summaryResponse, matchPagesResponse, atpPlayersResponse, wtaPlayersResponse] = await Promise.allSettled([
-        fetch(`/api/live-data?ts=${Date.now()}`),
+        fetch("/api/live-data"),
         fetch("/api/db/summary"),
         fetch("/api/db/match-pages?limit=100"),
         fetch("/api/db/player-pages?tour=ATP&limit=500"),

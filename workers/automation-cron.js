@@ -28,8 +28,7 @@ async function callSite(env, path, options = {}) {
 }
 
 async function refreshPredictions(env) {
-  const cacheBust = encodeURIComponent(`cf-cron-${Date.now()}`);
-  const result = await callSite(env, `/api/live-data?ts=${cacheBust}`);
+  const result = await callSite(env, "/api/live-data?refresh=1");
   return {
     task: "refresh-predictions",
     matches: result.payload?.matches?.length || 0,

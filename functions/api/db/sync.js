@@ -587,6 +587,7 @@ async function syncDatabase(request, env) {
 
   try {
     const liveUrl = new URL("/api/live-data", request.url);
+    liveUrl.searchParams.set("refresh", "1");
     liveUrl.searchParams.set("databaseSync", "1");
     liveUrl.searchParams.set("ts", Date.now().toString());
     const liveResponse = await fetch(liveUrl.href, { headers: { accept: "application/json" } });

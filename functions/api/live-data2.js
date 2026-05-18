@@ -12,6 +12,9 @@ const PLAYER_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PLAYER_LIMIT = 500;
 const AI_CACHE_TTL_SECONDS = 30 * 60;
 const AI_NEWS_CACHE_TTL_SECONDS = 60 * 60;
+const LIVE_DATA_CACHE_KEY = "live-data:homepage:v2";
+const LIVE_DATA_FRESH_MS = 5 * 60 * 1000;
+const LIVE_DATA_CACHE_TTL_SECONDS = 20 * 60;
 const CLOUDBET_MARKETS_QUERY = "?markets=tennis.winner&markets=tennis.winner_and_total";
 const RECENT_FORM_DAYS = 100;
 const MIN_PUBLIC_PICK_ODDS = 1.4;
@@ -24,8 +27,8 @@ const fallbackPlayers = [
 ];
 const fallbackNews = [{ id: "fallback-news", title: "Tennis news loading", category: "News", time: "Latest", summary: "Live Tennis.com RSS headlines will appear after the feed responds.", url: "#", imageUrl: DEFAULT_NEWS_IMAGE, source: "TennisTipz" }];
 
-function json(payload, status = 200) {
-  return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=180, stale-while-revalidate=900" } });
+function json(payload, status = 200, extraHeaders = {}) {
+  return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300, stale-while-revalidate=900", ...extraHeaders } });
 }
 function asInt(value, fallback = 0) { const parsed = Number.parseInt(value, 10); return Number.isFinite(parsed) ? parsed : fallback; }
 function asFloat(value, fallback = null) { const parsed = Number.parseFloat(value); return Number.isFinite(parsed) ? parsed : fallback; }
@@ -37,6 +40,7 @@ function getOpenAiModel(env) { return env.OPENAI_MODEL || "gpt-4o-mini"; }
 function hasOpenAi(env) { return Boolean(env.OPENAI_API_KEY) && env.ENABLE_OPENAI_AI !== "false"; }
 function namesLookSimilar(a, b) { const left = normalizeName(a).split(" ").filter(Boolean); const right = normalizeName(b).split(" ").filter(Boolean); if (!left.length || !right.length) return false; const rightSet = new Set(right); const shared = left.filter((part) => rightSet.has(part)); return left.at(-1) === right.at(-1) && (shared.length >= 2 || left.length === 1 || right.length === 1); }
 function getPlayerCache(env) { return env.TENNIS_PLAYERS_CACHE || env.PLAYER_STATS_KV || env.PLAYERS_KV || null; }
+function cachedAtMs(payload) { return payload?.generatedAt ? Date.parse(payload.generatedAt) : 0; }
 
 async function fetchApiTennis(env, method, params = {}) {
   if (!env.API_TENNIS_KEY) return [];
@@ -712,7 +716,7 @@ async function enhanceNewsWithOpenAi(env, news, diagnostics) {
   return enhanced;
 }
 
-export async function onRequestGet({ env }) {
+async function buildLiveDataPayload(env) {
   const betUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_BET_URL).trim();
   const errors = [];
   const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasOpenAiKey: Boolean(env.OPENAI_API_KEY), openAiModel: getOpenAiModel(env), hasPlayerCache: Boolean(getPlayerCache(env)), hasD1: Boolean(env.TENNIS_DB), predictionSource: hasOpenAi(env) ? "OpenAI structured prediction layer using Cloudbet odds, API-Tennis/player DB form, rankings and surface data" : "Cloudbet ATP/WTA match markets. Direct tennis.winner when available; derived winner side from tennis.winner_and_total when direct winner is absent.", playerStats: "Top 500 ATP + Top 500 WTA", newsProvider: hasOpenAi(env) ? "OpenAI summaries from ESPN + TennisHead RSS" : "ESPN + TennisHead RSS" };
@@ -731,5 +735,29 @@ export async function onRequestGet({ env }) {
   diagnostics.upcomingMatchCount = matches.filter((match) => !match.live).length;
   diagnostics.newsCount = news.length;
   diagnostics.newsWithImagesCount = news.filter((article) => article.imageUrl).length;
-  return json({ generatedAt: new Date().toISOString(), source: { tennis: players.length ? "API-Tennis" : "fallback", odds: env.CLOUDBET_API_KEY && !errors.some((error) => error.startsWith("cloudbet")) ? "Cloudbet" : "fallback", news: news.length ? (diagnostics.openAiNews === "success" || diagnostics.openAiNews === "cached" ? "OpenAI + ESPN/TennisHead" : "ESPN/TennisHead") : "fallback" }, betUrl, matches, players: players.length ? players : fallbackPlayers, news: news.length ? news : fallbackNews, errors, diagnostics });
+  return { generatedAt: new Date().toISOString(), source: { tennis: players.length ? "API-Tennis" : "fallback", odds: env.CLOUDBET_API_KEY && !errors.some((error) => error.startsWith("cloudbet")) ? "Cloudbet" : "fallback", news: news.length ? (diagnostics.openAiNews === "success" || diagnostics.openAiNews === "cached" ? "OpenAI + ESPN/TennisHead" : "ESPN/TennisHead") : "fallback" }, betUrl, matches, players: players.length ? players : fallbackPlayers, news: news.length ? news : fallbackNews, errors, diagnostics };
+}
+
+async function refreshLiveDataCache(env) {
+  const cache = getPlayerCache(env);
+  const payload = await buildLiveDataPayload(env);
+  if (cache) await cache.put(LIVE_DATA_CACHE_KEY, JSON.stringify(payload), { expirationTtl: LIVE_DATA_CACHE_TTL_SECONDS }).catch(() => null);
+  return payload;
+}
+
+export async function onRequestGet({ request, env, waitUntil }) {
+  const url = new URL(request.url);
+  const forceRefresh = url.searchParams.get("refresh") === "1";
+  const cache = getPlayerCache(env);
+  const cached = !forceRefresh && cache ? await cache.get(LIVE_DATA_CACHE_KEY, "json").catch(() => null) : null;
+
+  if (cached?.generatedAt) {
+    const ageMs = Date.now() - cachedAtMs(cached);
+    const isFresh = ageMs < LIVE_DATA_FRESH_MS;
+    if (!isFresh && waitUntil) waitUntil(refreshLiveDataCache(env).catch(() => null));
+    return json({ ...cached, cache: { status: isFresh ? "fresh" : "stale", ageSeconds: Math.max(0, Math.round(ageMs / 1000)) } }, 200, { "x-tennistipz-cache": isFresh ? "HIT" : "STALE" });
+  }
+
+  const payload = await refreshLiveDataCache(env);
+  return json({ ...payload, cache: { status: "miss", ageSeconds: 0 } }, 200, { "x-tennistipz-cache": "MISS" });
 }
