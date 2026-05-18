@@ -50,12 +50,19 @@ async function syncDatabase(env) {
   };
 }
 
-async function postThreadsPrediction(env, language = "en") {
+function scheduledPostStyle(scheduledAt) {
+  const slot = Math.floor(scheduledAt.getTime() / (15 * 60 * 1000));
+  return slot % 4 === 0 ? "news" : "prediction";
+}
+
+async function postThreadsPrediction(env, language = "en", style = "mixed") {
   const lang = encodeURIComponent(language);
-  const result = await callSite(env, `/api/automation/promote?platform=threads&limit=1&lang=${lang}`, { method: "POST", authenticated: true });
+  const postStyle = encodeURIComponent(style);
+  const result = await callSite(env, `/api/automation/promote?platform=threads&limit=1&lang=${lang}&style=${postStyle}`, { method: "POST", authenticated: true });
   return {
     task: "threads-autopost",
     language,
+    style,
     ok: result.payload?.ok === true,
     posted: result.payload?.threads?.filter((item) => item.result?.ok).length || 0,
     skipped: result.payload?.threads?.filter((item) => item.skipped).length || 0,
@@ -95,10 +102,11 @@ async function runScheduled(controller, env) {
   const results = [];
   if (cron === "*/15 * * * *") {
     const minute = scheduledAt.getUTCMinutes();
-    if (minute === 0) results.push(await runSafely("threads-autopost:hi", () => postThreadsPrediction(env, "hi")));
-    if (minute === 15) results.push(await runSafely("threads-autopost:pt-BR", () => postThreadsPrediction(env, "pt-BR")));
-    if (minute === 30) results.push(await runSafely("threads-autopost:es", () => postThreadsPrediction(env, "es")));
-    if (minute === 45) results.push(await runSafely("threads-autopost:tr", () => postThreadsPrediction(env, "tr")));
+    const style = scheduledPostStyle(scheduledAt);
+    if (minute === 0) results.push(await runSafely("threads-autopost:hi", () => postThreadsPrediction(env, "hi", style)));
+    if (minute === 15) results.push(await runSafely("threads-autopost:pt-BR", () => postThreadsPrediction(env, "pt-BR", style)));
+    if (minute === 30) results.push(await runSafely("threads-autopost:es", () => postThreadsPrediction(env, "es", style)));
+    if (minute === 45) results.push(await runSafely("threads-autopost:tr", () => postThreadsPrediction(env, "tr", style)));
     results.push(await runSafely("refresh-predictions", () => refreshPredictions(env)));
     if (scheduledAt.getUTCHours() === 2 && scheduledAt.getUTCMinutes() === 15) results.push(await runSafely("db-sync", () => syncDatabase(env)));
   }

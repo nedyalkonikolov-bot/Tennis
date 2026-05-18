@@ -311,13 +311,27 @@ function chooseNewsHook(match, newsHooks = []) {
   return newsHooks[rotationIndex(match, newsHooks.length, "news")];
 }
 
+function normalizePostStyle(value) {
+  const style = String(value || "").toLowerCase();
+  if (["news", "headline", "hook"].includes(style)) return "news";
+  if (["prediction", "pick", "strict", "pure"].includes(style)) return "prediction";
+  return "mixed";
+}
+
+function choosePostStyle(match, requestedStyle = "mixed") {
+  const style = normalizePostStyle(requestedStyle);
+  if (style !== "mixed") return style;
+  return rotationIndex(match, 4, "style") === 0 ? "news" : "prediction";
+}
+
 function composeSocialPost(match, options = {}) {
   const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
   const url = SITE_URL + "/predictions/" + slug + "/";
   const referral = chooseReferralLink(match, options.referral);
   const hashtags = chooseHashtags(match);
   const followPrompt = chooseFollowPrompt(match);
-  const news = options.newsHook;
+  const postStyle = options.postStyle || "prediction";
+  const news = postStyle === "news" ? options.newsHook : null;
   const pick = match.predicted_winner_name || "value watch";
   const confidence = match.confidence ? String(match.confidence) + "%" : "model";
   const odds = match.predicted_odds ? String(match.predicted_odds) : null;
@@ -336,7 +350,7 @@ function composeSocialPost(match, options = {}) {
   const oddsLine = odds ? "\nOdds tracked: " + odds + "." : "";
   let text = lead + oddsLine + "\n\nFull prediction: " + url + "\nBetting offer: " + referral.url + "\n\n" + followPrompt + "\nComment your pick. 18+ Bet responsibly. " + hashtags;
   text = trimToLimit(text, 275);
-  return { text, url, referral, hashtags, news };
+  return { text, url, referral, hashtags, news, postStyle };
 }
 
 function composeTweet(match, options = {}) {
@@ -355,7 +369,8 @@ function composeThreadsPost(match, options = {}) {
   const url = SITE_URL + "/predictions/" + slug + "/";
   const referral = chooseReferralLink(match, options.referral);
   const hashtags = (locale.hashtags || chooseHashtags(match).split(" ").slice(0, 2)).join(" ");
-  const news = options.newsHook;
+  const postStyle = options.postStyle || "prediction";
+  const news = postStyle === "news" ? options.newsHook : null;
   const pick = match.predicted_winner_name || "value watch";
   const confidence = match.confidence ? String(match.confidence) + "%" : "model";
   const odds = match.predicted_odds ? ` | ${locale.odds} ${String(match.predicted_odds)}` : "";
@@ -372,7 +387,7 @@ function composeThreadsPost(match, options = {}) {
     lead = trimToLimit(`${matchTitle}\n${locale.pick}: ${pick}`, 500 - (`\n${locale.offer}: ${referral.url}\n\n${engage}`).length);
     text = `${lead}\n${locale.offer}: ${referral.url}\n\n${engage}`;
   }
-  return { text, url, referral, hashtags, language, languageLabel: locale.label, news };
+  return { text, url, referral, hashtags, language, languageLabel: locale.label, news, postStyle };
 }
 
 async function ensureAutomationTable(db) {
@@ -520,6 +535,7 @@ async function promote(request, env) {
   const dryRun = url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
   const platform = ["twitter", "threads", "all"].includes(url.searchParams.get("platform")) ? url.searchParams.get("platform") : "all";
   const referralOverride = url.searchParams.get("ref") || url.searchParams.get("referral") || null;
+  const requestedPostStyle = normalizePostStyle(url.searchParams.get("style") || url.searchParams.get("postStyle") || "mixed");
   const threadsLanguage = normalizeThreadsLanguage(url.searchParams.get("lang") || url.searchParams.get("language") || "en");
   const threadsPlatform = threadsPlatformKey(threadsLanguage);
   const postTwitterEnabled = platform === "all" || platform === "twitter";
@@ -535,28 +551,29 @@ async function promote(request, env) {
   const threads = [];
 
   for (const match of matches) {
-    const newsHook = chooseNewsHook(match, newsHooks);
-    const tweet = composeTweet(match, { referral: referralOverride, newsHook });
-    const threadsPost = composeThreadsPost(match, { referral: referralOverride, language: threadsLanguage, newsHook });
+    const postStyle = choosePostStyle(match, requestedPostStyle);
+    const newsHook = postStyle === "news" ? chooseNewsHook(match, newsHooks) : null;
+    const tweet = composeTweet(match, { referral: referralOverride, newsHook, postStyle });
+    const threadsPost = composeThreadsPost(match, { referral: referralOverride, language: threadsLanguage, newsHook, postStyle });
     const twitterPosted = await isAlreadyPosted(db, "twitter", match.prediction_id);
     const threadsPosted = await isAlreadyPosted(db, threadsPlatform, match.prediction_id);
 
     if (postTwitterEnabled && !twitterPosted && tweets.length < limit) {
       if (dryRun) {
-        tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, news: tweet.news, text: tweet.text });
+        tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, postStyle: tweet.postStyle, url: tweet.url, referral: tweet.referral, news: tweet.news, text: tweet.text });
       } else {
         const result = await postTweet(env, tweet.text);
-        tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, url: tweet.url, referral: tweet.referral, news: tweet.news, result });
+        tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, postStyle: tweet.postStyle, url: tweet.url, referral: tweet.referral, news: tweet.news, result });
         if (result.ok) await recordAutomationPost(db, "twitter", match.prediction_id, tweet.url, result.payload);
       }
     }
 
     if (postThreadsEnabled && !threadsPosted && threads.length < limit) {
       if (dryRun) {
-        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, text: threadsPost.text });
+        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, text: threadsPost.text });
       } else {
         const result = await postThreads(env, threadsPost.text);
-        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, result });
+        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, result });
         if (result.ok) await recordAutomationPost(db, threadsPlatform, match.prediction_id, threadsPost.url, result.payload);
       }
     }
@@ -570,6 +587,7 @@ async function promote(request, env) {
     ok: true,
     dryRun,
     platform,
+    requestedPostStyle,
     newsHooks: newsHooks.length,
     checked: matches.length,
     tweets,
