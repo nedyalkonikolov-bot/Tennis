@@ -62,10 +62,23 @@ async function postThreadsPrediction(env, language = "en") {
   };
 }
 
+async function runSafely(task, action) {
+  try {
+    return await action();
+  } catch (error) {
+    return { task, ok: false, error: error.message };
+  }
+}
+
 async function runTask(task, env, request) {
   if (task === "refresh") return refreshPredictions(env);
   if (task === "db-sync") return syncDatabase(env);
   if (task === "threads") return postThreadsPrediction(env, new URL(request.url).searchParams.get("lang") || "en");
+  if (task === "scheduled") {
+    const url = new URL(request.url);
+    const scheduledTime = url.searchParams.get("at") ? Date.parse(url.searchParams.get("at")) : Date.now();
+    return runScheduled({ cron: "*/15 * * * *", scheduledTime }, env);
+  }
   if (task === "all") {
     const results = [];
     results.push(await refreshPredictions(env));
@@ -81,20 +94,20 @@ async function runScheduled(controller, env) {
   const scheduledAt = new Date(controller.scheduledTime || Date.now());
   const results = [];
   if (cron === "*/15 * * * *") {
-    results.push(await refreshPredictions(env));
     const minute = scheduledAt.getUTCMinutes();
-    if (minute === 0) results.push(await postThreadsPrediction(env, "hi"));
-    if (minute === 15) results.push(await postThreadsPrediction(env, "pt-BR"));
-    if (minute === 30) results.push(await postThreadsPrediction(env, "es"));
-    if (minute === 45) results.push(await postThreadsPrediction(env, "tr"));
-    if (scheduledAt.getUTCHours() === 2 && scheduledAt.getUTCMinutes() === 15) results.push(await syncDatabase(env));
+    if (minute === 0) results.push(await runSafely("threads-autopost:hi", () => postThreadsPrediction(env, "hi")));
+    if (minute === 15) results.push(await runSafely("threads-autopost:pt-BR", () => postThreadsPrediction(env, "pt-BR")));
+    if (minute === 30) results.push(await runSafely("threads-autopost:es", () => postThreadsPrediction(env, "es")));
+    if (minute === 45) results.push(await runSafely("threads-autopost:tr", () => postThreadsPrediction(env, "tr")));
+    results.push(await runSafely("refresh-predictions", () => refreshPredictions(env)));
+    if (scheduledAt.getUTCHours() === 2 && scheduledAt.getUTCMinutes() === 15) results.push(await runSafely("db-sync", () => syncDatabase(env)));
   }
   return { ok: true, cron, ranAt: new Date().toISOString(), results };
 }
 
 export default {
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(runScheduled(controller, env));
+    ctx.waitUntil(runScheduled(controller, env).catch((error) => console.error("scheduled failed", error)));
   },
 
   async fetch(request, env) {
