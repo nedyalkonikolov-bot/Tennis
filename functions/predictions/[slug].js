@@ -145,7 +145,7 @@ function html(match, slug) {
 <meta property="og:type" content="article">
 <meta property="og:image" content="${SITE_URL}/og-image.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="stylesheet" href="/ad-banners.css">
+<link rel="stylesheet" href="/ad-banners.css?v=bad3218">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <script type="application/ld+json">${JSON.stringify(articleSchema)}</script>
 <style>body{margin:0;background:#07111f;color:#e5edf7;font-family:Arial,sans-serif;line-height:1.6}.wrap{max-width:1040px;margin:auto;padding:32px 18px}.crumb,.muted{color:#94a3b8}a{color:#bef264}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}.card{background:#111c2d;border:1px solid rgba(255,255,255,.1);padding:18px}.pill{display:inline-block;background:#bef264;color:#08111f;font-weight:700;padding:6px 10px}.cta{display:inline-block;margin-top:16px;background:#bef264;color:#08111f;padding:12px 16px;font-weight:700;text-decoration:none}h1{font-size:clamp(34px,6vw,62px);line-height:1.05}h2{margin-top:34px}</style>
@@ -171,7 +171,7 @@ function html(match, slug) {
 <p class="muted">18+ Bet responsibly. This is prediction research, not a guaranteed outcome.</p>
 <a class="cta" href="${CLOUDBET_URL}" rel="sponsored nofollow">Open Cloudbet tennis odds</a>
 <p><a href="/tennis-predictions/">More tennis predictions today</a> · <a href="/atp-predictions/">ATP predictions</a> · <a href="/wta-predictions/">WTA predictions</a></p>
-</main><script src="/ad-banners.js" defer></script></body></html>`;
+</main><script src="/ad-banners.js?v=bad3218" defer></script></body></html>`;
 }
 
 export async function onRequestGet({ params, env }) {
