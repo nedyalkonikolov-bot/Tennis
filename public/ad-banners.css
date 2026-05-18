@@ -3,19 +3,50 @@
   top: 50%;
   z-index: 30;
   display: none;
-  width: 120px;
-  height: 450px;
-  overflow: hidden;
+  width: 140px;
+  overflow: clip;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #020617;
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.35);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.32);
+  color: #e5edf7;
+  text-decoration: none;
   transform: translateY(-50%);
+  backdrop-filter: blur(14px);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.side-banner:hover {
+  border-color: rgba(190, 242, 100, 0.45);
+  box-shadow: 0 24px 70px rgba(132, 204, 22, 0.16), 0 22px 60px rgba(0, 0, 0, 0.35);
+  transform: translateY(-50%) translateY(-2px);
+}
+
+.side-banner-label,
+.side-banner-note {
+  display: block;
+  padding: 9px 10px;
+  font-family: Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.side-banner-label {
+  color: #bef264;
+  letter-spacing: 0;
+}
+
+.side-banner-note {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
 }
 
 .side-banner img {
   display: block;
-  width: 120px;
-  height: 450px;
+  width: 100%;
+  height: auto;
   object-fit: cover;
 }
 
@@ -30,8 +61,8 @@
 @media (min-width: 1280px) and (min-height: 600px) {
   body {
     box-sizing: border-box;
-    padding-right: 132px;
-    padding-left: 132px;
+    padding-right: 156px;
+    padding-left: 156px;
   }
 
   .side-banner {
@@ -41,13 +72,11 @@
 
 @media (min-width: 1600px) and (min-height: 700px) {
   body {
-    padding-right: 184px;
-    padding-left: 184px;
+    padding-right: 196px;
+    padding-left: 196px;
   }
 
-  .side-banner,
-  .side-banner img {
-    width: 160px;
-    height: 600px;
+  .side-banner {
+    width: 172px;
   }
 }

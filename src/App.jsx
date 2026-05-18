@@ -15,7 +15,7 @@ import {
   Trophy,
   Users,
 } from "lucide-react";
-import { fallbackMatches, fallbackNews, fallbackPlayers } from "./data/fallbackData";
+import { fallbackNews, fallbackPlayers } from "./data/fallbackData";
 
 const siteUrl = "https://www.tennistipz.win";
 const defaultBetUrl = "https://www.cloudbet.com/en/sports/tennis";
@@ -72,7 +72,7 @@ const initialLiveData = {
   generatedAt: null,
   source: { tennis: "fallback", odds: "fallback", news: "fallback" },
   betUrl: cloudbetUrl,
-  matches: fallbackMatches,
+  matches: [],
   players: fallbackPlayers,
   news: fallbackNews,
   errors: [],
@@ -558,11 +558,13 @@ export default function TennisTipzApp() {
 
       if (liveResponse.status === "fulfilled" && liveResponse.value.ok) {
         const payload = await liveResponse.value.json();
-        setLiveData({ generatedAt: payload.generatedAt || null, source: payload.source || initialLiveData.source, betUrl: payload.betUrl || cloudbetUrl, matches: Array.isArray(payload.matches) ? payload.matches : fallbackMatches, players: payload.players?.length ? payload.players : fallbackPlayers, news: payload.news?.length ? payload.news : fallbackNews, errors: payload.errors || [] });
+        const source = payload.source || initialLiveData.source;
+        const hasLivePredictionFeed = source.tennis !== "fallback" && source.odds !== "fallback";
+        setLiveData({ generatedAt: payload.generatedAt || null, source, betUrl: payload.betUrl || cloudbetUrl, matches: hasLivePredictionFeed && Array.isArray(payload.matches) ? payload.matches : [], players: payload.players?.length ? payload.players : fallbackPlayers, news: payload.news?.length ? payload.news : fallbackNews, errors: payload.errors || [] });
         if (payload.errors?.length) setError("Some live feeds used fallback data.");
       } else {
         setLiveData(initialLiveData);
-        setError("Live feed unavailable. Showing fallback data.");
+        setError("Live prediction feed unavailable. No fallback picks are shown.");
       }
 
       const nextDbData = { ...initialDbData };
