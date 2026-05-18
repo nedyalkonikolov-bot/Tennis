@@ -80,93 +80,13 @@ async function fetchApiTennisRaw(env, method, params = {}) {
   return payload.result || null;
 }
 
-function buildPlayerStatements(db, player) {
+function buildPlayerStatements(db, player, resolvedId = "") {
   const tour = player.tour || player.sex || "ATP";
-  const id = makePlayerId(tour, player.name, player.playerKey);
+  const id = resolvedId || makePlayerId(tour, player.name, player.playerKey);
   const normalizedName = normalizeName(player.name);
   const snapshotDate = todayIsoDate();
 
   return [
-    db.prepare(`
-      INSERT INTO players (
-        id, player_key, name, normalized_name, tour, country, current_rank, points, movement,
-        form_rating, hold_rate, break_rate, clay_rating, hard_rating, grass_rating, source, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(id) DO UPDATE SET
-        player_key = excluded.player_key,
-        name = excluded.name,
-        normalized_name = excluded.normalized_name,
-        tour = excluded.tour,
-        country = excluded.country,
-        current_rank = excluded.current_rank,
-        points = excluded.points,
-        movement = excluded.movement,
-        form_rating = excluded.form_rating,
-        hold_rate = excluded.hold_rate,
-        break_rate = excluded.break_rate,
-        clay_rating = excluded.clay_rating,
-        hard_rating = excluded.hard_rating,
-        grass_rating = excluded.grass_rating,
-        source = excluded.source,
-        updated_at = datetime('now')
-    `).bind(
-      id,
-      safeText(player.playerKey),
-      player.name,
-      normalizedName,
-      tour,
-      safeText(player.country),
-      asInt(player.rank, null),
-      asInt(player.points, 0),
-      safeText(player.movement || player.trend),
-      asInt(player.form, 50),
-      asInt(player.hold, 0),
-      asInt(player.breakRate, 0),
-      asInt(player.clay, 0),
-      asInt(player.hard, 0),
-      asInt(player.grass, 0),
-      "live-data"
-    ),
-    db.prepare(`
-      INSERT INTO player_stat_snapshots (
-        id, player_id, snapshot_date, rank, points, form_rating, hold_rate, break_rate,
-        clay_rating, hard_rating, grass_rating, source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(player_id, snapshot_date) DO UPDATE SET
-        rank = excluded.rank,
-        points = excluded.points,
-        form_rating = excluded.form_rating,
-        hold_rate = excluded.hold_rate,
-        break_rate = excluded.break_rate,
-        clay_rating = excluded.clay_rating,
-        hard_rating = excluded.hard_rating,
-        grass_rating = excluded.grass_rating,
-        source = excluded.source
-    `).bind(
-      `${id}:${snapshotDate}`,
-      id,
-      snapshotDate,
-      asInt(player.rank, null),
-      asInt(player.points, 0),
-      asInt(player.form, 50),
-      asInt(player.hold, 0),
-      asInt(player.breakRate, 0),
-      asInt(player.clay, 0),
-      asInt(player.hard, 0),
-      asInt(player.grass, 0),
-      "live-data"
-    ),
-  ];
-}
-
-async function upsertPlayerAndSnapshot(db, player) {
-  const tour = player.tour || player.sex || "ATP";
-  const normalizedName = normalizeName(player.name);
-  const existing = await db.prepare("SELECT id FROM players WHERE tour = ? AND normalized_name = ? LIMIT 1").bind(tour, normalizedName).first();
-  const id = existing?.id || makePlayerId(tour, player.name, player.playerKey);
-  const snapshotDate = todayIsoDate();
-
-  await db.batch([
     db.prepare(`
       INSERT INTO players (
         id, player_key, name, normalized_name, tour, country, current_rank, points, movement,
@@ -234,7 +154,7 @@ async function upsertPlayerAndSnapshot(db, player) {
       asInt(player.grass, 0),
       "live-data"
     ),
-  ]);
+  ];
 }
 
 async function runBatches(db, statements, batchSize = 80) {
@@ -673,11 +593,18 @@ async function syncDatabase(request, env) {
     if (!liveResponse.ok) throw new Error(`live-data returned ${liveResponse.status}`);
     const liveData = await liveResponse.json();
 
+    const existingPlayers = await db.prepare("SELECT id, tour, normalized_name FROM players").all();
+    const playerIdByName = new Map((existingPlayers.results || []).map((player) => [`${player.tour}:${player.normalized_name}`, player.id]));
+    const playerStatements = [];
     for (const player of liveData.players || []) {
       if (!player?.name || !["ATP", "WTA"].includes(player.tour || player.sex)) continue;
-      await upsertPlayerAndSnapshot(db, player);
+      const tour = player.tour || player.sex || "ATP";
+      const key = `${tour}:${normalizeName(player.name)}`;
+      if (!playerIdByName.has(key)) playerIdByName.set(key, makePlayerId(tour, player.name, player.playerKey));
+      playerStatements.push(...buildPlayerStatements(db, player, playerIdByName.get(key)));
       playersUpserted += 1;
     }
+    await runBatches(db, playerStatements);
 
     const profileSync = await syncPlayerProfiles(db, env, liveData.players || []);
     playerProfilesUpserted = profileSync.profiles;
