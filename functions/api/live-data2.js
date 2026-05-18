@@ -2,7 +2,7 @@ const TENNIS_API_BASE = "https://api.api-tennis.com/tennis/";
 const CLOUDBET_API_BASE = "https://sports-api.cloudbet.com/pub/v2/odds";
 const NEWS_FEEDS = [
   { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
-  { name: "TennisHead", url: "https://tennishead.net/feed" },
+  { name: "TennisHead", url: "https://r.jina.ai/http://https://tennishead.net/feed", type: "jinaMarkdown" },
 ];
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_BET_URL = "https://www.cloudbet.com/en/sports/tennis";
@@ -504,15 +504,29 @@ async function syncLivePredictionsToDb(env, matches, diagnostics) {
 }
 function rssTag(item, tag) { return cleanText(item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`, "i"))?.[1] || ""); }
 function rssImage(item) { return item.match(/<media:content[^>]+url=["']([^"']+)/i)?.[1] || item.match(/<enclosure[^>]+url=["']([^"']+)/i)?.[1] || DEFAULT_NEWS_IMAGE; }
+function newsCategory(title) { return /rank|stat/i.test(title) ? "Trend" : /open|masters|draw|schedule|garros|wimbledon|slam/i.test(title) ? "Tournament" : /injur|withdraw|fitness|return/i.test(title) ? "Player News" : "News"; }
+function formatNewsTime(date) { return Number.isNaN(date.getTime()) ? "Latest" : date.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
+function parseJinaMarkdownNews(text, feed) {
+  return [...text.matchAll(/### \[([^\]]+)\]\((https?:\/\/[^\s)]+)\)[\s\S]*?\n([A-Z][a-z]{2}, \d{1,2} [A-Z][a-z]{2} \d{4} [^\n]+)/g)]
+    .slice(0, 16)
+    .map((match, index) => {
+      const title = cleanText(match[1]);
+      const url = match[2];
+      const published = new Date(match[3]);
+      return { id: url || `${feed.name}-${index}`, title, category: newsCategory(title), time: formatNewsTime(published), publishedAt: Number.isNaN(published.getTime()) ? "" : published.toISOString(), summary: "Read the latest TennisHead update.", url, imageUrl: DEFAULT_NEWS_IMAGE, source: feed.name };
+    });
+}
 async function getNewsFromFeed(feed) {
-  const response = await fetch(feed.url, { headers: { accept: "application/rss+xml, application/xml, text/xml" } });
+  const response = await fetch(feed.url, { headers: { accept: feed.type === "jinaMarkdown" ? "text/plain, text/markdown" : "application/rss+xml, application/xml, text/xml" } });
   if (!response.ok) throw new Error(`${feed.name} returned ${response.status}`);
-  return [...(await response.text()).matchAll(/<item[\s\S]*?<\/item>/gi)].slice(0, 16).map((match, index) => {
+  const text = await response.text();
+  if (feed.type === "jinaMarkdown") return parseJinaMarkdownNews(text, feed);
+  return [...text.matchAll(/<item[\s\S]*?<\/item>/gi)].slice(0, 16).map((match, index) => {
     const item = match[0];
     const title = rssTag(item, "title");
     const url = rssTag(item, "link") || rssTag(item, "guid") || "#";
     const published = new Date(rssTag(item, "pubDate"));
-    return { id: url || `${feed.name}-${index}`, title, category: /rank|stat/i.test(title) ? "Trend" : /open|masters|draw|schedule/i.test(title) ? "Tournament" : "News", time: Number.isNaN(published.getTime()) ? "Latest" : published.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }), publishedAt: Number.isNaN(published.getTime()) ? "" : published.toISOString(), summary: rssTag(item, "description") || "Read the latest tennis update.", url, imageUrl: rssImage(item), source: feed.name };
+    return { id: url || `${feed.name}-${index}`, title, category: newsCategory(title), time: formatNewsTime(published), publishedAt: Number.isNaN(published.getTime()) ? "" : published.toISOString(), summary: rssTag(item, "description") || "Read the latest tennis update.", url, imageUrl: rssImage(item), source: feed.name };
   });
 }
 
@@ -574,7 +588,7 @@ async function enhanceNewsWithOpenAi(env, news, diagnostics) {
       category: safeText(ai.category) || item.category,
       summary: safeText(ai.summary) || item.summary,
       bettingAngle: safeText(ai.bettingAngle),
-      source: "TennisTipz AI + Tennis.com",
+      source: `TennisTipz AI + ${item.source || "ESPN/TennisHead"}`,
     };
   });
   if (cache && enhanced.length) await cache.put(cacheKey, JSON.stringify({ generatedAt: new Date().toISOString(), news: enhanced }), { expirationTtl: AI_NEWS_CACHE_TTL_SECONDS }).catch(() => null);

@@ -5,7 +5,7 @@ const X_TWEET_URL = "https://api.twitter.com/2/tweets";
 const THREADS_API_URL = "https://graph.threads.net/v1.0";
 const NEWS_FEEDS = [
   { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
-  { name: "TennisHead", url: "https://tennishead.net/feed" },
+  { name: "TennisHead", url: "https://r.jina.ai/http://https://tennishead.net/feed", type: "jinaMarkdown" },
 ];
 const THREADS_LOCALES = {
   en: {
@@ -293,11 +293,22 @@ function rssTag(item, tag) {
   return decodeHtml(item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] || "");
 }
 
+function parseJinaMarkdownHooks(text, feed, limit = 8) {
+  return [...text.matchAll(/### \[([^\]]+)\]\((https?:\/\/[^\s)]+)\)[\s\S]*?\n([A-Z][a-z]{2}, \d{1,2} [A-Z][a-z]{2} \d{4} [^\n]+)/g)]
+    .slice(0, limit)
+    .map((match, index) => {
+      const title = decodeHtml(match[1]);
+      const published = new Date(match[3]);
+      return { id: match[2] || `${feed.name}-${index}`, title, summary: "", url: match[2], source: feed.name, publishedAt: Number.isNaN(published.getTime()) ? "" : published.toISOString() };
+    });
+}
+
 async function getNewsHooksFromFeed(feed, limit = 8) {
-  const response = await fetch(feed.url, { headers: { accept: "application/rss+xml, application/xml, text/xml" } });
+  const response = await fetch(feed.url, { headers: { accept: feed.type === "jinaMarkdown" ? "text/plain, text/markdown" : "application/rss+xml, application/xml, text/xml" } });
   if (!response.ok) throw new Error(`${feed.name} news returned ${response.status}`);
-  const xml = await response.text();
-  return xml
+  const text = await response.text();
+  if (feed.type === "jinaMarkdown") return parseJinaMarkdownHooks(text, feed, limit);
+  return text
     .split(/<item\b/i)
     .slice(1, limit + 1)
     .map((item, index) => {
