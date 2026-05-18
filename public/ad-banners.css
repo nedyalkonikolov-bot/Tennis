@@ -1,25 +1,27 @@
-.side-banner {
-  position: fixed;
-  top: 50%;
-  z-index: 30;
+.site-ad-shell {
+  width: 100%;
+}
+
+.side-banner-rail {
   display: none;
-  width: 140px;
+}
+
+.side-banner {
+  display: block;
   overflow: clip;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.94);
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.32);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.28);
   color: #e5edf7;
   text-decoration: none;
-  transform: translateY(-50%);
-  backdrop-filter: blur(14px);
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
 .side-banner:hover {
   border-color: rgba(190, 242, 100, 0.45);
-  box-shadow: 0 24px 70px rgba(132, 204, 22, 0.16), 0 22px 60px rgba(0, 0, 0, 0.35);
-  transform: translateY(-50%) translateY(-2px);
+  box-shadow: 0 24px 70px rgba(132, 204, 22, 0.16), 0 22px 60px rgba(0, 0, 0, 0.34);
+  transform: translateY(-2px);
 }
 
 .side-banner-label,
@@ -50,33 +52,34 @@
   object-fit: cover;
 }
 
-.side-banner-left {
-  left: 12px;
-}
-
-.side-banner-right {
-  right: 12px;
-}
-
-@media (min-width: 1280px) and (min-height: 600px) {
-  body {
-    box-sizing: border-box;
-    padding-right: 156px;
-    padding-left: 156px;
+@media (min-width: 1400px) and (min-height: 620px) {
+  .site-ad-shell {
+    display: grid;
+    grid-template-columns: 140px minmax(0, 1fr) 140px;
+    gap: 20px;
+    align-items: start;
+    max-width: 1640px;
+    margin: 0 auto;
+    padding: 0 20px;
   }
 
-  .side-banner {
+  .site-ad-shell > :not(.side-banner-rail) {
+    min-width: 0;
+  }
+
+  .side-banner-rail {
+    position: sticky;
+    top: 92px;
     display: block;
+    padding-top: 28px;
   }
 }
 
-@media (min-width: 1600px) and (min-height: 700px) {
-  body {
-    padding-right: 196px;
-    padding-left: 196px;
-  }
-
-  .side-banner {
-    width: 172px;
+@media (min-width: 1680px) and (min-height: 720px) {
+  .site-ad-shell {
+    grid-template-columns: 172px minmax(0, 1fr) 172px;
+    gap: 24px;
+    max-width: 1760px;
+    padding: 0 24px;
   }
 }

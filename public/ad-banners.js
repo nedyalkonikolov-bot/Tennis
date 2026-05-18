@@ -1,6 +1,4 @@
 (function () {
-  if (document.querySelector("[data-side-banners]")) return;
-
   var banners = [
     {
       name: "Stake.com",
@@ -18,14 +16,13 @@
     },
   ];
 
-  var wrapper = document.createElement("aside");
-  wrapper.className = "side-banners";
-  wrapper.setAttribute("data-side-banners", "");
-  wrapper.setAttribute("aria-label", "Sponsored betting offers");
+  function createRail(banner) {
+    var rail = document.createElement("aside");
+    rail.className = "side-banner-rail side-banner-rail-" + banner.position;
+    rail.setAttribute("aria-label", banner.name + " sponsored offer");
 
-  banners.forEach(function (banner) {
     var link = document.createElement("a");
-    link.className = "side-banner side-banner-" + banner.position;
+    link.className = "side-banner";
     link.href = banner.href;
     link.target = "_blank";
     link.rel = "nofollow sponsored noopener noreferrer";
@@ -49,8 +46,28 @@
     link.appendChild(label);
     link.appendChild(image);
     link.appendChild(note);
-    wrapper.appendChild(link);
-  });
+    rail.appendChild(link);
+    return rail;
+  }
 
-  document.body.appendChild(wrapper);
+  function install() {
+    if (document.querySelector("[data-side-banners]")) return true;
+
+    var content = document.getElementById("root") || document.querySelector("main");
+    if (!content || !content.parentNode) return false;
+
+    var shell = document.createElement("div");
+    shell.className = "site-ad-shell";
+    shell.setAttribute("data-side-banners", "");
+
+    content.parentNode.insertBefore(shell, content);
+    shell.appendChild(createRail(banners[0]));
+    shell.appendChild(content);
+    shell.appendChild(createRail(banners[1]));
+    return true;
+  }
+
+  if (!install()) {
+    document.addEventListener("DOMContentLoaded", install, { once: true });
+  }
 })();
