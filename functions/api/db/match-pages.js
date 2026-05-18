@@ -29,6 +29,18 @@ function wl(wins, losses) {
 }
 
 function buildAiPrediction(row) {
+  let factors = {};
+  try { factors = row.factors_json ? JSON.parse(row.factors_json) : {}; } catch { factors = {}; }
+  if (factors.aiSummary) {
+    return {
+      summary: factors.aiSummary,
+      reasons: Array.isArray(factors.aiReasons) ? factors.aiReasons : [],
+      bettingAngle: factors.aiBettingAngle || "Use this AI prediction as research only; tennis betting carries risk and no result is guaranteed.",
+      strength: "OpenAI analysis",
+      generatedAt: factors.openai?.generatedAt || new Date().toISOString(),
+      model: "OpenAI",
+    };
+  }
   const confidence = asNumber(row.confidence, 0);
   const edge = asNumber(row.model_edge, 0);
   const pick = row.predicted_winner_name || "value watch";

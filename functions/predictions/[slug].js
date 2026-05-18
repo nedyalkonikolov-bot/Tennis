@@ -35,6 +35,15 @@ function isoDateOrUndefined(value) {
 }
 
 function buildAiPrediction(row) {
+  let factors = {};
+  try { factors = row.factors_json ? JSON.parse(row.factors_json) : {}; } catch { factors = {}; }
+  if (factors.aiSummary) {
+    return {
+      summary: factors.aiSummary,
+      reasons: Array.isArray(factors.aiReasons) ? factors.aiReasons : [],
+      strength: "OpenAI analysis",
+    };
+  }
   const confidence = asNumber(row.confidence, 0);
   const edge = asNumber(row.model_edge, 0);
   const pick = row.predicted_winner_name || "value watch";
@@ -71,6 +80,7 @@ async function findMatchBySlug(db, slug) {
       COALESCE(sb.matches_won, 0) AS player_b_season_wins,
       COALESCE(sb.matches_lost, 0) AS player_b_season_losses,
       p.id AS prediction_id, p.predicted_winner_name, p.predicted_side, p.confidence, p.predicted_odds, p.model_edge,
+      p.factors_json,
       po.result_status, po.actual_winner_name, po.correct, po.settled_at
     FROM matches m
     LEFT JOIN players pa ON pa.id = m.player_a_id
