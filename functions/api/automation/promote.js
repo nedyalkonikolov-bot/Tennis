@@ -5,6 +5,7 @@ const X_TWEET_URL = "https://api.twitter.com/2/tweets";
 const THREADS_API_URL = "https://graph.threads.net/v1.0";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const MIN_PUBLIC_PICK_ODDS = 1.4;
+const SOCIAL_PREVIEW_COUNT = 9;
 const NEWS_FEEDS = [
   { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
   { name: "TennisHead", url: "https://r.jina.ai/http://https://tennishead.net/feed", type: "jinaMarkdown" },
@@ -282,6 +283,15 @@ function chooseHashtags(match) {
   return HASHTAG_SETS[rotationIndex(match, HASHTAG_SETS.length, "tags")].join(" ");
 }
 
+function socialPreviewIndex(match, salt = "") {
+  return rotationIndex(match, SOCIAL_PREVIEW_COUNT, `preview:${salt}`) + 1;
+}
+
+function predictionUrl(match, salt = "") {
+  const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
+  return `${SITE_URL}/predictions/${slug}/?preview=${socialPreviewIndex(match, salt)}`;
+}
+
 function chooseFollowPrompt(match) {
   return FOLLOW_PROMPTS[rotationIndex(match, FOLLOW_PROMPTS.length, "follow")];
 }
@@ -360,8 +370,7 @@ function choosePostStyle(match, requestedStyle = "mixed") {
 }
 
 function composeSocialPost(match, options = {}) {
-  const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
-  const url = SITE_URL + "/predictions/" + slug + "/";
+  const url = predictionUrl(match, options.platform || "twitter");
   const referral = chooseReferralLink(match, options.referral);
   const hashtags = chooseHashtags(match);
   const followPrompt = chooseFollowPrompt(match);
@@ -427,7 +436,7 @@ async function callOpenAiPost(env, payload, fallbackText, maxLength) {
       input: [
         {
           role: "system",
-          content: "You write short, catchy tennis prediction social posts for TennisTipz. Use only supplied facts. Always include both supplied links exactly once: the prediction link and the affiliate/referral link. Never guarantee results. Mention 18+ and responsible betting. Urge users to follow, comment, and repost. Match the requested language. Return only the final post text.",
+          content: "You write short, catchy tennis prediction social posts for TennisTipz. Use only supplied facts. Always include both supplied links exactly once: the prediction link and the affiliate/referral link. Choose 2 to 4 popular, relevant hashtags for the platform, language, tour, and betting context; do not rely on a fixed hashtag list. Never guarantee results. Mention 18+ and responsible betting. Urge users to follow, comment, and repost. Match the requested language. Return only the final post text.",
         },
         { role: "user", content: JSON.stringify(payload) },
       ],
@@ -468,7 +477,7 @@ async function composeAiSocialPost(env, match, options = {}) {
     },
     newsHook: base.news ? { title: base.news.title, source: base.news.source, url: base.news.url } : null,
     requiredCallToAction: locale.engage || "Comment your pick and repost for more tennis predictions.",
-    hashtags: options.platform === "twitter" ? chooseHashtags(match) : (locale.hashtags || []).join(" "),
+    hashtagInstruction: "Choose 2 to 4 popular, relevant hashtags for this post in the requested language and platform.",
   };
   const ai = await callOpenAiPost(env, payload, base.text, maxLength);
   return { ...base, language, languageLabel: locale.label, text: ai.text, ai };
@@ -477,8 +486,7 @@ async function composeAiSocialPost(env, match, options = {}) {
 function composeThreadsPost(match, options = {}) {
   const language = normalizeThreadsLanguage(options.language);
   const locale = THREADS_LOCALES[language] || THREADS_LOCALES.en;
-  const slug = slugify([match.tour, match.player_a_name, "vs", match.player_b_name].join(" "));
-  const url = SITE_URL + "/predictions/" + slug + "/";
+  const url = predictionUrl(match, `threads:${language}`);
   const referral = chooseReferralLink(match, options.referral);
   const hashtags = (locale.hashtags || chooseHashtags(match).split(" ").slice(0, 2)).join(" ");
   const postStyle = options.postStyle || "prediction";

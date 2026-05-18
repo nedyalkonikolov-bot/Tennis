@@ -1,6 +1,7 @@
 const SITE_URL = "https://www.tennistipz.win";
 const CLOUDBET_URL = "https://cldbt.cloud/go/en/landing/bitcoin-betting?af_token=ecea0a0896472c99ee3ff23d7fae8483&aftm_campaign=Tennis&aftm_source=tennistipz.win&aftm_medium=organic&aftm_content=Predictions&aftm_cid=4";
 const MIN_PUBLIC_PICK_ODDS = 1.4;
+const SOCIAL_PREVIEW_COUNT = 9;
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
@@ -14,6 +15,18 @@ function slugify(value = "") {
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "match";
+}
+
+function previewIndex(seed = "") {
+  const total = [...String(seed)].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return (total % SOCIAL_PREVIEW_COUNT) + 1;
+}
+
+function socialPreviewImage(request, seed) {
+  const url = new URL(request.url);
+  const requested = Number.parseInt(url.searchParams.get("preview") || "", 10);
+  const index = requested >= 1 && requested <= SOCIAL_PREVIEW_COUNT ? requested : previewIndex(seed);
+  return `${SITE_URL}/social-previews/tennistipz-preview-${String(index).padStart(2, "0")}.png`;
 }
 
 function asNumber(value, fallback = 0) {
@@ -105,9 +118,10 @@ async function findMatchBySlug(db, slug) {
   return (result.results || []).find((row) => slugify(`${row.tour} ${row.player_a_name} vs ${row.player_b_name}`) === slug);
 }
 
-function html(match, slug) {
+function html(match, slug, request) {
   const title = `${match.player_a_name} vs ${match.player_b_name}`;
   const canonical = `${SITE_URL}/predictions/${slug}/`;
+  const previewImage = socialPreviewImage(request, `${match.match_id || ""}:${slug}`);
   const ai = buildAiPrediction(match);
   const startDate = isoDateOrUndefined(match.start_time);
   const description = `${title} prediction: ${match.predicted_winner_name || "AI pick"}, ${match.confidence || "model"}% confidence, ${match.surface || "tennis"} surface, Cloudbet odds ${match.predicted_odds || "available"}.`;
@@ -143,8 +157,11 @@ function html(match, slug) {
 <meta property="og:description" content="${escapeHtml(description)}">
 <meta property="og:url" content="${canonical}">
 <meta property="og:type" content="article">
-<meta property="og:image" content="${SITE_URL}/og-image.png">
+<meta property="og:image" content="${previewImage}">
+<meta property="og:image:width" content="1024">
+<meta property="og:image:height" content="1024">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="${previewImage}">
 <link rel="stylesheet" href="/ad-banners.css?v=navy-rails">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <script type="application/ld+json">${JSON.stringify(articleSchema)}</script>
@@ -174,12 +191,12 @@ function html(match, slug) {
 </main><script src="/ad-banners.js?v=navy-rails" defer></script></body></html>`;
 }
 
-export async function onRequestGet({ params, env }) {
+export async function onRequestGet({ request, params, env }) {
   if (!env.TENNIS_DB) return new Response("Missing database", { status: 500 });
   const slug = params.slug;
   const match = await findMatchBySlug(env.TENNIS_DB, slug);
   if (!match) return new Response("Prediction not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
-  return new Response(html(match, slug), {
+  return new Response(html(match, slug, request), {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "public, max-age=300, stale-while-revalidate=1800",
