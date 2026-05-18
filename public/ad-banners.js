@@ -2,14 +2,12 @@
   var banners = [
     {
       name: "Stake.com",
-      label: "Stake offer",
       href: "https://stake.com/?c=NOYIoKcY",
       image: "/ads/stake-banner-160x600.gif",
       position: "left",
     },
     {
       name: "Cloudbet",
-      label: "Cloudbet bonus",
       href: "https://cldbt.cloud/go/en/landing/bitcoin-betting?af_token=ecea0a0896472c99ee3ff23d7fae8483&aftm_campaign=Tennis&aftm_source=tennistipz.win&aftm_medium=organic&aftm_content=Predictions&aftm_cid=4",
       image: "/ads/cloudbet-offer-160x600.png",
       position: "right",
@@ -28,10 +26,6 @@
     link.rel = "nofollow sponsored noopener noreferrer";
     link.setAttribute("aria-label", "Open " + banner.name + " sponsored offer");
 
-    var label = document.createElement("span");
-    label.className = "side-banner-label";
-    label.textContent = banner.label;
-
     var image = document.createElement("img");
     image.src = banner.image;
     image.alt = banner.name + " sponsored offer";
@@ -39,13 +33,7 @@
     image.height = 600;
     image.loading = "lazy";
 
-    var note = document.createElement("span");
-    note.className = "side-banner-note";
-    note.textContent = "18+ Bet responsibly";
-
-    link.appendChild(label);
     link.appendChild(image);
-    link.appendChild(note);
     rail.appendChild(link);
     return rail;
   }

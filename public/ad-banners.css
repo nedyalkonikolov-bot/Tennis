@@ -9,37 +9,17 @@
 .side-banner {
   display: block;
   overflow: clip;
-  border-radius: 8px;
-  background: #111c2d;
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.22);
-  color: #e5edf7;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
   text-decoration: none;
-  transition: box-shadow 180ms ease, transform 180ms ease;
+  transition: filter 180ms ease, transform 180ms ease;
 }
 
 .side-banner:hover {
-  box-shadow: 0 24px 70px rgba(132, 204, 22, 0.13), 0 22px 60px rgba(0, 0, 0, 0.28);
+  filter: brightness(1.06);
   transform: translateY(-2px);
-}
-
-.side-banner-label,
-.side-banner-note {
-  display: block;
-  padding: 9px 10px;
-  font-family: Arial, sans-serif;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.2;
-  text-align: center;
-}
-
-.side-banner-label {
-  color: #bef264;
-  letter-spacing: 0;
-}
-
-.side-banner-note {
-  color: #94a3b8;
 }
 
 .side-banner img {
@@ -69,6 +49,7 @@
     top: 92px;
     display: block;
     padding-top: 28px;
+    background: transparent;
   }
 }
 
