@@ -239,7 +239,7 @@ async function syncOutcomes(request, env) {
 
   const url = new URL(request.url);
   const daysBack = Math.min(Math.max(Number.parseInt(url.searchParams.get("days") || "120", 10), 1), 365);
-  const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "300", 10), 1), 500);
+  const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "60", 10), 1), 80);
   const db = env.TENNIS_DB;
   const repairedEmptySettlements = await repairEmptySettlements(db);
 

@@ -63,7 +63,7 @@ async function postThreadsPrediction(env, language = "en", style = "mixed") {
   };
 }
 
-async function syncOutcomes(env, days = 180, limit = 500) {
+async function syncOutcomes(env, days = 180, limit = 60) {
   const result = await callSite(env, `/api/db/sync-outcomes?days=${encodeURIComponent(days)}&limit=${encodeURIComponent(limit)}`, { method: "POST", authenticated: true });
   return {
     task: "sync-outcomes",
@@ -112,7 +112,7 @@ async function runTask(task, env, request) {
   if (task === "db-sync") return syncDatabase(env);
   if (task === "sync-outcomes") {
     const url = new URL(request.url);
-    return syncOutcomes(env, url.searchParams.get("days") || 180, url.searchParams.get("limit") || 500);
+    return syncOutcomes(env, url.searchParams.get("days") || 180, url.searchParams.get("limit") || 60);
   }
   if (task === "threads") return postThreadsPrediction(env, new URL(request.url).searchParams.get("lang") || "en");
   if (task === "human-threads") return postHumanThreads(env);

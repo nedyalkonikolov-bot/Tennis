@@ -16,7 +16,7 @@ on:
       limit:
         description: "Maximum pending predictions to check"
         required: false
-        default: "500"
+        default: "60"
 
 jobs:
   sync-outcomes:
@@ -29,7 +29,7 @@ jobs:
         env:
           SYNC_TOKEN: ${{ secrets.TENNISTIPZ_DATABASE_SYNC_TOKEN }}
           DAYS: ${{ github.event.inputs.days || '180' }}
-          LIMIT: ${{ github.event.inputs.limit || '500' }}
+          LIMIT: ${{ github.event.inputs.limit || '60' }}
         run: |
           if [ -z "$SYNC_TOKEN" ]; then
             echo "Missing TENNISTIPZ_DATABASE_SYNC_TOKEN secret"
