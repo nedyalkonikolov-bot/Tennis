@@ -50,3 +50,85 @@ CLOUDBET_AFFILIATE_URL=your_cloudbet_affiliate_link
 ```bash
 npm run build
 ```
+
+## Threads Content Automation
+
+This repo also includes a dry-run-first Threads automation for human-style tennis content. It generates five post variants with the OpenAI Responses API, scores them, applies anti-spam limits, and can publish the best one through the Threads API.
+
+### Install
+
+```bash
+npm install
+```
+
+### Environment
+
+Create `.env` from `.env.example`:
+
+```text
+OPENAI_API_KEY=your_openai_key
+OPENAI_MODEL=gpt-4o-mini
+THREADS_USER_ID=your_threads_user_id
+THREADS_ACCESS_TOKEN=your_threads_access_token
+LIVE_POSTING=false
+POST_STORAGE_PATH=./data/threads-posts.json
+MATCH_DATA_PATH=./match-data.json
+```
+
+`LIVE_POSTING=false` is the default. In dry-run mode the automation prints and logs the generated post, but does not publish.
+
+### Match Input
+
+Put match data in `match-data.json`, or pass it inline with `--match`:
+
+```json
+{
+  "tournament": "ATP Rome",
+  "surface": "clay",
+  "player1": "Carlos Alcaraz",
+  "player2": "Jannik Sinner",
+  "score": "live or upcoming",
+  "stats": {
+    "break_points": "...",
+    "first_serve_percentage": "...",
+    "recent_form": "..."
+  },
+  "prediction": {
+    "lean": "Over 22.5 games",
+    "confidence": "medium",
+    "reason": "Both players hold serve well on clay"
+  }
+}
+```
+
+### Dry Run
+
+```bash
+npm run threads:dry-run
+```
+
+This logs generated variants, the selected post, score, safety-rule status, timestamp, and match metadata to `data/threads-posts.json`.
+
+### Live Posting
+
+On macOS/Linux:
+
+```bash
+LIVE_POSTING=true npm run threads:post
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:LIVE_POSTING="true"
+npm run threads:post
+```
+
+The automation will publish only when all safety rules pass:
+
+- max 6 posts per day
+- max 1 post with a link per day
+- minimum 90 minutes between posts
+- no near-duplicate wording
+
+The selected post is sent to Threads by creating a text media container and then publishing that container.

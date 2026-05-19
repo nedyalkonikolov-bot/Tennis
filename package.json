@@ -10,7 +10,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "threads:dry-run": "node src/index.js --dry-run",
+    "threads:post": "node src/index.js"
   },
   "dependencies": {
     "lucide-react": "^1.14.0",

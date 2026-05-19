@@ -49,17 +49,6 @@ async function syncDatabase(env) {
   };
 }
 
-function scheduledPostStyle(scheduledAt) {
-  const slot = Math.floor(scheduledAt.getTime() / (15 * 60 * 1000));
-  return slot % 4 === 0 ? "news" : "prediction";
-}
-
-function scheduledSecondaryLanguage(scheduledAt) {
-  const languages = ["hi", "pt-BR", "es", "tr"];
-  const slot = Math.floor(scheduledAt.getTime() / (2 * 60 * 60 * 1000));
-  return languages[slot % languages.length];
-}
-
 async function postThreadsPrediction(env, language = "en", style = "mixed") {
   const lang = encodeURIComponent(language);
   const postStyle = encodeURIComponent(style);
@@ -106,13 +95,6 @@ async function runScheduled(controller, env) {
   const scheduledAt = new Date(controller.scheduledTime || Date.now());
   const results = [];
   if (cron === "*/15 * * * *") {
-    const minute = scheduledAt.getUTCMinutes();
-    const style = scheduledPostStyle(scheduledAt);
-    results.push(await runSafely("threads-autopost:en", () => postThreadsPrediction(env, "en", style)));
-    if (minute === 0 && scheduledAt.getUTCHours() % 2 === 0) {
-      const language = scheduledSecondaryLanguage(scheduledAt);
-      results.push(await runSafely(`threads-autopost:${language}`, () => postThreadsPrediction(env, language, style)));
-    }
     results.push(await runSafely("refresh-predictions", () => refreshPredictions(env)));
     if (scheduledAt.getUTCHours() === 2 && scheduledAt.getUTCMinutes() === 15) results.push(await runSafely("db-sync", () => syncDatabase(env)));
   }
