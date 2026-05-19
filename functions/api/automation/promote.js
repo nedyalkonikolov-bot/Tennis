@@ -10,6 +10,13 @@ const NEWS_FEEDS = [
   { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
   { name: "TennisHead", url: "https://r.jina.ai/http://https://tennishead.net/feed", type: "jinaMarkdown" },
 ];
+const HUMAN_THREADS_PLATFORM = "threads:human";
+const HUMAN_MAX_POST_LENGTH = 450;
+const HUMAN_MAX_POSTS_PER_DAY = 6;
+const HUMAN_MAX_LINK_POSTS_PER_DAY = 1;
+const HUMAN_MIN_POST_INTERVAL_MINUTES = 90;
+const HUMAN_EMOTION_WORDS = ["feels", "looks", "underrated", "dangerous", "momentum", "pressure", "nervy", "scrappy", "tight", "swing"];
+const HUMAN_SPAM_WORDS = ["odds", "bet", "bets", "betting", "stake", "lock", "guaranteed", "sure win", "free pick"];
 const THREADS_LOCALES = {
   en: {
     label: "English",
@@ -435,6 +442,12 @@ function extractHashtags(text) {
   return String(text || "").match(/#[\p{L}\p{N}_]+/gu) || [];
 }
 
+async function getEspnNewsHooks(limit = 8) {
+  const espn = NEWS_FEEDS.find((feed) => feed.name === "ESPN");
+  if (!espn) return [];
+  return getNewsHooksFromFeed(espn, limit).catch(() => []);
+}
+
 function appendTopicTags(text, topicTags = [], maxLength = 500) {
   const existing = new Set(extractHashtags(text).map((tag) => tag.toLowerCase()));
   const missing = topicTags.filter((tag) => !existing.has(String(tag).toLowerCase()));
@@ -495,6 +508,146 @@ async function callOpenAiPost(env, payload, fallbackText, maxLength) {
     return { text: fallbackText, source: "template", reason: "openai-missing-required-links" };
   }
   return { text, source: "openai", model: getOpenAiModel(env) };
+}
+
+function hasLink(text) {
+  return /https?:\/\//i.test(String(text || "")) || String(text || "").toLowerCase().includes("tennistipz.win/");
+}
+
+function hashtagCount(text) {
+  return (String(text || "").match(/#[\p{L}\p{N}_]+/gu) || []).length;
+}
+
+function wordHitCount(text, words) {
+  const lower = String(text || "").toLowerCase();
+  return words.reduce((count, word) => {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    return count + (new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, "u").test(lower) ? 1 : 0);
+  }, 0);
+}
+
+function normalizeTextForDuplicate(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenOverlap(left, right) {
+  const leftTokens = new Set(normalizeTextForDuplicate(left).split(" ").filter((token) => token.length > 3));
+  const rightTokens = normalizeTextForDuplicate(right).split(" ").filter((token) => token.length > 3);
+  if (!leftTokens.size || !rightTokens.length) return 0;
+  return rightTokens.filter((token) => leftTokens.has(token)).length / Math.max(leftTokens.size, rightTokens.length);
+}
+
+function humanPostScore(text) {
+  const clean = String(text || "").trim();
+  let score = 0;
+  const reasons = [];
+  if (clean.includes("?")) { score += 18; reasons.push("question"); }
+  if (clean.length <= 280) { score += 14; reasons.push("under-280"); }
+  else if (clean.length <= HUMAN_MAX_POST_LENGTH) { score += 5; reasons.push("under-450"); }
+  else { score -= 40; reasons.push("too-long"); }
+  const emotionHits = wordHitCount(clean, HUMAN_EMOTION_WORDS);
+  if (emotionHits) { score += emotionHits * 7; reasons.push(`emotion-${emotionHits}`); }
+  if (/\b(who|what|am i|anyone|agree|disagree|tell me|which)\b/i.test(clean)) { score += 8; reasons.push("reply-hook"); }
+  if (hasLink(clean)) { score -= 25; reasons.push("link"); }
+  const tags = hashtagCount(clean);
+  if (tags > 1) { score -= tags * 8; reasons.push(`hashtags-${tags}`); }
+  const spamHits = wordHitCount(clean, HUMAN_SPAM_WORDS);
+  if (spamHits) { score -= spamHits * 18; reasons.push(`spam-${spamHits}`); }
+  return { score, reasons };
+}
+
+function cleanHumanPostText(text) {
+  return String(text || "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\b(?:guaranteed|lock|sure win|free pick)\b/gi, "")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim()
+    .slice(0, HUMAN_MAX_POST_LENGTH);
+}
+
+function fallbackHumanVariants(candidate) {
+  if (candidate.type === "news") {
+    const title = candidate.news.title;
+    return [
+      { type: "hot_take", text: `This tennis headline feels like one of those stories where the reaction says more than the result. ${trimToLimit(title, 120)} What are people missing here?` },
+      { type: "stat_angle", text: `The underrated part of this story is how much momentum can change around one match week. ${trimToLimit(title, 110)} Does this shift your read?` },
+      { type: "live_match_reaction", text: `This looks like a classic tennis pressure moment: everyone sees the headline, but the next match tells us what is real.` },
+      { type: "debate_question", text: `${trimToLimit(title, 150)} Fair reaction or are tennis fans overdoing it again?` },
+      { type: "soft_prediction", text: `Soft read: this story probably matters more for confidence than rankings. Tennis has a way of making small momentum swings feel huge.` },
+    ];
+  }
+
+  const match = candidate.match;
+  const title = `${match.player_a_name} vs ${match.player_b_name}`;
+  const pick = match.predicted_winner_name || "the form player";
+  return [
+    { type: "hot_take", text: `${title} feels way more dangerous than the card suggests. One momentum swing and this gets uncomfortable fast. Am I overthinking it?` },
+    { type: "stat_angle", text: `The surface angle matters here. If the first-serve numbers dip, ${title} can flip quickly. Who handles pressure better?` },
+    { type: "live_match_reaction", text: `This has that tense tennis energy where one loose service game suddenly feels massive. Momentum might decide the whole thing.` },
+    { type: "debate_question", text: `${title}: who is actually more underrated in this matchup? I can see the case both ways if the rallies get longer.` },
+    { type: "soft_prediction", text: `Soft lean toward ${pick}, but not in an obvious way. This looks like patience and pressure tolerance more than highlight shots.` },
+  ];
+}
+
+async function callOpenAiHumanVariants(env, candidate) {
+  const fallback = fallbackHumanVariants(candidate);
+  if (!hasOpenAi(env)) return { source: "template", variants: fallback, reason: "missing-openai" };
+
+  const input = candidate.type === "news"
+    ? { contentType: "ESPN tennis news", news: candidate.news }
+    : {
+      contentType: "TennisTipz prediction",
+      prediction: {
+        tournament: candidate.match.tournament,
+        surface: candidate.match.surface || null,
+        player1: candidate.match.player_a_name,
+        player2: candidate.match.player_b_name,
+        score: candidate.match.live ? "live" : "upcoming",
+        stats: {
+          recent_form: candidate.match.ai_summary || null,
+          confidence: candidate.match.confidence || null,
+        },
+        prediction: {
+          lean: candidate.match.predicted_winner_name,
+          confidence: candidate.match.confidence ? `${candidate.match.confidence}%` : "medium",
+          reason: candidate.match.ai_betting_angle || candidate.match.ai_summary || "Model leans this side based on current match data.",
+        },
+      },
+    };
+
+  const response = await fetch(OPENAI_RESPONSES_URL, {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: getOpenAiModel(env),
+      input: [
+        {
+          role: "system",
+          content: "Create human tennis-fan Threads posts for TennisTipz. Return strict JSON only: {\"variants\":[{\"type\":\"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction\",\"text\":\"...\"}]}. Create exactly 5 variants, one of each type. Max 450 characters each. No direct links. No spammy betting language. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, not like AI. Mention tennistipz.win only occasionally and naturally.",
+        },
+        { role: "user", content: JSON.stringify(input) },
+      ],
+      text: { format: { type: "text" } },
+      max_output_tokens: 900,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) return { source: "template", variants: fallback, reason: `openai-${response.status}`, payload: data };
+  const raw = data.output_text || data.output?.flatMap((item) => item.content || []).map((part) => part.text).filter(Boolean).join("\n") || "";
+  try {
+    const parsed = JSON.parse(raw);
+    const variants = (parsed.variants || []).map((variant) => ({ type: variant.type || "variant", text: cleanHumanPostText(variant.text) })).filter((variant) => variant.text);
+    return variants.length ? { source: "openai", variants, model: getOpenAiModel(env) } : { source: "template", variants: fallback, reason: "openai-empty-variants" };
+  } catch (error) {
+    return { source: "template", variants: fallback, reason: `openai-invalid-json: ${error.message}`, raw: raw.slice(0, 500) };
+  }
 }
 
 async function composeAiSocialPost(env, match, options = {}) {
@@ -586,13 +739,16 @@ async function getPostableMatches(db, limit) {
       m.tour,
       m.tournament,
       m.start_time,
+      m.live,
+      m.surface,
       m.player_a_name,
       m.player_b_name,
       p.id AS prediction_id,
       p.predicted_winner_name,
       p.confidence,
       p.predicted_odds,
-      p.created_at
+      p.created_at,
+      p.factors_json
     FROM matches m
     JOIN predictions p ON p.match_id = m.id
     WHERE m.tour IN ('ATP', 'WTA')
@@ -601,7 +757,15 @@ async function getPostableMatches(db, limit) {
     ORDER BY m.live DESC, p.created_at DESC, m.start_time ASC
     LIMIT ?
   `).bind(limit).all();
-  return result.results || [];
+  return (result.results || []).map((match) => {
+    let factors = {};
+    try { factors = JSON.parse(match.factors_json || "{}"); } catch { factors = {}; }
+    return {
+      ...match,
+      ai_summary: factors.aiSummary || null,
+      ai_betting_angle: factors.aiBettingAngle || null,
+    };
+  });
 }
 
 async function postTweet(env, text) {
@@ -686,6 +850,134 @@ async function recordAutomationPost(db, platform, targetId, url, payload) {
   `).bind(crypto.randomUUID(), platform, targetId, url, JSON.stringify(payload)).run();
 }
 
+async function getRecentAutomationPosts(db, platform, hours = 24) {
+  const result = await db.prepare(`
+    SELECT platform, target_type, target_id, url, response_json, created_at
+    FROM automation_posts
+    WHERE platform = ?
+      AND created_at >= datetime('now', ?)
+    ORDER BY created_at DESC
+  `).bind(platform, `-${hours} hours`).all();
+  return result.results || [];
+}
+
+function parsePostedText(row) {
+  try {
+    const payload = JSON.parse(row.response_json || "{}");
+    return payload.selectedPost || payload.text || payload.post || "";
+  } catch {
+    return "";
+  }
+}
+
+async function recordHumanAutomationPost(db, candidate, selected, publishResult, generation) {
+  const targetType = candidate.type === "news" ? "news" : "prediction";
+  const targetId = candidate.targetId;
+  const url = candidate.url || SITE_URL;
+  const payload = {
+    selectedPost: selected.text,
+    selectedType: selected.type,
+    score: selected.score,
+    scoreReasons: selected.reasons,
+    generatedVariants: generation.scored,
+    generationSource: generation.source,
+    generationReason: generation.reason || null,
+    match: candidate.match || null,
+    news: candidate.news || null,
+    publishResult,
+  };
+  await db.prepare(`
+    INSERT OR IGNORE INTO automation_posts (id, platform, target_type, target_id, url, status, response_json)
+    VALUES (?, ?, ?, ?, ?, 'posted', ?)
+  `).bind(crypto.randomUUID(), HUMAN_THREADS_PLATFORM, targetType, targetId, url, JSON.stringify(payload)).run();
+}
+
+function humanPostingRules(recentRows, text) {
+  const reasons = [];
+  const now = Date.now();
+  const dayRows = recentRows.filter((row) => now - Date.parse(row.created_at) < 24 * 60 * 60 * 1000);
+  if (dayRows.length >= HUMAN_MAX_POSTS_PER_DAY) reasons.push(`daily-limit-${HUMAN_MAX_POSTS_PER_DAY}`);
+  const linkRows = dayRows.filter((row) => hasLink(parsePostedText(row)));
+  if (hasLink(text) && linkRows.length >= HUMAN_MAX_LINK_POSTS_PER_DAY) reasons.push(`daily-link-limit-${HUMAN_MAX_LINK_POSTS_PER_DAY}`);
+  const latest = recentRows[0];
+  if (latest) {
+    const minutes = (now - Date.parse(latest.created_at)) / 60000;
+    if (minutes < HUMAN_MIN_POST_INTERVAL_MINUTES) reasons.push(`interval-${Math.round(minutes)}-of-${HUMAN_MIN_POST_INTERVAL_MINUTES}`);
+  }
+  const duplicate = recentRows.find((row) => tokenOverlap(text, parsePostedText(row)) >= 0.72);
+  if (duplicate) reasons.push("duplicate-wording");
+  return { ok: reasons.length === 0, reasons };
+}
+
+function selectHumanCandidate(matches, newsHooks) {
+  const candidates = [];
+  for (const match of matches.slice(0, 8)) {
+    candidates.push({
+      type: "prediction",
+      targetId: `prediction:${match.prediction_id}`,
+      url: predictionUrl(match, "human"),
+      match,
+    });
+  }
+  for (const news of newsHooks.slice(0, 8)) {
+    candidates.push({
+      type: "news",
+      targetId: `news:${slugify(news.url || news.title || news.id || "espn")}`,
+      url: news.url,
+      news,
+    });
+  }
+  if (!candidates.length) return null;
+  const slot = Math.floor(Date.now() / (90 * 60 * 1000));
+  return candidates[slot % candidates.length];
+}
+
+async function promoteHumanThreads(request, env, dryRun) {
+  const db = env.TENNIS_DB;
+  await ensureAutomationTable(db);
+  const recentRows = await getRecentAutomationPosts(db, HUMAN_THREADS_PLATFORM, 72);
+  const postedTargets = new Set(recentRows.map((row) => row.target_id));
+  const matches = (await getPostableMatches(db, 30)).filter((match) => !postedTargets.has(`prediction:${match.prediction_id}`));
+  const newsHooks = (await getEspnNewsHooks(12)).filter((news) => !postedTargets.has(`news:${slugify(news.url || news.title || news.id || "espn")}`));
+  const candidate = selectHumanCandidate(matches, newsHooks);
+  if (!candidate) {
+    return jsonResponse({ ok: true, dryRun, mode: "human-threads", skipped: true, reason: "no-unposted-predictions-or-espn-news" });
+  }
+
+  const generation = await callOpenAiHumanVariants(env, candidate);
+  const scored = generation.variants
+    .map((variant) => {
+      const clean = cleanHumanPostText(variant.text);
+      return { ...variant, text: clean, ...humanPostScore(clean) };
+    })
+    .sort((left, right) => right.score - left.score);
+  const selected = scored[0];
+  const rules = humanPostingRules(recentRows, selected.text);
+  const publishResult = dryRun
+    ? { dryRun: true, ok: false, reason: "dry-run" }
+    : rules.ok ? await postThreads(env, selected.text) : { skipped: true, ok: false, reasons: rules.reasons };
+
+  if (!dryRun && publishResult.ok) await recordHumanAutomationPost(db, candidate, selected, publishResult, { ...generation, scored });
+
+  return jsonResponse({
+    ok: true,
+    dryRun,
+    mode: "human-threads",
+    source: candidate.type,
+    candidate,
+    generatedVariants: scored,
+    selectedPost: selected.text,
+    selectedType: selected.type,
+    score: selected.score,
+    scoreReasons: selected.reasons,
+    rules,
+    publishResult,
+    generationSource: generation.source,
+    generationReason: generation.reason || null,
+    recentHumanPosts: recentRows.length,
+  });
+}
+
 async function submitSitemapToGoogle(env) {
   const tokenResult = await getGoogleAccessToken(env);
   if (!tokenResult) return { skipped: true, reason: "Missing GOOGLE_SEARCH_CONSOLE_ACCESS_TOKEN or service account env vars" };
@@ -707,6 +999,7 @@ async function promote(request, env) {
 
   const url = new URL(request.url);
   const dryRun = url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
+  const humanMode = url.searchParams.get("mode") === "human" || url.searchParams.get("human") === "1" || url.searchParams.get("human") === "true";
   const platform = ["twitter", "threads", "all"].includes(url.searchParams.get("platform")) ? url.searchParams.get("platform") : "all";
   const referralOverride = url.searchParams.get("ref") || url.searchParams.get("referral") || null;
   const requestedPostStyle = normalizePostStyle(url.searchParams.get("style") || url.searchParams.get("postStyle") || "mixed");
@@ -718,6 +1011,8 @@ async function promote(request, env) {
   const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "3", 10), 1), 25);
   const db = env.TENNIS_DB;
   await ensureAutomationTable(db);
+
+  if (humanMode && platform === "threads") return promoteHumanThreads(request, env, dryRun);
 
   const scanLimit = Math.min(Math.max(limit * 20, 50), 150);
   const matches = await getPostableMatches(db, scanLimit);

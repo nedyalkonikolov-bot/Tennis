@@ -55,6 +55,10 @@ npm run build
 
 This repo also includes a dry-run-first Threads automation for human-style tennis content. It generates five post variants with the OpenAI Responses API, scores them, applies anti-spam limits, and can publish the best one through the Threads API.
 
+On Cloudflare, the automation worker calls `/api/automation/promote?platform=threads&mode=human&limit=1` every 4 hours. That server-side mode chooses from stored TennisTipz predictions or ESPN tennis news, then creates one discussion-style Threads post. It still enforces max 6 posts/day, max 1 link post/day, minimum 90 minutes between posts, and duplicate wording checks.
+
+The worker deployment is handled by `.github/workflows/deploy-automation-worker.yml`. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub repository secrets so schedule changes deploy from GitHub instead of a local PC.
+
 ### Install
 
 ```bash

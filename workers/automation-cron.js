@@ -63,6 +63,19 @@ async function postThreadsPrediction(env, language = "en", style = "mixed") {
   };
 }
 
+async function postHumanThreads(env) {
+  const result = await callSite(env, "/api/automation/promote?platform=threads&mode=human&limit=1", { method: "POST", authenticated: true });
+  return {
+    task: "threads-human-autopost",
+    ok: result.payload?.ok === true,
+    source: result.payload?.source || null,
+    posted: result.payload?.publishResult?.ok === true ? 1 : 0,
+    skipped: Boolean(result.payload?.publishResult?.skipped || result.payload?.skipped),
+    selectedType: result.payload?.selectedType || null,
+    rules: result.payload?.rules || null,
+  };
+}
+
 async function runSafely(task, action) {
   try {
     return await action();
@@ -75,6 +88,7 @@ async function runTask(task, env, request) {
   if (task === "refresh") return refreshPredictions(env);
   if (task === "db-sync") return syncDatabase(env);
   if (task === "threads") return postThreadsPrediction(env, new URL(request.url).searchParams.get("lang") || "en");
+  if (task === "human-threads") return postHumanThreads(env);
   if (task === "scheduled") {
     const url = new URL(request.url);
     const scheduledTime = url.searchParams.get("at") ? Date.parse(url.searchParams.get("at")) : Date.now();
@@ -83,7 +97,7 @@ async function runTask(task, env, request) {
   if (task === "all") {
     const results = [];
     results.push(await refreshPredictions(env));
-    results.push(await postThreadsPrediction(env, "en"));
+    results.push(await postHumanThreads(env));
     results.push(await syncDatabase(env));
     return { task: "all", results };
   }
@@ -97,6 +111,9 @@ async function runScheduled(controller, env) {
   if (cron === "*/15 * * * *") {
     results.push(await runSafely("refresh-predictions", () => refreshPredictions(env)));
     if (scheduledAt.getUTCHours() === 2 && scheduledAt.getUTCMinutes() === 15) results.push(await runSafely("db-sync", () => syncDatabase(env)));
+  }
+  if (cron === "0 */4 * * *") {
+    results.push(await runSafely("threads-human-autopost", () => postHumanThreads(env)));
   }
   return { ok: true, cron, ranAt: new Date().toISOString(), results };
 }
