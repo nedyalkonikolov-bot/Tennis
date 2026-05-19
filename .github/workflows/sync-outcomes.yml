@@ -17,6 +17,10 @@ on:
         description: "Maximum pending predictions to check"
         required: false
         default: "60"
+      batches:
+        description: "How many settlement batches to run"
+        required: false
+        default: "6"
 
 jobs:
   sync-outcomes:
@@ -30,12 +34,18 @@ jobs:
           SYNC_TOKEN: ${{ secrets.TENNISTIPZ_DATABASE_SYNC_TOKEN }}
           DAYS: ${{ github.event.inputs.days || '180' }}
           LIMIT: ${{ github.event.inputs.limit || '60' }}
+          BATCHES: ${{ github.event.inputs.batches || '6' }}
         run: |
           if [ -z "$SYNC_TOKEN" ]; then
             echo "Missing TENNISTIPZ_DATABASE_SYNC_TOKEN secret"
             exit 1
           fi
 
-          curl --fail-with-body -X POST \
-            "https://www.tennistipz.win/api/db/sync-outcomes?days=${DAYS}&limit=${LIMIT}" \
-            -H "x-sync-token: $SYNC_TOKEN"
+          for batch in $(seq 1 "$BATCHES"); do
+            echo "Running outcome sync batch ${batch}/${BATCHES}"
+            curl --fail-with-body -X POST \
+              "https://www.tennistipz.win/api/db/sync-outcomes?days=${DAYS}&limit=${LIMIT}" \
+              -H "x-sync-token: $SYNC_TOKEN"
+            echo
+            sleep 5
+          done
