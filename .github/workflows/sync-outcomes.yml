@@ -1,0 +1,41 @@
+name: Sync TennisTipz outcomes
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "functions/api/db/sync-outcomes.js"
+      - ".github/workflows/sync-outcomes.yml"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days back to settle"
+        required: false
+        default: "180"
+      limit:
+        description: "Maximum pending predictions to check"
+        required: false
+        default: "500"
+
+jobs:
+  sync-outcomes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Pages deployment
+        run: sleep 90
+
+      - name: Sync prediction outcomes
+        env:
+          SYNC_TOKEN: ${{ secrets.TENNISTIPZ_DATABASE_SYNC_TOKEN }}
+          DAYS: ${{ github.event.inputs.days || '180' }}
+          LIMIT: ${{ github.event.inputs.limit || '500' }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "Missing TENNISTIPZ_DATABASE_SYNC_TOKEN secret"
+            exit 1
+          fi
+
+          curl --fail-with-body -X POST \
+            "https://www.tennistipz.win/api/db/sync-outcomes?days=${DAYS}&limit=${LIMIT}" \
+            -H "x-sync-token: $SYNC_TOKEN"

@@ -50,6 +50,19 @@ function todayIsoDate(offsetDays = 0) {
   return date.toISOString().slice(0, 10);
 }
 
+function isoDateFromValue(value, fallbackOffsetDays = 0) {
+  const parsed = value ? new Date(value) : null;
+  if (parsed && !Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return todayIsoDate(fallbackOffsetDays);
+}
+
+function shiftIsoDate(value, offsetDays = 0) {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return todayIsoDate(offsetDays);
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return date.toISOString().slice(0, 10);
+}
+
 function isAuthorized(request, env) {
   if (!env.DATABASE_SYNC_TOKEN) return false;
   const url = new URL(request.url);
@@ -114,8 +127,12 @@ function predictionWinnerId(prediction, winnerName) {
   return null;
 }
 
+function outcomeMatchesPrediction(outcome, prediction) {
+  return looseNameMatch(outcome?.winnerName, prediction.player_a_name) || looseNameMatch(outcome?.winnerName, prediction.player_b_name);
+}
+
 function isUsableOutcome(outcome) {
-  return Boolean(outcome && normalizeName(outcome.winnerName) && outcome.winnerId);
+  return Boolean(outcome && normalizeName(outcome.winnerName));
 }
 
 async function repairEmptySettlements(db) {
@@ -148,14 +165,17 @@ async function repairEmptySettlements(db) {
 }
 
 async function findStoredRecentOutcome(db, prediction, daysBack) {
+  const matchDate = isoDateFromValue(prediction.start_time, -daysBack);
+  const dateStart = shiftIsoDate(matchDate, -3);
+  const dateStop = shiftIsoDate(matchDate, 3);
   const rows = await db.prepare(`
     SELECT player_id, opponent_name, score, result, match_date
     FROM player_recent_matches
-    WHERE match_date >= date('now', ?)
+    WHERE match_date BETWEEN ? AND ?
       AND player_id IN (?, ?)
     ORDER BY match_date DESC
     LIMIT 50
-  `).bind(`-${daysBack} days`, prediction.player_a_id, prediction.player_b_id).all();
+  `).bind(dateStart, dateStop, prediction.player_a_id, prediction.player_b_id).all();
 
   for (const row of rows.results || []) {
     const isPlayerARecord = row.player_id === prediction.player_a_id;
@@ -173,11 +193,12 @@ async function findStoredRecentOutcome(db, prediction, daysBack) {
 async function findPlayerFixtureOutcome(env, prediction, daysBack) {
   const playerKey = prediction.player_a_key || prediction.player_b_key;
   if (!playerKey) return null;
+  const matchDate = isoDateFromValue(prediction.start_time, -daysBack);
 
   const fixtures = await fetchApiTennis(env, "get_fixtures", {
     player_key: playerKey,
-    date_start: todayIsoDate(-daysBack),
-    date_stop: todayIsoDate(),
+    date_start: shiftIsoDate(matchDate, -3),
+    date_stop: shiftIsoDate(matchDate, 3),
   });
 
   const event = fixtures.filter(isFinishedEvent).find((candidate) => eventMatchesPrediction(candidate, prediction));
@@ -217,8 +238,8 @@ async function syncOutcomes(request, env) {
   if (!env.API_TENNIS_KEY) return jsonResponse({ error: "Missing API_TENNIS_KEY" }, 500);
 
   const url = new URL(request.url);
-  const daysBack = Math.min(Math.max(Number.parseInt(url.searchParams.get("days") || "14", 10), 1), 30);
-  const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "75", 10), 1), 150);
+  const daysBack = Math.min(Math.max(Number.parseInt(url.searchParams.get("days") || "120", 10), 1), 365);
+  const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "300", 10), 1), 500);
   const db = env.TENNIS_DB;
   const repairedEmptySettlements = await repairEmptySettlements(db);
 
@@ -242,17 +263,19 @@ async function syncOutcomes(request, env) {
     LEFT JOIN players pa ON pa.id = m.player_a_id
     LEFT JOIN players pb ON pb.id = m.player_b_id
     WHERE po.result_status = 'pending'
+      AND datetime(COALESCE(m.start_time, p.created_at)) >= datetime('now', ?)
     ORDER BY p.created_at ASC
     LIMIT ?
-  `).bind(limit).all();
+  `).bind(`-${daysBack} days`, limit).all();
 
   const predictions = pending.results || [];
   if (!predictions.length) {
     return jsonResponse({ ok: true, checked: 0, settled: 0, correct: 0, repairedEmptySettlements, missed: [] });
   }
 
+  const globalDaysBack = Math.min(daysBack, 30);
   const events = await fetchApiTennis(env, "get_fixtures", {
-    date_start: todayIsoDate(-daysBack),
+    date_start: todayIsoDate(-globalDaysBack),
     date_stop: todayIsoDate(),
   });
   const finishedEvents = events.filter(isFinishedEvent);
@@ -266,7 +289,7 @@ async function syncOutcomes(request, env) {
   for (const prediction of predictions) {
     let outcome = await findStoredRecentOutcome(db, prediction, daysBack);
 
-    if (isUsableOutcome(outcome)) {
+    if (isUsableOutcome(outcome) && outcomeMatchesPrediction(outcome, prediction)) {
       settledFromRecentMatches += 1;
     } else {
       const event = finishedEvents.find((candidate) => eventMatchesPrediction(candidate, prediction));
@@ -278,16 +301,16 @@ async function syncOutcomes(request, env) {
           score: getApiTennisScore(event),
           source: "api-tennis-fixtures",
         };
-        if (isUsableOutcome(outcome)) settledFromFixtures += 1;
+        if (isUsableOutcome(outcome) && outcomeMatchesPrediction(outcome, prediction)) settledFromFixtures += 1;
       }
 
-      if (!isUsableOutcome(outcome)) {
+      if (!isUsableOutcome(outcome) || !outcomeMatchesPrediction(outcome, prediction)) {
         outcome = await findPlayerFixtureOutcome(env, prediction, daysBack);
-        if (isUsableOutcome(outcome)) settledFromPlayerFixtures += 1;
+        if (isUsableOutcome(outcome) && outcomeMatchesPrediction(outcome, prediction)) settledFromPlayerFixtures += 1;
       }
     }
 
-    if (!isUsableOutcome(outcome)) {
+    if (!isUsableOutcome(outcome) || !outcomeMatchesPrediction(outcome, prediction)) {
       missed.push({ prediction_id: prediction.prediction_id, match_id: prediction.match_id, title: `${prediction.player_a_name} vs ${prediction.player_b_name}` });
       continue;
     }

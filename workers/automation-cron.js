@@ -63,6 +63,18 @@ async function postThreadsPrediction(env, language = "en", style = "mixed") {
   };
 }
 
+async function syncOutcomes(env, days = 180, limit = 500) {
+  const result = await callSite(env, `/api/db/sync-outcomes?days=${encodeURIComponent(days)}&limit=${encodeURIComponent(limit)}`, { method: "POST", authenticated: true });
+  return {
+    task: "sync-outcomes",
+    ok: result.payload?.ok === true,
+    checked: result.payload?.checked || 0,
+    settled: result.payload?.settled || 0,
+    correct: result.payload?.correct || 0,
+    missed: result.payload?.missed?.length || 0,
+  };
+}
+
 async function postHumanThreads(env) {
   const result = await callSite(env, "/api/automation/promote?platform=threads&mode=human&limit=1", { method: "POST", authenticated: true });
   return {
@@ -98,6 +110,10 @@ async function runSafely(task, action) {
 async function runTask(task, env, request) {
   if (task === "refresh") return refreshPredictions(env);
   if (task === "db-sync") return syncDatabase(env);
+  if (task === "sync-outcomes") {
+    const url = new URL(request.url);
+    return syncOutcomes(env, url.searchParams.get("days") || 180, url.searchParams.get("limit") || 500);
+  }
   if (task === "threads") return postThreadsPrediction(env, new URL(request.url).searchParams.get("lang") || "en");
   if (task === "human-threads") return postHumanThreads(env);
   if (task === "seo-article") return generateSeoArticle(env);
@@ -110,6 +126,7 @@ async function runTask(task, env, request) {
     const results = [];
     results.push(await refreshPredictions(env));
     results.push(await postHumanThreads(env));
+    results.push(await syncOutcomes(env));
     results.push(await generateSeoArticle(env));
     results.push(await syncDatabase(env));
     return { task: "all", results };
@@ -123,7 +140,10 @@ async function runScheduled(controller, env) {
   const results = [];
   if (cron === "*/15 * * * *") {
     results.push(await runSafely("refresh-predictions", () => refreshPredictions(env)));
-    if (scheduledAt.getUTCHours() === 2 && scheduledAt.getUTCMinutes() === 15) results.push(await runSafely("db-sync", () => syncDatabase(env)));
+    if (scheduledAt.getUTCHours() === 2 && scheduledAt.getUTCMinutes() === 15) {
+      results.push(await runSafely("db-sync", () => syncDatabase(env)));
+      results.push(await runSafely("sync-outcomes", () => syncOutcomes(env)));
+    }
   }
   if (cron === "0 */4 * * *") {
     results.push(await runSafely("threads-human-autopost", () => postHumanThreads(env)));
