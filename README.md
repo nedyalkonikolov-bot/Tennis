@@ -59,6 +59,8 @@ On Cloudflare, the automation worker calls `/api/automation/promote?platform=thr
 
 The worker deployment is handled by `.github/workflows/deploy-automation-worker.yml`. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub repository secrets so schedule changes deploy from GitHub instead of a local PC.
 
+The worker also calls `/api/automation/articles?limit=1&source=mixed` twice per day. That endpoint creates original SEO articles from ESPN tennis news or stored TennisTipz predictions, saves them in D1, and publishes them at `/articles/<slug>/`. Generated article URLs are included in the dynamic sitemap.
+
 ### Install
 
 ```bash

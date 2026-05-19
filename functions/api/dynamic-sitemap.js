@@ -27,7 +27,7 @@ export async function onRequestGet({ env }) {
   const entries = [];
 
   if (env.TENNIS_DB) {
-    const [players, matches] = await Promise.all([
+    const [players, matches, articles] = await Promise.all([
       env.TENNIS_DB.prepare(`
         SELECT name, tour
         FROM players
@@ -42,6 +42,13 @@ export async function onRequestGet({ env }) {
         ORDER BY updated_at DESC
         LIMIT 500
       `).all(),
+      env.TENNIS_DB.prepare(`
+        SELECT slug
+        FROM seo_articles
+        WHERE status = 'published'
+        ORDER BY created_at DESC
+        LIMIT 500
+      `).all().catch(() => ({ results: [] })),
     ]);
 
     for (const player of players.results || []) {
@@ -50,6 +57,10 @@ export async function onRequestGet({ env }) {
 
     for (const match of matches.results || []) {
       entries.push(urlEntry(`/predictions/${slugify(`${match.tour} ${match.player_a_name} vs ${match.player_b_name}`)}/`, "0.74", "daily"));
+    }
+
+    for (const article of articles.results || []) {
+      entries.push(urlEntry(`/articles/${article.slug}/`, "0.78", "daily"));
     }
   }
 

@@ -5,7 +5,8 @@ compatibility_date = "2026-05-16"
 [triggers]
 crons = [
   "*/15 * * * *",
-  "0 */4 * * *"
+  "0 */4 * * *",
+  "30 */12 * * *"
 ]
 
 [vars]

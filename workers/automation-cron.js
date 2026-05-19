@@ -76,6 +76,17 @@ async function postHumanThreads(env) {
   };
 }
 
+async function generateSeoArticle(env) {
+  const result = await callSite(env, "/api/automation/articles?limit=1&source=mixed", { method: "POST", authenticated: true });
+  return {
+    task: "seo-article",
+    ok: result.payload?.ok === true,
+    generated: result.payload?.generated?.length || 0,
+    skipped: result.payload?.skipped || null,
+    article: result.payload?.generated?.[0]?.article?.url || null,
+  };
+}
+
 async function runSafely(task, action) {
   try {
     return await action();
@@ -89,6 +100,7 @@ async function runTask(task, env, request) {
   if (task === "db-sync") return syncDatabase(env);
   if (task === "threads") return postThreadsPrediction(env, new URL(request.url).searchParams.get("lang") || "en");
   if (task === "human-threads") return postHumanThreads(env);
+  if (task === "seo-article") return generateSeoArticle(env);
   if (task === "scheduled") {
     const url = new URL(request.url);
     const scheduledTime = url.searchParams.get("at") ? Date.parse(url.searchParams.get("at")) : Date.now();
@@ -98,6 +110,7 @@ async function runTask(task, env, request) {
     const results = [];
     results.push(await refreshPredictions(env));
     results.push(await postHumanThreads(env));
+    results.push(await generateSeoArticle(env));
     results.push(await syncDatabase(env));
     return { task: "all", results };
   }
@@ -114,6 +127,9 @@ async function runScheduled(controller, env) {
   }
   if (cron === "0 */4 * * *") {
     results.push(await runSafely("threads-human-autopost", () => postHumanThreads(env)));
+  }
+  if (cron === "30 */12 * * *") {
+    results.push(await runSafely("seo-article", () => generateSeoArticle(env)));
   }
   return { ok: true, cron, ranAt: new Date().toISOString(), results };
 }
