@@ -53,12 +53,17 @@ ${article.source_url ? `<div class="source"><strong>Source context:</strong> <a 
 
 export async function onRequestGet({ params, env }) {
   if (!env.TENNIS_DB) return new Response("Missing database", { status: 500 });
-  const article = await env.TENNIS_DB.prepare(`
-    SELECT *
-    FROM seo_articles
-    WHERE slug = ? AND status = 'published'
-    LIMIT 1
-  `).bind(params.slug).first();
+  let article = null;
+  try {
+    article = await env.TENNIS_DB.prepare(`
+      SELECT *
+      FROM seo_articles
+      WHERE slug = ? AND status = 'published'
+      LIMIT 1
+    `).bind(params.slug).first();
+  } catch (error) {
+    if (!String(error.message || "").includes("seo_articles")) throw error;
+  }
   if (!article) return new Response("Article not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
   return new Response(articleHtml(article), {
     headers: {
