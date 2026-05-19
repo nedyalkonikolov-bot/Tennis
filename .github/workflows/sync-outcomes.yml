@@ -16,11 +16,11 @@ on:
       limit:
         description: "Maximum pending predictions to check"
         required: false
-        default: "60"
+        default: "20"
       batches:
         description: "How many settlement batches to run"
         required: false
-        default: "6"
+        default: "10"
 
 jobs:
   sync-outcomes:
@@ -33,8 +33,8 @@ jobs:
         env:
           SYNC_TOKEN: ${{ secrets.TENNISTIPZ_DATABASE_SYNC_TOKEN }}
           DAYS: ${{ github.event.inputs.days || '180' }}
-          LIMIT: ${{ github.event.inputs.limit || '60' }}
-          BATCHES: ${{ github.event.inputs.batches || '6' }}
+          LIMIT: ${{ github.event.inputs.limit || '20' }}
+          BATCHES: ${{ github.event.inputs.batches || '10' }}
         run: |
           if [ -z "$SYNC_TOKEN" ]; then
             echo "Missing TENNISTIPZ_DATABASE_SYNC_TOKEN secret"
