@@ -636,6 +636,9 @@ function fallbackHumanVariants(candidate) {
 async function callOpenAiHumanVariants(env, candidate) {
   const fallback = fallbackHumanVariants(candidate);
   if (!hasOpenAi(env)) return { source: "template", variants: fallback, reason: "missing-openai" };
+  if (candidate.type === "prediction" && !candidate.match?.ai_summary && !candidate.match?.ai_betting_angle) {
+    return { source: "template", variants: fallback, reason: "missing-grounding-context" };
+  }
 
   const input = candidate.type === "news"
     ? { contentType: "ESPN tennis news", news: candidate.news }
