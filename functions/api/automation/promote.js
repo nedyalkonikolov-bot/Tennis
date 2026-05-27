@@ -492,6 +492,11 @@ function sanitizeAiPost(text, maxLength, requiredLinks = [], topicTags = []) {
   for (const link of requiredLinks) {
     if (link) clean += `\n${link}`;
   }
+  const lower = clean.toLowerCase();
+  const requiredSafety = [];
+  if (!lower.includes("18+") && !lower.includes("responsib")) requiredSafety.push("18+ Bet responsibly.");
+  if (!(lower.includes("follow") && lower.includes("comment") && lower.includes("repost"))) requiredSafety.push("Follow, comment and repost.");
+  if (requiredSafety.length) clean += `\n${requiredSafety.join(" ")}`;
   clean = appendTopicTags(clean, topicTags, maxLength);
   clean = clean.replace(/\bguaranteed\b/gi, "model-backed").replace(/\bsure win\b/gi, "prediction");
   if (clean.length <= maxLength) return clean;
