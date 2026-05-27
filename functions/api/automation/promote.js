@@ -6,6 +6,7 @@ const THREADS_API_URL = "https://graph.threads.net/v1.0";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const MIN_PUBLIC_PICK_ODDS = 1.4;
 const TOP_PLAYER_POST_RANK = 30;
+const DEFAULT_THREADS_TOPIC_TAG = "Tennis";
 const SOCIAL_PREVIEW_COUNT = 9;
 const NEWS_FEEDS = [
   { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
@@ -849,14 +850,17 @@ async function postThreads(env, text) {
   const user = await getThreadsUser(env);
   if (!user) return { skipped: true, reason: "Missing THREADS_USER_ID or usable Threads token" };
   if (user.error) return { ok: false, phase: "me", status: user.status, payload: user.payload };
+  const topicTag = String(env.THREADS_TOPIC_TAG || DEFAULT_THREADS_TOPIC_TAG).trim();
+  const createBody = new URLSearchParams({ media_type: "TEXT", text, access_token: env.THREADS_ACCESS_TOKEN });
+  if (topicTag) createBody.set("topic_tag", topicTag.replace(/^#/, ""));
 
   const createResponse = await fetch(`${THREADS_API_URL}/${encodeURIComponent(user.id)}/threads`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ media_type: "TEXT", text, access_token: env.THREADS_ACCESS_TOKEN }),
+    body: createBody,
   });
   const createPayload = await createResponse.json().catch(() => ({}));
-  if (!createResponse.ok || !createPayload.id) return { ok: false, phase: "create", user, status: createResponse.status, payload: createPayload };
+  if (!createResponse.ok || !createPayload.id) return { ok: false, phase: "create", user, topicTag, status: createResponse.status, payload: createPayload };
 
   const attempts = [];
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -868,7 +872,7 @@ async function postThreads(env, text) {
     });
     const publishPayload = await publishResponse.json().catch(() => ({}));
     attempts.push({ attempt, status: publishResponse.status, payload: publishPayload });
-    if (publishResponse.ok) return { ok: true, phase: "publish", user, status: publishResponse.status, payload: publishPayload, creation: createPayload, attempts };
+    if (publishResponse.ok) return { ok: true, phase: "publish", user, topicTag, status: publishResponse.status, payload: publishPayload, creation: createPayload, attempts };
 
     const subcode = publishPayload?.error?.error_subcode;
     const code = publishPayload?.error?.code;
@@ -877,7 +881,7 @@ async function postThreads(env, text) {
   }
 
   const last = attempts[attempts.length - 1] || { status: 0, payload: {} };
-  return { ok: false, phase: "publish", user, status: last.status, payload: last.payload, creation: createPayload, attempts };
+  return { ok: false, phase: "publish", user, topicTag, status: last.status, payload: last.payload, creation: createPayload, attempts };
 }
 
 async function getTopPlayerNames(db, limit = TOP_PLAYER_POST_RANK) {
