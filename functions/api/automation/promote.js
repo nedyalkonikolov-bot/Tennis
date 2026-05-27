@@ -301,10 +301,16 @@ function chooseHashtags(match) {
 
 function chooseTopicTags(match, language = "en", platform = "threads") {
   const normalizedLanguage = normalizeThreadsLanguage(language);
-  const baseTags = platform === "threads"
+  const rawBaseTags = platform === "threads"
     ? (THREADS_TOPIC_TAGS[normalizedLanguage] || THREADS_TOPIC_TAGS.en)
     : HASHTAG_SETS[rotationIndex(match, HASHTAG_SETS.length, "tags")];
   const tour = String(match.tour || "").toUpperCase();
+  const baseTags = rawBaseTags.filter((tag) => {
+    const upper = String(tag).toUpperCase();
+    if (tour === "ATP" && upper === "#WTA") return false;
+    if (tour === "WTA" && upper === "#ATP") return false;
+    return true;
+  });
   const tags = [...baseTags];
   if (tour && !tags.includes(`#${tour}`)) tags.push(`#${tour}`);
   const start = rotationIndex(match, tags.length, `topic:${platform}:${normalizedLanguage}`);
@@ -476,6 +482,8 @@ function appendTopicTags(text, topicTags = [], maxLength = 500) {
 
 function sanitizeAiPost(text, maxLength, requiredLinks = [], topicTags = []) {
   let clean = String(text || "")
+    .replace(/\[([^\]]+)\]\((?:https?:\/\/)?[^)\n]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)\n]*/g, "$1")
     .replace(/\s+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/https?:\/\/\S+/g, "")
@@ -774,8 +782,8 @@ async function getPostableMatches(db, limit) {
       p.factors_json
     FROM matches m
     JOIN predictions p ON p.match_id = m.id
-    LEFT JOIN players pa ON pa.id = m.player_a_id
-    LEFT JOIN players pb ON pb.id = m.player_b_id
+    LEFT JOIN players pa ON pa.tour = m.tour AND pa.normalized_name = m.normalized_player_a
+    LEFT JOIN players pb ON pb.tour = m.tour AND pb.normalized_name = m.normalized_player_b
     WHERE m.tour IN ('ATP', 'WTA')
       AND p.predicted_winner_name IS NOT NULL
       AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) > ${MIN_PUBLIC_PICK_ODDS}
