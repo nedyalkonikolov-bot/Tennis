@@ -600,8 +600,9 @@ function cleanHumanPostText(text) {
 
 function hasUnsupportedHumanClaim(candidate, text) {
   if (candidate.type !== "prediction") return false;
+  if (!candidate.match?.live && /\b(what a start|come out firing|today|right now|so far|already)\b/i.test(String(text || ""))) return true;
   if (candidate.match?.ai_summary || candidate.match?.ai_betting_angle) return false;
-  return /\b(recent form|this season|lately|has improved|improved significantly|footwork|defense|statistically|numbers show|stats say)\b/i.test(String(text || ""));
+  return /\b(recent form|this season|lately|has improved|improved significantly|building momentum|momentum|footwork|groundstrokes|clay court game|skills on clay|defense|statistically|historically|numbers show|stats say)\b/i.test(String(text || ""));
 }
 
 function fallbackHumanVariants(candidate) {
@@ -1017,6 +1018,7 @@ async function promoteHumanThreads(request, env, dryRun) {
       const clean = cleanHumanPostText(variant.text);
       return { ...variant, text: clean, ...humanPostScore(clean) };
     })
+    .filter((variant) => candidate.type !== "prediction" || candidate.match?.live || variant.type !== "live_match_reaction")
     .filter((variant) => variant.text && !hasUnsupportedHumanClaim(candidate, variant.text))
     .sort((left, right) => right.score - left.score);
   const grounded = scored.length ? scored : fallbackHumanVariants(candidate)
@@ -1024,6 +1026,7 @@ async function promoteHumanThreads(request, env, dryRun) {
       const clean = cleanHumanPostText(variant.text);
       return { ...variant, text: clean, ...humanPostScore(clean) };
     })
+    .filter((variant) => candidate.type !== "prediction" || candidate.match?.live || variant.type !== "live_match_reaction")
     .filter((variant) => variant.text && !hasUnsupportedHumanClaim(candidate, variant.text))
     .sort((left, right) => right.score - left.score);
   const selected = grounded[0];
