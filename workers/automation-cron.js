@@ -52,12 +52,13 @@ async function syncDatabase(env) {
 async function postThreadsPrediction(env, language = "en", style = "mixed") {
   const lang = encodeURIComponent(language);
   const postStyle = encodeURIComponent(style);
-  const result = await callSite(env, `/api/automation/promote?platform=threads&limit=1&lang=${lang}&style=${postStyle}`, { method: "POST", authenticated: true });
+  const result = await callSite(env, `/api/automation/promote?platform=threads&limit=1&lang=${lang}&style=${postStyle}&ai=1`, { method: "POST", authenticated: true });
   return {
     task: "threads-autopost",
     language,
     style,
     ok: result.payload?.ok === true,
+    topRankFilter: result.payload?.topRankFilter || null,
     posted: result.payload?.threads?.filter((item) => item.result?.ok).length || 0,
     skipped: result.payload?.threads?.filter((item) => item.skipped).length || 0,
   };

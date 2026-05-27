@@ -5,6 +5,7 @@ const X_TWEET_URL = "https://api.twitter.com/2/tweets";
 const THREADS_API_URL = "https://graph.threads.net/v1.0";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const MIN_PUBLIC_PICK_ODDS = 1.4;
+const TOP_PLAYER_POST_RANK = 30;
 const SOCIAL_PREVIEW_COUNT = 9;
 const NEWS_FEEDS = [
   { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
@@ -381,8 +382,18 @@ async function getRecentNewsHooks(limit = 8) {
 }
 
 function chooseNewsHook(match, newsHooks = []) {
-  if (!newsHooks.length) return null;
-  return newsHooks[rotationIndex(match, newsHooks.length, "news")];
+  const names = [match.player_a_name, match.player_b_name].filter(Boolean);
+  const relatedHooks = newsHooks.filter((news) => textMentionsAnyName(`${news.title || ""} ${news.summary || ""}`, names));
+  if (!relatedHooks.length) return null;
+  return relatedHooks[rotationIndex(match, relatedHooks.length, "news")];
+}
+
+function textMentionsAnyName(text, names = []) {
+  const haystack = String(text || "").toLowerCase();
+  return names.some((name) => {
+    const parts = String(name || "").toLowerCase().split(/\s+/).filter((part) => part.length > 2);
+    return parts.length && (haystack.includes(parts.join(" ")) || parts.some((part) => haystack.includes(part)));
+  });
 }
 
 function normalizePostStyle(value) {
@@ -610,6 +621,11 @@ async function callOpenAiHumanVariants(env, candidate) {
         player1: candidate.match.player_a_name,
         player2: candidate.match.player_b_name,
         score: candidate.match.live ? "live" : "upcoming",
+        playerRanks: {
+          [candidate.match.player_a_name]: candidate.match.player_a_rank || null,
+          [candidate.match.player_b_name]: candidate.match.player_b_rank || null,
+        },
+        topRankFilter: TOP_PLAYER_POST_RANK,
         stats: {
           recent_form: candidate.match.ai_summary || null,
           confidence: candidate.match.confidence || null,
@@ -630,7 +646,7 @@ async function callOpenAiHumanVariants(env, candidate) {
       input: [
         {
           role: "system",
-          content: "Create human tennis-fan Threads posts for TennisTipz. Return strict JSON only: {\"variants\":[{\"type\":\"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction\",\"text\":\"...\"}]}. Create exactly 5 variants, one of each type. Max 450 characters each. No direct links. No spammy betting language. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, not like AI. Mention tennistipz.win only occasionally and naturally.",
+          content: "Create human tennis-fan Threads posts for TennisTipz. Use only supplied Top ATP/WTA 30 player or match context. Return strict JSON only: {\"variants\":[{\"type\":\"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction\",\"text\":\"...\"}]}. Create exactly 5 variants, one of each type. Max 450 characters each. No direct links. No spammy betting language. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, not like AI. Mention tennistipz.win only occasionally and naturally.",
         },
         { role: "user", content: JSON.stringify(input) },
       ],
@@ -670,6 +686,11 @@ async function composeAiSocialPost(env, match, options = {}) {
       tournament: match.tournament,
       startTime: match.start_time,
       players: [match.player_a_name, match.player_b_name],
+      playerRanks: {
+        [match.player_a_name]: match.player_a_rank || null,
+        [match.player_b_name]: match.player_b_rank || null,
+      },
+      topRankFilter: TOP_PLAYER_POST_RANK,
       pick: match.predicted_winner_name,
       confidence: match.confidence,
       odds: match.predicted_odds,
@@ -743,6 +764,8 @@ async function getPostableMatches(db, limit) {
       m.surface,
       m.player_a_name,
       m.player_b_name,
+      pa.current_rank AS player_a_rank,
+      pb.current_rank AS player_b_rank,
       p.id AS prediction_id,
       p.predicted_winner_name,
       p.confidence,
@@ -751,9 +774,15 @@ async function getPostableMatches(db, limit) {
       p.factors_json
     FROM matches m
     JOIN predictions p ON p.match_id = m.id
+    LEFT JOIN players pa ON pa.id = m.player_a_id
+    LEFT JOIN players pb ON pb.id = m.player_b_id
     WHERE m.tour IN ('ATP', 'WTA')
       AND p.predicted_winner_name IS NOT NULL
       AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) > ${MIN_PUBLIC_PICK_ODDS}
+      AND (
+        CAST(COALESCE(pa.current_rank, 999999) AS INTEGER) BETWEEN 1 AND ${TOP_PLAYER_POST_RANK}
+        OR CAST(COALESCE(pb.current_rank, 999999) AS INTEGER) BETWEEN 1 AND ${TOP_PLAYER_POST_RANK}
+      )
     ORDER BY m.live DESC, p.created_at DESC, m.start_time ASC
     LIMIT ?
   `).bind(limit).all();
@@ -836,6 +865,17 @@ async function postThreads(env, text) {
 
   const last = attempts[attempts.length - 1] || { status: 0, payload: {} };
   return { ok: false, phase: "publish", user, status: last.status, payload: last.payload, creation: createPayload, attempts };
+}
+
+async function getTopPlayerNames(db, limit = TOP_PLAYER_POST_RANK) {
+  const result = await db.prepare(`
+    SELECT name
+    FROM players
+    WHERE tour IN ('ATP', 'WTA')
+      AND CAST(COALESCE(current_rank, 999999) AS INTEGER) BETWEEN 1 AND ?
+    ORDER BY tour ASC, current_rank ASC
+  `).bind(limit).all();
+  return (result.results || []).map((player) => player.name).filter(Boolean);
 }
 
 async function isAlreadyPosted(db, platform, targetId) {
@@ -938,7 +978,10 @@ async function promoteHumanThreads(request, env, dryRun) {
   const recentRows = await getRecentAutomationPosts(db, HUMAN_THREADS_PLATFORM, 72);
   const postedTargets = new Set(recentRows.map((row) => row.target_id));
   const matches = (await getPostableMatches(db, 30)).filter((match) => !postedTargets.has(`prediction:${match.prediction_id}`));
-  const newsHooks = (await getEspnNewsHooks(12)).filter((news) => !postedTargets.has(`news:${slugify(news.url || news.title || news.id || "espn")}`));
+  const topPlayerNames = await getTopPlayerNames(db);
+  const newsHooks = (await getEspnNewsHooks(12))
+    .filter((news) => !postedTargets.has(`news:${slugify(news.url || news.title || news.id || "espn")}`))
+    .filter((news) => textMentionsAnyName(`${news.title || ""} ${news.summary || ""}`, topPlayerNames));
   const candidate = selectHumanCandidate(matches, newsHooks);
   if (!candidate) {
     return jsonResponse({ ok: true, dryRun, mode: "human-threads", skipped: true, reason: "no-unposted-predictions-or-espn-news" });
@@ -1034,7 +1077,7 @@ async function promote(request, env) {
 
     if (postTwitterEnabled && !twitterPosted && tweets.length < limit) {
       if (dryRun) {
-        tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, postStyle: tweet.postStyle, url: tweet.url, referral: tweet.referral, news: tweet.news, ai: tweet.ai, text: tweet.text });
+        tweets.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: tweet.postStyle, url: tweet.url, referral: tweet.referral, news: tweet.news, ai: tweet.ai, text: tweet.text });
       } else {
         const result = await postTweet(env, tweet.text);
         tweets.push({ predictionId: match.prediction_id, matchId: match.match_id, postStyle: tweet.postStyle, url: tweet.url, referral: tweet.referral, news: tweet.news, ai: tweet.ai, result });
@@ -1044,10 +1087,10 @@ async function promote(request, env) {
 
     if (postThreadsEnabled && !threadsPosted && threads.length < limit) {
       if (dryRun) {
-        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, text: threadsPost.text });
+        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, text: threadsPost.text });
       } else {
         const result = await postThreads(env, threadsPost.text);
-        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, result });
+        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, result });
         if (result.ok) await recordAutomationPost(db, threadsPlatform, match.prediction_id, threadsPost.url, result.payload);
       }
     }
@@ -1063,6 +1106,7 @@ async function promote(request, env) {
     platform,
     requestedPostStyle,
     aiPosts: useAiPosts && hasOpenAi(env) ? "enabled" : useAiPosts ? "fallback-template" : "disabled",
+    topRankFilter: TOP_PLAYER_POST_RANK,
     newsHooks: newsHooks.length,
     checked: matches.length,
     tweets,
