@@ -6,7 +6,7 @@ const THREADS_API_URL = "https://graph.threads.net/v1.0";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const MIN_PUBLIC_PICK_ODDS = 1.4;
 const TOP_PLAYER_POST_RANK = 30;
-const DEFAULT_THREADS_TOPIC_TAG = "Tennis";
+const DEFAULT_THREADS_TOPIC_TAG = "Tennis Threads";
 const SOCIAL_PREVIEW_COUNT = 9;
 const NEWS_FEEDS = [
   { name: "ESPN", url: "https://www.espn.com/espn/rss/tennis/news" },
