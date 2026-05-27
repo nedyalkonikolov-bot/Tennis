@@ -50,17 +50,18 @@ async function syncDatabase(env) {
 }
 
 async function postThreadsPrediction(env, language = "en", style = "mixed") {
-  const lang = encodeURIComponent(language);
-  const postStyle = encodeURIComponent(style);
-  const result = await callSite(env, `/api/automation/promote?platform=threads&limit=1&lang=${lang}&style=${postStyle}&ai=1`, { method: "POST", authenticated: true });
+  const result = await callSite(env, "/api/automation/promote?platform=threads&mode=human&limit=1", { method: "POST", authenticated: true });
   return {
-    task: "threads-autopost",
+    task: "threads-authentic-autopost",
     language,
     style,
     ok: result.payload?.ok === true,
-    topRankFilter: result.payload?.topRankFilter || null,
-    posted: result.payload?.threads?.filter((item) => item.result?.ok).length || 0,
-    skipped: result.payload?.threads?.filter((item) => item.skipped).length || 0,
+    mode: result.payload?.mode || null,
+    source: result.payload?.source || null,
+    posted: result.payload?.publishResult?.ok === true ? 1 : 0,
+    skipped: Boolean(result.payload?.publishResult?.skipped || result.payload?.skipped),
+    selectedType: result.payload?.selectedType || null,
+    rules: result.payload?.rules || null,
   };
 }
 

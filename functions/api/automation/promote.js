@@ -18,7 +18,7 @@ const HUMAN_MAX_POSTS_PER_DAY = 6;
 const HUMAN_MAX_LINK_POSTS_PER_DAY = 1;
 const HUMAN_MIN_POST_INTERVAL_MINUTES = 90;
 const HUMAN_EMOTION_WORDS = ["feels", "looks", "underrated", "dangerous", "momentum", "pressure", "nervy", "scrappy", "tight", "swing"];
-const HUMAN_SPAM_WORDS = ["odds", "bet", "bets", "betting", "stake", "lock", "guaranteed", "sure win", "free pick"];
+const HUMAN_SPAM_WORDS = ["odds", "bet", "bets", "betting", "stake", "cloudbet", "bc.game", "affiliate", "offer", "lock", "guaranteed", "sure win", "free pick"];
 const THREADS_LOCALES = {
   en: {
     label: "English",
@@ -589,6 +589,7 @@ function humanPostScore(text) {
 function cleanHumanPostText(text) {
   return String(text || "")
     .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\b(?:cloudbet|bc\.game|stake\.com|affiliate|referral|odds|betting offer|place a bet)\b/gi, "")
     .replace(/\b(?:guaranteed|lock|sure win|free pick)\b/gi, "")
     .replace(/\s+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -660,7 +661,7 @@ async function callOpenAiHumanVariants(env, candidate) {
       input: [
         {
           role: "system",
-          content: "Create human tennis-fan Threads posts for TennisTipz. Use only supplied Top ATP/WTA 30 player or match context. Return strict JSON only: {\"variants\":[{\"type\":\"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction\",\"text\":\"...\"}]}. Create exactly 5 variants, one of each type. Max 450 characters each. No direct links. No spammy betting language. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, not like AI. Mention tennistipz.win only occasionally and naturally.",
+          content: "Create authentic human tennis-fan Threads posts for TennisTipz. Use only supplied Top ATP/WTA 30 player or match context. Return strict JSON only: {\"variants\":[{\"type\":\"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction\",\"text\":\"...\"}]}. Create exactly 5 variants, one of each type. Max 450 characters each. No links, URLs, affiliate names, referral language, odds, betting offers, or calls to bet. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, like a real tennis fan starting a conversation. Mention tennistipz.win only rarely and naturally.",
         },
         { role: "user", content: JSON.stringify(input) },
       ],
