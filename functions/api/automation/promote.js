@@ -598,6 +598,12 @@ function cleanHumanPostText(text) {
     .slice(0, HUMAN_MAX_POST_LENGTH);
 }
 
+function hasUnsupportedHumanClaim(candidate, text) {
+  if (candidate.type !== "prediction") return false;
+  if (candidate.match?.ai_summary || candidate.match?.ai_betting_angle) return false;
+  return /\b(recent form|this season|lately|has improved|improved significantly|footwork|defense|statistically|numbers show|stats say)\b/i.test(String(text || ""));
+}
+
 function fallbackHumanVariants(candidate) {
   if (candidate.type === "news") {
     const title = candidate.news.title;
@@ -661,7 +667,7 @@ async function callOpenAiHumanVariants(env, candidate) {
       input: [
         {
           role: "system",
-          content: "Create authentic human tennis-fan Threads posts for TennisTipz. Use only supplied Top ATP/WTA 30 player or match context. Return strict JSON only: {\"variants\":[{\"type\":\"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction\",\"text\":\"...\"}]}. Create exactly 5 variants, one of each type. Max 450 characters each. No links, URLs, affiliate names, referral language, odds, betting offers, or calls to bet. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, like a real tennis fan starting a conversation. Mention tennistipz.win only rarely and naturally.",
+          content: "Create authentic human tennis-fan Threads posts for TennisTipz. Use only supplied Top ATP/WTA 30 player or match context. Return strict JSON only: {\"variants\":[{\"type\":\"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction\",\"text\":\"...\"}]}. Create exactly 5 variants, one of each type. Max 450 characters each. Do not invent stats, recent form, injuries, technique changes, momentum, or season trends unless they are explicitly supplied. No links, URLs, affiliate names, referral language, odds, betting offers, or calls to bet. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, like a real tennis fan starting a conversation. Mention tennistipz.win only rarely and naturally.",
         },
         { role: "user", content: JSON.stringify(input) },
       ],
@@ -1011,14 +1017,22 @@ async function promoteHumanThreads(request, env, dryRun) {
       const clean = cleanHumanPostText(variant.text);
       return { ...variant, text: clean, ...humanPostScore(clean) };
     })
+    .filter((variant) => variant.text && !hasUnsupportedHumanClaim(candidate, variant.text))
     .sort((left, right) => right.score - left.score);
-  const selected = scored[0];
+  const grounded = scored.length ? scored : fallbackHumanVariants(candidate)
+    .map((variant) => {
+      const clean = cleanHumanPostText(variant.text);
+      return { ...variant, text: clean, ...humanPostScore(clean) };
+    })
+    .filter((variant) => variant.text && !hasUnsupportedHumanClaim(candidate, variant.text))
+    .sort((left, right) => right.score - left.score);
+  const selected = grounded[0];
   const rules = humanPostingRules(recentRows, selected.text);
   const publishResult = dryRun
     ? { dryRun: true, ok: false, reason: "dry-run" }
     : rules.ok ? await postThreads(env, selected.text) : { skipped: true, ok: false, reasons: rules.reasons };
 
-  if (!dryRun && publishResult.ok) await recordHumanAutomationPost(db, candidate, selected, publishResult, { ...generation, scored });
+  if (!dryRun && publishResult.ok) await recordHumanAutomationPost(db, candidate, selected, publishResult, { ...generation, scored: grounded });
 
   return jsonResponse({
     ok: true,
@@ -1026,7 +1040,7 @@ async function promoteHumanThreads(request, env, dryRun) {
     mode: "human-threads",
     source: candidate.type,
     candidate,
-    generatedVariants: scored,
+    generatedVariants: grounded,
     selectedPost: selected.text,
     selectedType: selected.type,
     score: selected.score,
