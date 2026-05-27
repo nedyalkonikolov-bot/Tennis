@@ -5,6 +5,10 @@ const NEWS_FEEDS = [
   { name: "TennisHead", url: "https://r.jina.ai/http://https://tennishead.net/feed", type: "jinaMarkdown" },
 ];
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
+const DEFAULT_OPENAI_PREDICTION_MODEL = "gpt-5.4-mini";
+const DEFAULT_OPENAI_NEWS_MODEL = "gpt-5.4-mini";
+const DEFAULT_OPENAI_PREMIUM_MODEL = "gpt-5.4";
 const DEFAULT_BET_URL = "https://www.cloudbet.com/en/sports/tennis";
 const DEFAULT_NEWS_IMAGE = "https://images.tennis.com/image/upload/t_q-best/tenniscom-prd/colectyfnidvc41bazww.jpg";
 const PLAYER_CACHE_KEY = "players:standings:v1";
@@ -36,7 +40,12 @@ function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
 function cleanText(value = "") { return String(value).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim(); }
 function normalizeName(value = "") { return String(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim(); }
 function safeText(value = "") { return String(value || "").trim(); }
-function getOpenAiModel(env) { return env.OPENAI_MODEL || "gpt-4o-mini"; }
+function getOpenAiModel(env, task = "default") {
+  if (task === "prediction" && env.OPENAI_USE_PREMIUM_PREDICTIONS === "true") return env.OPENAI_PREMIUM_MODEL || DEFAULT_OPENAI_PREMIUM_MODEL;
+  if (task === "prediction") return env.OPENAI_PREDICTION_MODEL || env.OPENAI_MODEL || DEFAULT_OPENAI_PREDICTION_MODEL;
+  if (task === "news") return env.OPENAI_NEWS_MODEL || env.OPENAI_MODEL || DEFAULT_OPENAI_NEWS_MODEL;
+  return env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
+}
 function hasOpenAi(env) { return Boolean(env.OPENAI_API_KEY) && env.ENABLE_OPENAI_AI !== "false"; }
 function namesLookSimilar(a, b) { const left = normalizeName(a).split(" ").filter(Boolean); const right = normalizeName(b).split(" ").filter(Boolean); if (!left.length || !right.length) return false; const rightSet = new Set(right); const shared = left.filter((part) => rightSet.has(part)); return left.at(-1) === right.at(-1) && (shared.length >= 2 || left.length === 1 || right.length === 1); }
 function getPlayerCache(env) { return env.TENNIS_PLAYERS_CACHE || env.PLAYER_STATS_KV || env.PLAYERS_KV || null; }
@@ -138,7 +147,7 @@ function riskPriceBoost(odds) { const price = asFloat(odds, 0); if (!price) retu
 function profileFor(players, name, tour) { return players.find((player) => player.tour === tour && namesLookSimilar(player.name, name)) || null; }
 function surfaceRating(profile, surface) { if (!profile) return 50; return asInt(profile[String(surface).toLowerCase()], profile.form || 50); }
 function emptyRecentForm() { return { wins: 0, losses: 0, matches: 0, winRate: 50 }; }
-async function callOpenAiJson(env, name, schema, input, maxOutputTokens = 1200) {
+async function callOpenAiJson(env, name, schema, input, maxOutputTokens = 1200, task = "default") {
   if (!hasOpenAi(env)) return null;
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: "POST",
@@ -147,7 +156,7 @@ async function callOpenAiJson(env, name, schema, input, maxOutputTokens = 1200) 
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: getOpenAiModel(env),
+      model: getOpenAiModel(env, task),
       input,
       text: {
         format: {
@@ -261,11 +270,11 @@ async function enhancePredictionsWithOpenAi(env, matches, diagnostics) {
   const result = await callOpenAiJson(env, "tennis_predictions", schema, [
     { role: "system", content: "You are TennisTipz AI. Generate tennis match winner predictions from supplied current data only. Use a higher risk appetite than a favorite-only model: actively prefer value-priced picks when the available player data supports them, and avoid very short prices unless the evidence edge is clearly dominant. Public TennisTipz picks should focus on odds above 1.40. Do not invent injuries, scores, private information, or guaranteed outcomes. Use cautious betting language and include risk context. Return JSON only." },
     { role: "user", content: JSON.stringify({ generatedAt: new Date().toISOString(), matches: target.map(aiPredictionInput) }) },
-  ], 2200);
+  ], 2200, "prediction");
   const predictions = result?.predictions || [];
   if (cache && predictions.length) await cache.put(cacheKey, JSON.stringify({ generatedAt: new Date().toISOString(), predictions }), { expirationTtl: AI_CACHE_TTL_SECONDS }).catch(() => null);
   diagnostics.openAiPredictions = predictions.length ? "success" : "empty";
-  diagnostics.openAiModel = getOpenAiModel(env);
+  diagnostics.openAiModel = getOpenAiModel(env, "prediction");
   diagnostics.openAiPredictionCount = predictions.length;
   const byId = new Map(predictions.map((item) => [String(item.id), item]));
   return matches.map((match) => byId.has(String(match.id)) ? applyAiPrediction(match, byId.get(String(match.id))) : match);
@@ -696,7 +705,7 @@ async function enhanceNewsWithOpenAi(env, news, diagnostics) {
   const result = await callOpenAiJson(env, "tennis_news", schema, [
     { role: "system", content: "You are TennisTipz AI. Rewrite the supplied ESPN and TennisHead tennis RSS headlines into original, concise betting-research news cards. Use only supplied facts. Do not copy article wording. Do not invent injuries, rumors, or match results. Return JSON only." },
     { role: "user", content: JSON.stringify({ generatedAt: new Date().toISOString(), articles: news.slice(0, 8).map(({ id, title, summary, url, source }) => ({ id, title, summary, url, source })) }) },
-  ], 1800);
+  ], 1800, "news");
   const byId = new Map((result?.news || []).map((item) => [String(item.id), item]));
   const enhanced = news.map((item) => {
     const ai = byId.get(String(item.id));
@@ -719,7 +728,7 @@ async function enhanceNewsWithOpenAi(env, news, diagnostics) {
 async function buildLiveDataPayload(env) {
   const betUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_BET_URL).trim();
   const errors = [];
-  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasOpenAiKey: Boolean(env.OPENAI_API_KEY), openAiModel: getOpenAiModel(env), hasPlayerCache: Boolean(getPlayerCache(env)), hasD1: Boolean(env.TENNIS_DB), predictionSource: hasOpenAi(env) ? "OpenAI structured prediction layer using Cloudbet odds, API-Tennis/player DB form, rankings and surface data" : "Cloudbet ATP/WTA match markets. Direct tennis.winner when available; derived winner side from tennis.winner_and_total when direct winner is absent.", playerStats: "Top 500 ATP + Top 500 WTA", newsProvider: hasOpenAi(env) ? "OpenAI summaries from ESPN + TennisHead RSS" : "ESPN + TennisHead RSS" };
+  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasOpenAiKey: Boolean(env.OPENAI_API_KEY), openAiModel: getOpenAiModel(env), openAiModels: { prediction: getOpenAiModel(env, "prediction"), news: getOpenAiModel(env, "news") }, hasPlayerCache: Boolean(getPlayerCache(env)), hasD1: Boolean(env.TENNIS_DB), predictionSource: hasOpenAi(env) ? "OpenAI structured prediction layer using Cloudbet odds, API-Tennis/player DB form, rankings and surface data" : "Cloudbet ATP/WTA match markets. Direct tennis.winner when available; derived winner side from tennis.winner_and_total when direct winner is absent.", playerStats: "Top 500 ATP + Top 500 WTA", newsProvider: hasOpenAi(env) ? "OpenAI summaries from ESPN + TennisHead RSS" : "ESPN + TennisHead RSS" };
   let players = [];
   let matches = [];
   let news = [];

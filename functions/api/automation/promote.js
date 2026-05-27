@@ -4,6 +4,9 @@ const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters";
 const X_TWEET_URL = "https://api.twitter.com/2/tweets";
 const THREADS_API_URL = "https://graph.threads.net/v1.0";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
+const DEFAULT_OPENAI_SOCIAL_MODEL = "gpt-5.4-mini";
+const DEFAULT_OPENAI_PREMIUM_MODEL = "gpt-5.4";
 const MIN_PUBLIC_PICK_ODDS = 1.4;
 const TOP_PLAYER_POST_RANK = 30;
 const DEFAULT_THREADS_TOPIC_TAG = "Tennis Threads";
@@ -131,8 +134,10 @@ function hasOpenAi(env) {
   return Boolean(env.OPENAI_API_KEY) && env.ENABLE_OPENAI_AI !== "false";
 }
 
-function getOpenAiModel(env) {
-  return env.OPENAI_MODEL || "gpt-4o-mini";
+function getOpenAiModel(env, task = "default") {
+  if (task === "social") return env.OPENAI_SOCIAL_MODEL || env.OPENAI_THREADS_MODEL || env.OPENAI_MODEL || DEFAULT_OPENAI_SOCIAL_MODEL;
+  if (task === "premium") return env.OPENAI_PREMIUM_MODEL || DEFAULT_OPENAI_PREMIUM_MODEL;
+  return env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
 }
 
 function slugify(value = "") {
@@ -513,7 +518,7 @@ async function callOpenAiPost(env, payload, fallbackText, maxLength) {
     method: "POST",
     headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: getOpenAiModel(env),
+      model: getOpenAiModel(env, "social"),
       input: [
         {
           role: "system",
@@ -532,7 +537,7 @@ async function callOpenAiPost(env, payload, fallbackText, maxLength) {
   if (!text || !payload.predictionUrl || !payload.referral?.url || !text.includes(payload.predictionUrl) || !text.includes(payload.referral.url)) {
     return { text: fallbackText, source: "template", reason: "openai-missing-required-links" };
   }
-  return { text, source: "openai", model: getOpenAiModel(env) };
+  return { text, source: "openai", model: getOpenAiModel(env, "social") };
 }
 
 function hasLink(text) {
@@ -671,7 +676,7 @@ async function callOpenAiHumanVariants(env, candidate) {
     method: "POST",
     headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: getOpenAiModel(env),
+      model: getOpenAiModel(env, "social"),
       input: [
         {
           role: "system",
@@ -689,7 +694,7 @@ async function callOpenAiHumanVariants(env, candidate) {
   try {
     const parsed = JSON.parse(raw);
     const variants = (parsed.variants || []).map((variant) => ({ type: variant.type || "variant", text: cleanHumanPostText(variant.text) })).filter((variant) => variant.text);
-    return variants.length ? { source: "openai", variants, model: getOpenAiModel(env) } : { source: "template", variants: fallback, reason: "openai-empty-variants" };
+    return variants.length ? { source: "openai", variants, model: getOpenAiModel(env, "social") } : { source: "template", variants: fallback, reason: "openai-empty-variants" };
   } catch (error) {
     return { source: "template", variants: fallback, reason: `openai-invalid-json: ${error.message}`, raw: raw.slice(0, 500) };
   }

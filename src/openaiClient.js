@@ -9,7 +9,7 @@ function extractOutputText(payload) {
     .join("\n");
 }
 
-export async function generatePostVariants({ apiKey, model = "gpt-4o-mini", matchData }) {
+export async function generatePostVariants({ apiKey, model = "gpt-5.4-mini", matchData }) {
   if (!apiKey) throw new Error("OPENAI_API_KEY is required to generate posts.");
 
   const response = await fetch(RESPONSES_URL, {

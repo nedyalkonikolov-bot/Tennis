@@ -73,7 +73,12 @@ Create `.env` from `.env.example`:
 
 ```text
 OPENAI_API_KEY=your_openai_key
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-5.4-mini
+OPENAI_PREDICTION_MODEL=gpt-5.4-mini
+OPENAI_NEWS_MODEL=gpt-5.4-mini
+OPENAI_SOCIAL_MODEL=gpt-5.4-mini
+OPENAI_PREMIUM_MODEL=gpt-5.4
+OPENAI_USE_PREMIUM_PREDICTIONS=false
 THREADS_USER_ID=your_threads_user_id
 THREADS_ACCESS_TOKEN=your_threads_access_token
 LIVE_POSTING=false
@@ -82,6 +87,13 @@ MATCH_DATA_PATH=./match-data.json
 ```
 
 `LIVE_POSTING=false` is the default. In dry-run mode the automation prints and logs the generated post, but does not publish.
+
+Model routing is split by task so the high-volume mini token pool handles normal traffic:
+
+- `OPENAI_PREDICTION_MODEL`: structured match prediction enrichment, default `gpt-5.4-mini`
+- `OPENAI_NEWS_MODEL`: RSS headline/card rewriting, default `gpt-5.4-mini`
+- `OPENAI_SOCIAL_MODEL`: Threads/social post variants, default `gpt-5.4-mini`
+- `OPENAI_USE_PREMIUM_PREDICTIONS=true`: opt in to `OPENAI_PREMIUM_MODEL` for prediction batches only
 
 ### Match Input
 
