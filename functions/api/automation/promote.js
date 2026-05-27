@@ -601,6 +601,7 @@ function cleanHumanPostText(text) {
 function hasUnsupportedHumanClaim(candidate, text) {
   if (candidate.type !== "prediction") return false;
   if (!candidate.match?.live && /\b(what a start|come out firing|today|right now|so far|already)\b/i.test(String(text || ""))) return true;
+  if (/\b(confidence level|confidence sitting|recent confidence|deep run|higher-ranked players|gut feeling|crucial clay)\b/i.test(String(text || ""))) return true;
   if (candidate.match?.ai_summary || candidate.match?.ai_betting_angle) return false;
   return /\b(recent form|this season|lately|has improved|improved significantly|building momentum|momentum|footwork|groundstrokes|clay court game|skills on clay|defense|statistically|historically|numbers show|stats say)\b/i.test(String(text || ""));
 }
@@ -620,12 +621,15 @@ function fallbackHumanVariants(candidate) {
   const match = candidate.match;
   const title = `${match.player_a_name} vs ${match.player_b_name}`;
   const pick = match.predicted_winner_name || "the form player";
+  const rankLine = match.player_a_rank && match.player_b_rank
+    ? `${match.player_a_name} is ranked ${match.player_a_rank}, ${match.player_b_name} is ${match.player_b_rank}`
+    : title;
   return [
-    { type: "hot_take", text: `${title} feels way more dangerous than the card suggests. One momentum swing and this gets uncomfortable fast. Am I overthinking it?` },
-    { type: "stat_angle", text: `The surface angle matters here. If the first-serve numbers dip, ${title} can flip quickly. Who handles pressure better?` },
-    { type: "live_match_reaction", text: `This has that tense tennis energy where one loose service game suddenly feels massive. Momentum might decide the whole thing.` },
-    { type: "debate_question", text: `${title}: who is actually more underrated in this matchup? I can see the case both ways if the rallies get longer.` },
-    { type: "soft_prediction", text: `Soft lean toward ${pick}, but not in an obvious way. This looks like patience and pressure tolerance more than highlight shots.` },
+    { type: "hot_take", text: `${title} feels closer than the rankings make it look. ${rankLine}, but clay has a way of making matches awkward fast. Am I overthinking it?` },
+    { type: "stat_angle", text: `${rankLine}. That should matter, but this still feels like the kind of matchup where one nervous service game changes the whole read.` },
+    { type: "live_match_reaction", text: `${title} has that tight-match feel where every hold could start to feel heavy. Who would you trust more if it gets messy late?` },
+    { type: "debate_question", text: `${title}: who is actually being underrated here? I can see the case for ${pick}, but I do not think this is automatic.` },
+    { type: "soft_prediction", text: `Soft lean toward ${pick}, but this is more of a tennis-read match than a loud call. Curious if others see it the same way.` },
   ];
 }
 
