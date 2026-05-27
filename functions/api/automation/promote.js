@@ -134,10 +134,14 @@ function hasOpenAi(env) {
   return Boolean(env.OPENAI_API_KEY) && env.ENABLE_OPENAI_AI !== "false";
 }
 
+function nonLegacyModel(value) {
+  return value && value !== "gpt-4o-mini" ? value : null;
+}
+
 function getOpenAiModel(env, task = "default") {
-  if (task === "social") return env.OPENAI_SOCIAL_MODEL || env.OPENAI_THREADS_MODEL || env.OPENAI_MODEL || DEFAULT_OPENAI_SOCIAL_MODEL;
+  if (task === "social") return env.OPENAI_SOCIAL_MODEL || env.OPENAI_THREADS_MODEL || nonLegacyModel(env.OPENAI_MODEL) || DEFAULT_OPENAI_SOCIAL_MODEL;
   if (task === "premium") return env.OPENAI_PREMIUM_MODEL || DEFAULT_OPENAI_PREMIUM_MODEL;
-  return env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
+  return nonLegacyModel(env.OPENAI_MODEL) || DEFAULT_OPENAI_MODEL;
 }
 
 function slugify(value = "") {
