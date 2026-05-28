@@ -15,7 +15,11 @@ export async function onRequestGet({ request, env }) {
   const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "50", 10), 1), 200);
   const status = url.searchParams.get("status");
 
-  const where = `WHERE CAST(COALESCE(p.predicted_odds, '0') AS REAL) BETWEEN ${MIN_PUBLIC_PICK_ODDS} AND ${MAX_PUBLIC_PICK_ODDS} AND CAST(COALESCE(p.confidence, 0) AS INTEGER) >= ${MIN_PUBLIC_PICK_CONFIDENCE}${status ? " AND po.result_status = ?" : ""}`;
+  const where = `WHERE CAST(COALESCE(p.predicted_odds, '0') AS REAL) BETWEEN ${MIN_PUBLIC_PICK_ODDS} AND ${MAX_PUBLIC_PICK_ODDS}
+    AND CAST(COALESCE(p.confidence, 0) AS INTEGER) >= ${MIN_PUBLIC_PICK_CONFIDENCE}
+    AND LOWER(COALESCE(m.tournament, '')) NOT LIKE '%doubles%'
+    AND COALESCE(m.player_a_name, '') NOT LIKE '%/%'
+    AND COALESCE(m.player_b_name, '') NOT LIKE '%/%'${status ? " AND po.result_status = ?" : ""}`;
   const statement = env.TENNIS_DB.prepare(`
     SELECT
       p.id,

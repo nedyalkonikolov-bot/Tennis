@@ -820,6 +820,9 @@ async function getPostableMatches(db, limit) {
       AND p.predicted_winner_name IS NOT NULL
       AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) BETWEEN ${MIN_PUBLIC_PICK_ODDS} AND ${MAX_PUBLIC_PICK_ODDS}
       AND CAST(COALESCE(p.confidence, 0) AS INTEGER) >= ${MIN_PUBLIC_PICK_CONFIDENCE}
+      AND LOWER(COALESCE(m.tournament, '')) NOT LIKE '%doubles%'
+      AND COALESCE(m.player_a_name, '') NOT LIKE '%/%'
+      AND COALESCE(m.player_b_name, '') NOT LIKE '%/%'
       AND (
         CAST(COALESCE(pa.current_rank, 999999) AS INTEGER) BETWEEN 1 AND ${TOP_PLAYER_POST_RANK}
         OR CAST(COALESCE(pb.current_rank, 999999) AS INTEGER) BETWEEN 1 AND ${TOP_PLAYER_POST_RANK}

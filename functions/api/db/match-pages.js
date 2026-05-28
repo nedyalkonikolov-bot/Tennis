@@ -146,6 +146,9 @@ export async function onRequestGet({ request, env }) {
     WHERE m.tour IN ('ATP', 'WTA')
       AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) BETWEEN ${MIN_PUBLIC_PICK_ODDS} AND ${MAX_PUBLIC_PICK_ODDS}
       AND CAST(COALESCE(p.confidence, 0) AS INTEGER) >= ${MIN_PUBLIC_PICK_CONFIDENCE}
+      AND LOWER(COALESCE(m.tournament, '')) NOT LIKE '%doubles%'
+      AND COALESCE(m.player_a_name, '') NOT LIKE '%/%'
+      AND COALESCE(m.player_b_name, '') NOT LIKE '%/%'
     ORDER BY m.live DESC, p.created_at DESC, m.start_time ASC
     LIMIT ?
   `).bind(limit).all();
