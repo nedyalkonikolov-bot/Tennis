@@ -1,4 +1,5 @@
 const SITE_URL = "https://www.tennistipz.win";
+const CANONICAL_HOST = "www.tennistipz.win";
 const MIN_INDEXED_PICK_ODDS = 1.01;
 const MAX_INDEXED_PICK_ODDS = 2.0;
 const MIN_INDEXED_CONFIDENCE = 70;
@@ -31,7 +32,18 @@ function urlEntry(path, priority = "0.70", changefreq = "daily", lastmod = null)
   return `  <url>\n    <loc>${xmlEscape(`${SITE_URL}${path}`)}</loc>\n    <lastmod>${sitemapDate(lastmod)}</lastmod>\n    <changefreq>${changefreq}</changefreq>\n    <priority>${priority}</priority>\n  </url>`;
 }
 
-export async function onRequestGet({ env }) {
+function canonicalRedirect(request) {
+  const url = new URL(request.url);
+  if (url.hostname === CANONICAL_HOST && url.protocol === "https:") return null;
+  url.protocol = "https:";
+  url.hostname = CANONICAL_HOST;
+  return Response.redirect(url.toString(), 301);
+}
+
+export async function onRequestGet({ env, request }) {
+  const redirect = canonicalRedirect(request);
+  if (redirect) return redirect;
+
   const entries = [];
   const seen = new Set();
   const addEntry = (path, priority, changefreq, lastmod) => {
