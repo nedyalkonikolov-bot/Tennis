@@ -3,6 +3,9 @@ http://tennistipz.win/* https://www.tennistipz.win/:splat 301!
 http://www.tennistipz.win/* https://www.tennistipz.win/:splat 301!
 
 /tennis-predictions /tennis-predictions/ 301
+/tennis-predictions-today /tennis-predictions-today/ 301
+/atp-predictions /atp-predictions/ 301
+/wta-predictions /wta-predictions/ 301
 /player-stats /player-stats/ 301
 /tennis-news /tennis-news/ 301
 /tennis-betting /tennis-betting/ 301
