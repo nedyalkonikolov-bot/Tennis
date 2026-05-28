@@ -21,9 +21,9 @@ const LIVE_DATA_FRESH_MS = 5 * 60 * 1000;
 const LIVE_DATA_CACHE_TTL_SECONDS = 20 * 60;
 const CLOUDBET_MARKETS_QUERY = "?markets=tennis.winner&markets=tennis.winner_and_total";
 const RECENT_FORM_DAYS = 100;
-const MIN_PUBLIC_PICK_ODDS = 1.4;
-const MAX_PUBLIC_PICK_ODDS = 2.5;
-const MIN_PUBLIC_PICK_CONFIDENCE = 62;
+const MIN_PUBLIC_PICK_ODDS = 1.01;
+const MAX_PUBLIC_PICK_ODDS = 2.0;
+const MIN_PUBLIC_PICK_CONFIDENCE = 70;
 const BLOCKED_RE = /\b(simulated|simulation|virtual|srl|reality league|itf|utr|exhibition|junior|boys|girls|college|davis|billie|hopman)\b/i;
 
 const fallbackPlayers = [
@@ -149,7 +149,8 @@ function implied(odds) { const homeOdds = asFloat(odds?.home); const awayOdds = 
 function riskPriceBoost(odds) {
   const price = asFloat(odds, 0);
   if (!price) return -12;
-  if (price < MIN_PUBLIC_PICK_ODDS) return -8;
+  if (price < MIN_PUBLIC_PICK_ODDS) return -12;
+  if (price < 1.4) return 4;
   if (price <= 1.8) return 5;
   if (price <= MAX_PUBLIC_PICK_ODDS) return 1;
   return -12;
@@ -291,7 +292,7 @@ async function enhancePredictionsWithOpenAi(env, matches, diagnostics) {
     required: ["predictions"],
   };
   const result = await callOpenAiJson(env, "tennis_predictions", schema, [
-    { role: "system", content: "You are TennisTipz AI. Generate tennis match winner predictions from supplied current data only. Optimize for hit rate first. Prefer picks with odds from 1.40 to 2.50, strong market support, ranking/form/surface agreement, and confidence of at least 62. Avoid long-shot underdogs unless the supplied data edge is overwhelming. Do not invent injuries, scores, private information, or guaranteed outcomes. Use cautious betting language and include risk context. Return JSON only." },
+    { role: "system", content: "You are TennisTipz AI. Generate tennis match winner predictions from supplied current data only. Optimize for hit rate first. Prefer picks with odds from 1.01 to 2.00, strong market support, ranking/form/surface agreement, and confidence of at least 70. Avoid underdogs and long shots unless the supplied data edge is overwhelming. Do not invent injuries, scores, private information, or guaranteed outcomes. Use cautious betting language and include risk context. Return JSON only." },
     { role: "user", content: JSON.stringify({ generatedAt: new Date().toISOString(), matches: target.map(aiPredictionInput) }) },
   ], 2200, "prediction");
   const predictions = result?.predictions || [];

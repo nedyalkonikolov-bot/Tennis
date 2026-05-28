@@ -5,9 +5,9 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
-const MIN_PUBLIC_PICK_ODDS = 1.4;
-const MAX_PUBLIC_PICK_ODDS = 2.5;
-const MIN_PUBLIC_PICK_CONFIDENCE = 62;
+const MIN_PUBLIC_PICK_ODDS = 1.01;
+const MAX_PUBLIC_PICK_ODDS = 2.0;
+const MIN_PUBLIC_PICK_CONFIDENCE = 70;
 
 export async function onRequestGet({ request, env }) {
   if (!env.TENNIS_DB) return jsonResponse({ ok: false, error: "Missing TENNIS_DB D1 binding" }, 500);
