@@ -22,6 +22,8 @@ const LIVE_DATA_CACHE_TTL_SECONDS = 20 * 60;
 const CLOUDBET_MARKETS_QUERY = "?markets=tennis.winner&markets=tennis.winner_and_total";
 const RECENT_FORM_DAYS = 100;
 const MIN_PUBLIC_PICK_ODDS = 1.4;
+const MAX_PUBLIC_PICK_ODDS = 2.5;
+const MIN_PUBLIC_PICK_CONFIDENCE = 62;
 const BLOCKED_RE = /\b(simulated|simulation|virtual|srl|reality league|itf|utr|exhibition|junior|boys|girls|college|davis|billie|hopman)\b/i;
 
 const fallbackPlayers = [
@@ -144,7 +146,25 @@ function extractOdds(event) {
   return null;
 }
 function implied(odds) { const homeOdds = asFloat(odds?.home); const awayOdds = asFloat(odds?.away); if (!homeOdds || !awayOdds) return { home: 50, away: 50, edge: 0 }; const homeRaw = 1 / homeOdds; const awayRaw = 1 / awayOdds; const total = homeRaw + awayRaw; const home = Math.round((homeRaw / total) * 1000) / 10; const away = Math.round((awayRaw / total) * 1000) / 10; return { home, away, edge: Math.round((home - away) * 10) / 10 }; }
-function riskPriceBoost(odds) { const price = asFloat(odds, 0); if (!price) return -10; if (price <= MIN_PUBLIC_PICK_ODDS) return -8; return clamp((price - MIN_PUBLIC_PICK_ODDS) * 4.5, 0, 8); }
+function riskPriceBoost(odds) {
+  const price = asFloat(odds, 0);
+  if (!price) return -12;
+  if (price < MIN_PUBLIC_PICK_ODDS) return -8;
+  if (price <= 1.8) return 5;
+  if (price <= MAX_PUBLIC_PICK_ODDS) return 1;
+  return -12;
+}
+function pickOdds(match, side = match?.predictedSide) {
+  const direct = side === "home" ? match?.cloudbetOdds?.home : side === "away" ? match?.cloudbetOdds?.away : null;
+  return asFloat(direct || match?.predictedWinnerOdds || match?.odds, 0);
+}
+function isQualifiedPublicPick(match, side = match?.predictedSide, confidence = match?.confidence) {
+  const price = pickOdds(match, side);
+  if (!match?.predictedWinner || !["home", "away"].includes(side)) return false;
+  if (price < MIN_PUBLIC_PICK_ODDS || price > MAX_PUBLIC_PICK_ODDS) return false;
+  if (asInt(confidence, 0) < MIN_PUBLIC_PICK_CONFIDENCE) return false;
+  return ["ATP", "WTA"].includes(match.tour) && !match.doubles;
+}
 function profileFor(players, name, tour) { return players.find((player) => player.tour === tour && namesLookSimilar(player.name, name)) || null; }
 function surfaceRating(profile, surface) { if (!profile) return 50; return asInt(profile[String(surface).toLowerCase()], profile.form || 50); }
 function emptyRecentForm() { return { wins: 0, losses: 0, matches: 0, winRate: 50 }; }
@@ -205,13 +225,15 @@ function applyAiPrediction(match, ai) {
   const side = ai.predictedSide === "away" ? "away" : "home";
   const winner = side === "home" ? match.playerA : match.playerB;
   const odds = side === "home" ? match.cloudbetOdds?.home : match.cloudbetOdds?.away;
+  const confidence = clamp(asInt(ai.confidence, match.confidence), 51, 88);
+  if (!isQualifiedPublicPick({ ...match, predictedWinner: winner }, side, confidence)) return match;
   return {
     ...match,
     predictedWinner: winner,
     predictedSide: side,
     predictedWinnerOdds: odds || match.predictedWinnerOdds,
     odds: odds || match.odds,
-    confidence: clamp(asInt(ai.confidence, match.confidence), 51, 88),
+    confidence,
     modelEdge: asFloat(ai.modelEdge, match.modelEdge),
     market: `${winner} to Win`,
     aiSummary: safeText(ai.summary),
@@ -235,7 +257,7 @@ async function enhancePredictionsWithOpenAi(env, matches, diagnostics) {
   const cache = getPlayerCache(env);
   const limit = Math.min(Math.max(asInt(env.OPENAI_PREDICTION_LIMIT, 12), 1), 25);
   const target = matches.slice(0, limit);
-  const cacheKey = `ai:predictions:risk-v2:${target.map((match) => match.id).join(":")}`;
+  const cacheKey = `ai:predictions:accuracy-v1:${target.map((match) => match.id).join(":")}`;
   const cached = cache ? await cache.get(cacheKey, "json").catch(() => null) : null;
   if (cached?.predictions?.length) {
     diagnostics.openAiPredictions = "cached";
@@ -269,7 +291,7 @@ async function enhancePredictionsWithOpenAi(env, matches, diagnostics) {
     required: ["predictions"],
   };
   const result = await callOpenAiJson(env, "tennis_predictions", schema, [
-    { role: "system", content: "You are TennisTipz AI. Generate tennis match winner predictions from supplied current data only. Use a higher risk appetite than a favorite-only model: actively prefer value-priced picks when the available player data supports them, and avoid very short prices unless the evidence edge is clearly dominant. Public TennisTipz picks should focus on odds above 1.40. Do not invent injuries, scores, private information, or guaranteed outcomes. Use cautious betting language and include risk context. Return JSON only." },
+    { role: "system", content: "You are TennisTipz AI. Generate tennis match winner predictions from supplied current data only. Optimize for hit rate first. Prefer picks with odds from 1.40 to 2.50, strong market support, ranking/form/surface agreement, and confidence of at least 62. Avoid long-shot underdogs unless the supplied data edge is overwhelming. Do not invent injuries, scores, private information, or guaranteed outcomes. Use cautious betting language and include risk context. Return JSON only." },
     { role: "user", content: JSON.stringify({ generatedAt: new Date().toISOString(), matches: target.map(aiPredictionInput) }) },
   ], 2200, "prediction");
   const predictions = result?.predictions || [];
@@ -345,7 +367,7 @@ function makePrediction(event, odds, profileA, profileB) {
   const modelEdge = side === "home" ? homeScore - awayScore : awayScore - homeScore;
   const winner = side === "home" ? event.home.name : event.away.name;
   const confidence = clamp(Math.round(53 + Math.abs(modelEdge) * 0.62 + (profileA && profileB ? 3 : 1)), 51, 84);
-  return { predictedWinner: winner, predictedSide: side, predictedWinnerOdds: side === "home" ? odds.home : odds.away, confidence, modelEdge: Math.round(modelEdge * 10) / 10, factors: { marketProbability: prob, rankEdge: Math.round(rankEdge * 10) / 10, pointsEdge: Math.round(pointsEdge * 10) / 10, surfaceEdge: Math.round(surfaceEdge * 10) / 10, riskAppetite: "value-priced picks above 1.40 preferred", dataPoints: [odds.home, profileA?.rank && profileB?.rank, profileA?.points && profileB?.points].filter(Boolean).length } };
+  return { predictedWinner: winner, predictedSide: side, predictedWinnerOdds: side === "home" ? odds.home : odds.away, confidence, modelEdge: Math.round(modelEdge * 10) / 10, factors: { marketProbability: prob, rankEdge: Math.round(rankEdge * 10) / 10, pointsEdge: Math.round(pointsEdge * 10) / 10, surfaceEdge: Math.round(surfaceEdge * 10) / 10, pickPolicy: `accuracy-first picks, odds ${MIN_PUBLIC_PICK_ODDS}-${MAX_PUBLIC_PICK_ODDS}, confidence ${MIN_PUBLIC_PICK_CONFIDENCE}+`, dataPoints: [odds.home, profileA?.rank && profileB?.rank, profileA?.points && profileB?.points].filter(Boolean).length } };
 }
 function toIsoDate(value) {
   if (!value) return "";
@@ -624,6 +646,7 @@ async function syncLivePredictionsToDb(env, matches, diagnostics) {
   const playerIdByName = new Map((existingPlayers.results || []).map((player) => [`${player.tour}:${player.normalized_name}`, player.id]));
   for (const match of matches) {
     if (!match?.id || !match.playerA || !match.playerB || !["ATP", "WTA"].includes(match.tour)) continue;
+    if (!isQualifiedPublicPick(match)) continue;
     validMatches.push(match);
     statements.push(...livePredictionStatements(db, match, playerIdByName, queuedPlayers));
   }

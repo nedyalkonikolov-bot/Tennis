@@ -8,6 +8,8 @@ const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_SOCIAL_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_PREMIUM_MODEL = "gpt-5.4";
 const MIN_PUBLIC_PICK_ODDS = 1.4;
+const MAX_PUBLIC_PICK_ODDS = 2.5;
+const MIN_PUBLIC_PICK_CONFIDENCE = 62;
 const TOP_PLAYER_POST_RANK = 30;
 const DEFAULT_THREADS_TOPIC_TAG = "Tennis Threads";
 const SOCIAL_PREVIEW_COUNT = 9;
@@ -816,7 +818,8 @@ async function getPostableMatches(db, limit) {
     LEFT JOIN players pb ON pb.tour = m.tour AND pb.normalized_name = m.normalized_player_b
     WHERE m.tour IN ('ATP', 'WTA')
       AND p.predicted_winner_name IS NOT NULL
-      AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) > ${MIN_PUBLIC_PICK_ODDS}
+      AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) BETWEEN ${MIN_PUBLIC_PICK_ODDS} AND ${MAX_PUBLIC_PICK_ODDS}
+      AND CAST(COALESCE(p.confidence, 0) AS INTEGER) >= ${MIN_PUBLIC_PICK_CONFIDENCE}
       AND (
         CAST(COALESCE(pa.current_rank, 999999) AS INTEGER) BETWEEN 1 AND ${TOP_PLAYER_POST_RANK}
         OR CAST(COALESCE(pb.current_rank, 999999) AS INTEGER) BETWEEN 1 AND ${TOP_PLAYER_POST_RANK}

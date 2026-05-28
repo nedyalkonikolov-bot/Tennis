@@ -6,6 +6,8 @@ function jsonResponse(payload, status = 200) {
 }
 
 const MIN_PUBLIC_PICK_ODDS = 1.4;
+const MAX_PUBLIC_PICK_ODDS = 2.5;
+const MIN_PUBLIC_PICK_CONFIDENCE = 62;
 
 export async function onRequestGet({ request, env }) {
   if (!env.TENNIS_DB) return jsonResponse({ ok: false, error: "Missing TENNIS_DB D1 binding" }, 500);
@@ -13,7 +15,7 @@ export async function onRequestGet({ request, env }) {
   const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "50", 10), 1), 200);
   const status = url.searchParams.get("status");
 
-  const where = `WHERE CAST(COALESCE(p.predicted_odds, '0') AS REAL) > ${MIN_PUBLIC_PICK_ODDS}${status ? " AND po.result_status = ?" : ""}`;
+  const where = `WHERE CAST(COALESCE(p.predicted_odds, '0') AS REAL) BETWEEN ${MIN_PUBLIC_PICK_ODDS} AND ${MAX_PUBLIC_PICK_ODDS} AND CAST(COALESCE(p.confidence, 0) AS INTEGER) >= ${MIN_PUBLIC_PICK_CONFIDENCE}${status ? " AND po.result_status = ?" : ""}`;
   const statement = env.TENNIS_DB.prepare(`
     SELECT
       p.id,

@@ -23,6 +23,8 @@ const cloudbetUrl = "https://cldbt.cloud/go/en/landing/bitcoin-betting?af_token=
 const bcGameUrl = "https://bc.game/i-9767ib363b-n/";
 const stakeUrl = "https://stake.com/?c=NOYIoKcY";
 const minPublicPickOdds = 1.4;
+const maxPublicPickOdds = 2.5;
+const minPublicPickConfidence = 62;
 
 const navPages = [
   { id: "home", label: "Home", path: "/", icon: Home },
@@ -426,7 +428,14 @@ function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
   const [surface, setSurface] = useState("All");
   const [category, setCategory] = useState("upcoming");
   const [modelRun, setModelRun] = useState(0);
-  const scopedMatches = useMemo(() => matches.filter((match) => (!route.tour || match.tour === route.tour) && pickOdds(match) > minPublicPickOdds), [matches, route.tour]);
+  const scopedMatches = useMemo(() => matches.filter((match) => {
+    const price = pickOdds(match);
+    return (!route.tour || match.tour === route.tour)
+      && price >= minPublicPickOdds
+      && price <= maxPublicPickOdds
+      && (match.confidence || 0) >= minPublicPickConfidence
+      && !match.doubles;
+  }), [matches, route.tour]);
   const categoryCounts = useMemo(() => ({ live: scopedMatches.filter((match) => match.live).length, upcoming: scopedMatches.filter((match) => !match.live).length }), [scopedMatches]);
   const effectiveCategory = categoryCounts[category] ? category : categoryCounts.upcoming ? "upcoming" : "live";
   const filteredMatches = useMemo(() => scopedMatches
@@ -447,7 +456,7 @@ function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
       <div className="mt-8 grid gap-5 md:grid-cols-2">
         {filteredMatches.map((match) => <article key={match.id} className="border border-white/10 bg-white/[0.04] p-6">
           <div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-sm text-slate-400">{match.tournament} - {match.startTime}</p><h2 className="mt-2 text-2xl font-black"><a href={`/predictions/${match.slug}/`} onClick={(event) => { event.preventDefault(); onNavigate(`/predictions/${match.slug}/`); }} className="hover:text-lime-300">{match.playerA} vs {match.playerB}</a></h2></div><span className="rounded-full bg-lime-400/10 px-3 py-1 text-sm font-bold text-lime-300">{match.prediction.confidence}%</span></div>
-          <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-3 py-1 text-xs font-bold ${match.live ? "bg-red-500/15 text-red-200" : "bg-sky-400/10 text-sky-200"}`}>{match.live ? "Live" : "Upcoming"}</span><span className="rounded-full bg-amber-400/10 px-3 py-1 text-xs font-bold text-amber-200">Value odds &gt; 1.40</span><span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">Anticipation {Math.round(match.anticipation)}</span><a href={`/predictions/${match.slug}/`} onClick={(event) => { event.preventDefault(); onNavigate(`/predictions/${match.slug}/`); }} className="rounded-full bg-white/5 px-3 py-1 text-xs font-bold text-lime-300 hover:bg-white/10">Match page</a></div>
+          <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-3 py-1 text-xs font-bold ${match.live ? "bg-red-500/15 text-red-200" : "bg-sky-400/10 text-sky-200"}`}>{match.live ? "Live" : "Upcoming"}</span><span className="rounded-full bg-amber-400/10 px-3 py-1 text-xs font-bold text-amber-200">Qualified odds 1.40-2.50</span><span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">Anticipation {Math.round(match.anticipation)}</span><a href={`/predictions/${match.slug}/`} onClick={(event) => { event.preventDefault(); onNavigate(`/predictions/${match.slug}/`); }} className="rounded-full bg-white/5 px-3 py-1 text-xs font-bold text-lime-300 hover:bg-white/10">Match page</a></div>
           <p className="mt-5 text-slate-300">Predicted winner: <span className="font-bold text-white">{match.prediction.pick}</span></p>
           <div className="mt-5 grid gap-4 sm:grid-cols-3"><OddsLink match={match} fallbackBetUrl={betUrl} /><Metric label={`${match.playerA} 100d`} value={`${match.recentA?.wins || 0}-${match.recentA?.losses || 0}`} helper={`${match.recentA?.winRate || 50}% win rate`} /><Metric label={`${match.playerB} 100d`} value={`${match.recentB?.wins || 0}-${match.recentB?.losses || 0}`} helper={`${match.recentB?.winRate || 50}% win rate`} /></div>
           <div className="mt-5 space-y-3 text-sm text-slate-300"><p>Surface: {match.surface} | Status: {match.live ? "Live" : match.status}</p><StatBar value={match.prediction.confidence} /></div>
