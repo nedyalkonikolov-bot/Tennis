@@ -29,6 +29,7 @@ const minPublicPickConfidence = 70;
 const navPages = [
   { id: "home", label: "Home", path: "/", icon: Home },
   { id: "predictions", label: "Predictions", path: "/tennis-predictions/", icon: Target },
+  { id: "tips", label: "Betting Tips", path: "/tennis-betting-tips/", icon: Gauge },
   { id: "stats", label: "Player Stats", path: "/player-stats/", icon: Users },
   { id: "news", label: "News", path: "/tennis-news/", icon: Newspaper },
   { id: "betting", label: "Betting Sites", path: "/betting-sites/", icon: Landmark },
@@ -59,6 +60,31 @@ const pageMeta = {
     title: "Best Tennis Betting Sites | Cloudbet, BC.Game, Stake.com Reviews",
     description: "Compare crypto tennis betting sites including Cloudbet, BC.Game, and Stake.com with referral links, tennis market notes, and responsible betting guidance.",
     canonical: "/betting-sites/",
+  },
+  tips: {
+    title: "Tennis Betting Tips Today | ATP & WTA Prediction Research",
+    description: "Tennis betting tips for ATP and WTA matches with odds, AI confidence, player form, rankings, surface context, and responsible betting research.",
+    canonical: "/tennis-betting-tips/",
+  },
+};
+
+const bettingPageMeta = {
+  "/betting-sites/": pageMeta.betting,
+  "/tennis-betting/": {
+    title: "Tennis Betting Guide | ATP, WTA, Odds & Prediction Research",
+    description: "A practical tennis betting guide for ATP and WTA markets, Cloudbet odds, crypto sportsbooks, player stats, live betting, and responsible prediction research.",
+    canonical: "/tennis-betting/",
+  },
+  "/tennis-betting-tips/": pageMeta.tips,
+  "/cloudbet-tennis-betting/": {
+    title: "Cloudbet Tennis Betting | ATP & WTA Odds and Predictions",
+    description: "Cloudbet tennis betting research with ATP and WTA predictions, crypto odds context, player stats, AI confidence, and responsible betting notes.",
+    canonical: "/cloudbet-tennis-betting/",
+  },
+  "/crypto-tennis-betting/": {
+    title: "Crypto Tennis Betting Guide | Tennis Tips, Odds & Predictions",
+    description: "Crypto tennis betting guide with responsible betting tips, Cloudbet odds context, tennis predictions, ATP/WTA stats, and news signals for market research.",
+    canonical: "/crypto-tennis-betting/",
   },
 };
 
@@ -140,7 +166,8 @@ function getRoute(pathname) {
   if (cleanPath === "/wta-predictions/") return { id: "predictions", tour: "WTA" };
   if (cleanPath === "/players/atp/") return { id: "stats", tour: "ATP" };
   if (cleanPath === "/players/wta/") return { id: "stats", tour: "WTA" };
-  if (["/tennis-betting/", "/crypto-tennis-betting/", "/best-tennis-betting-sites/", "/betting-sites/"].includes(cleanPath)) return { id: "betting", path: cleanPath };
+  if (cleanPath === "/tennis-betting-tips/") return { id: "tips", path: cleanPath };
+  if (["/tennis-betting/", "/crypto-tennis-betting/", "/cloudbet-tennis-betting/", "/best-tennis-betting-sites/", "/betting-sites/"].includes(cleanPath)) return { id: "betting", path: cleanPath };
   const page = navPages.find((item) => item.path === cleanPath);
   return { id: page?.id || "home" };
 }
@@ -190,6 +217,12 @@ function buildDynamicMeta(route, dbData) {
       description: "Today's tennis predictions for ATP and WTA matches with Cloudbet odds, confidence, player form, and surface signals.",
       canonical: "/tennis-predictions-today/",
     };
+  }
+  if (route.id === "betting" && route.path) {
+    return bettingPageMeta[route.path] || pageMeta.betting;
+  }
+  if (route.id === "tips") {
+    return pageMeta.tips;
   }
   return pageMeta[route.id] || pageMeta.home;
 }
@@ -407,16 +440,19 @@ function HomePage({ onNavigate, liveData, dbData }) {
   );
 }
 
-function SeoHubLinks({ onNavigate }) {
+function SeoHubLinks() {
   const links = [
     ["/tennis-predictions-today/", "Tennis Predictions Today", "Daily ATP and WTA picks with odds and form signals."],
     ["/atp-predictions/", "ATP Predictions", "Men's tennis betting tips and Cloudbet markets."],
     ["/wta-predictions/", "WTA Predictions", "Women's tennis predictions, rankings and form notes."],
+    ["/tennis-betting-tips/", "Tennis Betting Tips", "Daily betting checklist for odds, form and match context."],
+    ["/cloudbet-tennis-betting/", "Cloudbet Tennis Betting", "Cloudbet odds explained with ATP and WTA prediction research."],
+    ["/tennis-betting/", "Tennis Betting Guide", "A practical guide to researching tennis bets responsibly."],
     ["/crypto-tennis-betting/", "Crypto Tennis Betting", "Bitcoin-friendly tennis betting guide and site comparison."],
     ["/players/atp/", "ATP Player Profiles", "Top ATP player stats and betting research pages."],
     ["/players/wta/", "WTA Player Profiles", "Top WTA player stats and betting research pages."],
   ];
-  return <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-2 lg:grid-cols-3 md:px-6">{links.map(([href, title, text]) => <button key={href} type="button" onClick={() => onNavigate(href)} className="border border-white/10 bg-white/[0.04] p-6 text-left hover:border-lime-400/40"><h3 className="text-xl font-bold">{title}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{text}</p></button>)}</section>;
+  return <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-2 lg:grid-cols-3 md:px-6">{links.map(([href, title, text]) => <a key={href} href={href} className="border border-white/10 bg-white/[0.04] p-6 text-left no-underline hover:border-lime-400/40"><h3 className="text-xl font-bold text-white">{title}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{text}</p></a>)}</section>;
 }
 
 function OddsLink({ match, fallbackBetUrl }) {
@@ -508,6 +544,16 @@ function NewsPage({ news }) {
   return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between"><div><p className="text-sm font-semibold uppercase text-lime-300">Live newsroom</p><h1 className="mt-2 text-4xl font-black">Tennis News for Betting</h1><p className="mt-3 max-w-2xl text-slate-400">Filter ATP and WTA updates by tournament context, player availability, market movement and trend signals.</p></div><CalendarDays className="text-slate-500" /></div><div className="mt-8 flex gap-2 overflow-x-auto">{newsCategories.map((item) => <button key={item} type="button" onClick={() => setCategory(item)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${category === item ? "bg-white text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{item}</button>)}</div><div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">{filteredNews.map((item) => <article key={item.id || item.title} className="overflow-hidden border border-white/10 bg-white/[0.04] hover:border-lime-400/40"><NewsImage item={item} /><div className="p-6"><div className="mb-4 flex items-center justify-between gap-3 text-sm"><span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category}</span><span className="text-slate-500">{item.time}</span></div><h2 className="text-xl font-black leading-tight">{item.title}</h2><p className="mt-4 leading-7 text-slate-400">{item.summary}</p>{item.url && item.url !== "#" && <a href={item.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">Read from {item.source}</a>}</div></article>)}</div></section>;
 }
 
+function TipsPage({ onNavigate }) {
+  const tips = [
+    ["Check the price first", "A good tennis prediction only matters if the available odds still leave room for value."],
+    ["Compare player form", "Use 100-day form and 2026 season records to spot rhythm, fatigue, and sample-size risk."],
+    ["Respect surface context", "Clay, grass, and hard courts can change serve value, rally length, and upset potential."],
+    ["Wait for late news", "Player withdrawals, medical reports, scheduling, and market movement can change the edge quickly."],
+  ];
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><p className="text-sm font-semibold uppercase text-lime-300">Tennis betting tips today</p><h1 className="mt-2 max-w-4xl text-5xl font-black">Betting tips built around odds, form, and match context</h1><p className="mt-4 max-w-3xl text-slate-400">Use these ATP and WTA betting tips as a research checklist before opening any sportsbook. TennisTipz combines odds, AI confidence, player stats, rankings, surface context and late news, but every pick still needs price discipline.</p><div className="mt-8 grid gap-5 md:grid-cols-2">{tips.map(([title, text]) => <article key={title} className="border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">{title}</h2><p className="mt-4 leading-7 text-slate-400">{text}</p></article>)}</div><div className="mt-10 flex flex-wrap gap-3"><button type="button" onClick={() => onNavigate("/tennis-predictions/")} className="rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Open prediction board</button><button type="button" onClick={() => onNavigate("/player-stats/")} className="rounded-xl border border-white/15 px-5 py-3 font-bold text-white hover:bg-white/10">Compare player stats</button><a href="/cloudbet-tennis-betting/" className="rounded-xl border border-white/15 px-5 py-3 font-bold text-white no-underline hover:bg-white/10">Cloudbet guide</a></div></section>;
+}
+
 function BettingHubPage() {
   const sites = [{ name: "Cloudbet", url: cloudbetUrl, text: "Cloudbet is the main tennis odds source used on TennisTipz, with crypto-friendly betting markets and ATP/WTA odds that fit match prediction research." }, { name: "BC.Game", url: bcGameUrl, text: "BC.Game is a crypto betting option for users comparing alternative sportsbooks and casino-led betting platforms with tennis market coverage." }, { name: "Stake.com", url: stakeUrl, text: "Stake.com is a major crypto betting brand for bettors who want broad sports coverage, familiar markets, and a simple account experience." }];
   return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><p className="text-sm font-semibold uppercase text-lime-300">Crypto tennis betting</p><h1 className="mt-2 text-4xl font-black">Best Tennis Betting Sites</h1><p className="mt-3 max-w-3xl text-slate-400">Compare crypto-friendly tennis betting sites for ATP and WTA markets, odds research, and responsible tennis betting. These links may be sponsored.</p><div className="mt-8 grid gap-5 md:grid-cols-3">{sites.map((site) => <article key={site.name} className="border border-white/10 bg-white/[0.04] p-6"><div className="mb-5 flex h-28 items-center justify-center bg-slate-900 text-2xl font-black text-lime-300">{site.name}</div><h2 className="text-2xl font-black">{site.name}</h2><p className="mt-4 leading-7 text-slate-400">{site.text}</p><a href={site.url} target="_blank" rel="noreferrer sponsored" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Visit {site.name} <ExternalLink size={16} /></a></article>)}</div><div className="mt-10 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Crypto Tennis Betting Guide</h2><p className="mt-4 leading-8 text-slate-400">A strong tennis betting workflow starts with market availability, then compares odds against player form, ranking movement, surface ratings, recent match load and tournament context. TennisTipz uses Cloudbet odds with ATP and WTA data to help bettors research picks before placing any wager.</p></div></section>;
@@ -577,5 +623,5 @@ export default function TennisTipzApp() {
   useEffect(() => { updateDocumentSeo(route, dbData); updateStructuredData(route, liveData, dbData); }, [route, liveData, dbData]);
   useEffect(() => { const onPopState = () => setRoute(getRoute(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
 
-  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} />}{route.id === "betting" && <BettingHubPage />}</main><ResponsibleFooter /></div>;
+  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} />}{route.id === "betting" && <BettingHubPage />}</main><ResponsibleFooter /></div>;
 }
