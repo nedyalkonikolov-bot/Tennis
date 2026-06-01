@@ -11,6 +11,10 @@ const MIN_PUBLIC_PICK_ODDS = 1.4;
 const MAX_PUBLIC_PICK_ODDS = 2.0;
 const MIN_PUBLIC_PICK_CONFIDENCE = 70;
 const TOP_PLAYER_POST_RANK = 30;
+const NEWS_MAX_AGE_HOURS = 36;
+const MATCH_LOOKAHEAD_HOURS = 72;
+const MATCH_RECENT_UPDATE_HOURS = 36;
+const MATCH_GRACE_MINUTES = 30;
 const DEFAULT_THREADS_TOPIC_TAG = "Tennis Threads";
 const SOCIAL_PREVIEW_COUNT = 9;
 const NEWS_FEEDS = [
@@ -361,6 +365,30 @@ function rssTag(item, tag) {
   return decodeHtml(item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] || "");
 }
 
+function parsedTime(value) {
+  const time = Date.parse(value || "");
+  return Number.isFinite(time) ? time : null;
+}
+
+function hoursSince(value) {
+  const time = parsedTime(value);
+  return time ? (Date.now() - time) / 36e5 : Infinity;
+}
+
+function isFreshNewsHook(news, maxAgeHours = NEWS_MAX_AGE_HOURS) {
+  const age = hoursSince(news?.publishedAt);
+  return age >= 0 && age <= maxAgeHours;
+}
+
+function isCurrentPredictionCandidate(match) {
+  const now = Date.now();
+  const start = parsedTime(match?.start_time);
+  const updated = parsedTime(match?.updated_at || match?.prediction_created_at || match?.created_at);
+  const startsSoon = start && start >= now - MATCH_GRACE_MINUTES * 60000 && start <= now + MATCH_LOOKAHEAD_HOURS * 36e5;
+  const refreshedRecently = updated && now - updated <= MATCH_RECENT_UPDATE_HOURS * 36e5;
+  return Boolean(match?.live) || Boolean(startsSoon && refreshedRecently);
+}
+
 function parseJinaMarkdownHooks(text, feed, limit = 8) {
   return [...text.matchAll(/### \[([^\]]+)\]\((https?:\/\/[^\s)]+)\)[\s\S]*?\n([A-Z][a-z]{2}, \d{1,2} [A-Z][a-z]{2} \d{4} [^\n]+)/g)]
     .slice(0, limit)
@@ -390,10 +418,11 @@ async function getNewsHooksFromFeed(feed, limit = 8) {
 }
 
 async function getRecentNewsHooks(limit = 8) {
-  const settled = await Promise.allSettled(NEWS_FEEDS.map((feed) => getNewsHooksFromFeed(feed, limit)));
+  const settled = await Promise.allSettled(NEWS_FEEDS.map((feed) => getNewsHooksFromFeed(feed, Math.max(limit * 3, 12))));
   const seen = new Set();
   return settled
     .flatMap((item) => item.status === "fulfilled" ? item.value : [])
+    .filter((item) => isFreshNewsHook(item))
     .filter((item) => item.url && !seen.has(item.url) && seen.add(item.url))
     .sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0))
     .slice(0, limit);
@@ -474,7 +503,8 @@ function extractHashtags(text) {
 async function getEspnNewsHooks(limit = 8) {
   const espn = NEWS_FEEDS.find((feed) => feed.name === "ESPN");
   if (!espn) return [];
-  return getNewsHooksFromFeed(espn, limit).catch(() => []);
+  const hooks = await getNewsHooksFromFeed(espn, Math.max(limit * 3, 12)).catch(() => []);
+  return hooks.filter((item) => isFreshNewsHook(item)).slice(0, limit);
 }
 
 function appendTopicTags(text, topicTags = [], maxLength = 500) {
@@ -528,7 +558,7 @@ async function callOpenAiPost(env, payload, fallbackText, maxLength) {
       input: [
         {
           role: "system",
-          content: "You write short, catchy tennis prediction social posts for TennisTipz. Use only supplied facts. Always include both supplied links exactly once: the prediction link and the affiliate/referral link. For Threads, end with 2 to 4 popular topic tags/hashtags selected from the supplied suggestedPopularTopicTags list when possible. For other platforms, include 2 to 4 popular, relevant hashtags for the platform, language, tour, and betting context. Never guarantee results. Mention 18+ and responsible betting. Urge users to follow, comment, and repost. Match the requested language. Return only the final post text.",
+          content: `You write short, catchy tennis prediction social posts for TennisTipz. Use only supplied facts from current live/upcoming predictions and fresh news. If a newsHook is present, use it only when publishedAt is present and within ${NEWS_MAX_AGE_HOURS} hours; otherwise ignore the newsHook and write from the prediction context only. Always include both supplied links exactly once: the prediction link and the affiliate/referral link. For Threads, end with 2 to 4 popular topic tags/hashtags selected from the supplied suggestedPopularTopicTags list when possible. For other platforms, include 2 to 4 popular, relevant hashtags for the platform, language, tour, and betting context. Never guarantee results. Mention 18+ and responsible betting. Urge users to follow, comment, and repost. Match the requested language. Return only the final post text.`,
         },
         { role: "user", content: JSON.stringify(payload) },
       ],
@@ -686,7 +716,7 @@ async function callOpenAiHumanVariants(env, candidate) {
       input: [
         {
           role: "system",
-          content: "Create authentic human tennis-fan Threads posts for TennisTipz. Use only supplied Top ATP/WTA 30 player or match context. Return strict JSON only: {\"variants\":[{\"type\":\"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction\",\"text\":\"...\"}]}. Create exactly 5 variants, one of each type. Max 450 characters each. Do not invent stats, recent form, injuries, technique changes, momentum, or season trends unless they are explicitly supplied. No links, URLs, affiliate names, referral language, odds, betting offers, or calls to bet. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, like a real tennis fan starting a conversation. Mention tennistipz.win only rarely and naturally.",
+          content: `Create authentic human tennis-fan Threads posts for TennisTipz. Use only supplied fresh ESPN/TennisHead news or current live/upcoming Top ATP/WTA 30 match context. Return strict JSON only: {"variants":[{"type":"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction","text":"..."}]}. Create exactly 5 variants, one of each type. Max 450 characters each. Do not invent stats, recent form, injuries, technique changes, momentum, or season trends unless they are explicitly supplied. Never refer to news older than ${NEWS_MAX_AGE_HOURS} hours. No links, URLs, affiliate names, referral language, odds, betting offers, or calls to bet. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, like a real tennis fan starting a conversation. Mention tennistipz.win only rarely and naturally.`,
         },
         { role: "user", content: JSON.stringify(input) },
       ],
@@ -735,7 +765,7 @@ async function composeAiSocialPost(env, match, options = {}) {
       confidence: match.confidence,
       odds: match.predicted_odds,
     },
-    newsHook: base.news ? { title: base.news.title, source: base.news.source, url: base.news.url } : null,
+    newsHook: base.news ? { title: base.news.title, source: base.news.source, url: base.news.url, publishedAt: base.news.publishedAt } : null,
     requiredCallToAction: locale.engage || "Comment your pick and repost for more tennis predictions.",
     suggestedPopularTopicTags: topicTags,
     hashtagInstruction: platform === "threads"
@@ -800,8 +830,10 @@ async function getPostableMatches(db, limit) {
       m.tour,
       m.tournament,
       m.start_time,
+      m.status,
       m.live,
       m.surface,
+      m.updated_at,
       m.player_a_name,
       m.player_b_name,
       pa.current_rank AS player_a_rank,
@@ -810,7 +842,7 @@ async function getPostableMatches(db, limit) {
       p.predicted_winner_name,
       p.confidence,
       p.predicted_odds,
-      p.created_at,
+      p.created_at AS prediction_created_at,
       p.factors_json
     FROM matches m
     JOIN predictions p ON p.match_id = m.id
@@ -823,14 +855,16 @@ async function getPostableMatches(db, limit) {
       AND LOWER(COALESCE(m.tournament, '')) NOT LIKE '%doubles%'
       AND COALESCE(m.player_a_name, '') NOT LIKE '%/%'
       AND COALESCE(m.player_b_name, '') NOT LIKE '%/%'
+      AND LOWER(COALESCE(m.status, '')) NOT IN ('finished', 'cancelled', 'canceled', 'retired', 'walkover')
       AND (
         CAST(COALESCE(pa.current_rank, 999999) AS INTEGER) BETWEEN 1 AND ${TOP_PLAYER_POST_RANK}
         OR CAST(COALESCE(pb.current_rank, 999999) AS INTEGER) BETWEEN 1 AND ${TOP_PLAYER_POST_RANK}
       )
-    ORDER BY m.live DESC, p.created_at DESC, m.start_time ASC
+      AND datetime(COALESCE(m.updated_at, p.created_at)) >= datetime('now', '-${MATCH_RECENT_UPDATE_HOURS} hours')
+    ORDER BY m.live DESC, datetime(m.start_time) ASC, datetime(COALESCE(m.updated_at, p.created_at)) DESC
     LIMIT ?
   `).bind(limit).all();
-  return (result.results || []).map((match) => {
+  return (result.results || []).filter(isCurrentPredictionCandidate).map((match) => {
     let factors = {};
     try { factors = JSON.parse(match.factors_json || "{}"); } catch { factors = {}; }
     return {
@@ -1026,12 +1060,12 @@ async function promoteHumanThreads(request, env, dryRun) {
   const postedTargets = new Set(recentRows.map((row) => row.target_id));
   const matches = (await getPostableMatches(db, 30)).filter((match) => !postedTargets.has(`prediction:${match.prediction_id}`));
   const topPlayerNames = await getTopPlayerNames(db);
-  const newsHooks = (await getEspnNewsHooks(12))
+  const newsHooks = (await getRecentNewsHooks(16))
     .filter((news) => !postedTargets.has(`news:${slugify(news.url || news.title || news.id || "espn")}`))
     .filter((news) => textMentionsAnyName(`${news.title || ""} ${news.summary || ""}`, topPlayerNames));
   const candidate = selectHumanCandidate(matches, newsHooks);
   if (!candidate) {
-    return jsonResponse({ ok: true, dryRun, mode: "human-threads", skipped: true, reason: "no-unposted-predictions-or-espn-news" });
+    return jsonResponse({ ok: true, dryRun, mode: "human-threads", skipped: true, reason: "no-current-unposted-predictions-or-fresh-news" });
   }
 
   const generation = await callOpenAiHumanVariants(env, candidate);
