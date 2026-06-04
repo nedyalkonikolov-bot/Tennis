@@ -34,6 +34,12 @@ export async function onRequestGet({ request }) {
     urlEntry("/bc-game-tennis-betting/", "2026-06-04", "weekly", "0.9"),
     urlEntry("/crypto-tennis-betting/", "2026-05-28", "weekly", "0.9"),
     urlEntry("/betting-sites/", "2026-05-28", "weekly", "0.9"),
+    urlEntry("/br/previsoes-tenis/", "2026-06-04", "daily", "0.88"),
+    urlEntry("/br/sites-apostas-tenis/", "2026-06-04", "weekly", "0.86"),
+    urlEntry("/bd/tennis-predictions/", "2026-06-04", "daily", "0.84"),
+    urlEntry("/bd/crypto-tennis-sites/", "2026-06-04", "weekly", "0.78"),
+    urlEntry("/tr/tenis-tahminleri/", "2026-06-04", "daily", "0.84"),
+    urlEntry("/tr/kripto-tenis-siteleri/", "2026-06-04", "weekly", "0.78"),
   ];
 
   const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries.join("\n")}\n</urlset>\n`;
