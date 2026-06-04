@@ -460,6 +460,10 @@ function OddsLink({ match, fallbackBetUrl }) {
   return <a href={href} target="_blank" rel="noreferrer sponsored" className="group block bg-slate-900 p-4 ring-1 ring-lime-400/20 transition hover:bg-lime-400 hover:text-slate-950"><span className="flex items-center justify-between gap-3 text-xs text-slate-500 group-hover:text-slate-800">Cloudbet odds <ExternalLink size={14} /></span><span className="mt-1 block font-bold">{match.predictedWinnerOdds || match.predicted_odds || match.odds || "N/A"}</span><span className="mt-1 block text-xs text-slate-500 group-hover:text-slate-800">{match.oddsSource || "Cloudbet"}</span></a>;
 }
 
+function BcGameTopBanner() {
+  return <a href={bcGameUrl} target="_blank" rel="noreferrer sponsored" aria-label="Open BC.Game sponsored offer" className="mb-8 block overflow-hidden rounded-lg border border-lime-300/20 bg-slate-900 shadow-2xl shadow-black/30 transition hover:-translate-y-0.5 hover:brightness-105"><img src="/ads/bc-game-banner-970x250.gif" alt="BC.Game crypto casino sponsored offer" width="970" height="250" loading="lazy" className="mx-auto block h-auto w-full max-w-[970px]" /></a>;
+}
+
 function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
   const [surface, setSurface] = useState("All");
   const [category, setCategory] = useState("upcoming");
@@ -483,6 +487,7 @@ function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
+      <BcGameTopBanner />
       <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div><p className="text-sm font-semibold uppercase text-lime-300">Cloudbet ATP/WTA value markets</p><h1 className="mt-2 text-4xl font-black">{heading}</h1><p className="mt-3 max-w-2xl text-slate-400">Live and upcoming tennis betting matches are separated, with a higher-risk value model showing only picks priced above 1.40 and ranking them by odds, form, status and confidence.</p></div>
         <button type="button" onClick={() => setModelRun((value) => (value === 3 ? -2 : value + 1))} className="inline-flex w-fit items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300"><Gauge size={18} /> Re-run Model</button>

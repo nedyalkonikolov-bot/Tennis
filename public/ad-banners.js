@@ -13,6 +13,11 @@
       position: "right",
     },
   ];
+  var topBanner = {
+    name: "BC.Game",
+    href: "https://bc.game/i-9767ib363b-n/",
+    image: "/ads/bc-game-banner-970x250.gif",
+  };
 
   function createRail(banner) {
     var rail = document.createElement("aside");
@@ -38,6 +43,34 @@
     return rail;
   }
 
+  function shouldShowTopBanner() {
+    return !/\/social-poster\/?$/.test(window.location.pathname);
+  }
+
+  function createTopBanner() {
+    var wrap = document.createElement("div");
+    wrap.className = "top-sponsored-banner";
+    wrap.setAttribute("aria-label", topBanner.name + " sponsored offer");
+
+    var link = document.createElement("a");
+    link.className = "top-sponsored-banner-link";
+    link.href = topBanner.href;
+    link.target = "_blank";
+    link.rel = "nofollow sponsored noopener noreferrer";
+    link.setAttribute("aria-label", "Open " + topBanner.name + " sponsored offer");
+
+    var image = document.createElement("img");
+    image.src = topBanner.image;
+    image.alt = topBanner.name + " sponsored crypto casino offer";
+    image.width = 970;
+    image.height = 250;
+    image.loading = "lazy";
+
+    link.appendChild(image);
+    wrap.appendChild(link);
+    return wrap;
+  }
+
   function install() {
     if (document.querySelector("[data-side-banners]")) return true;
 
@@ -50,7 +83,15 @@
 
     content.parentNode.insertBefore(shell, content);
     shell.appendChild(createRail(banners[0]));
-    shell.appendChild(content);
+    if (shouldShowTopBanner()) {
+      var contentWrap = document.createElement("div");
+      contentWrap.className = "site-ad-content";
+      contentWrap.appendChild(createTopBanner());
+      contentWrap.appendChild(content);
+      shell.appendChild(contentWrap);
+    } else {
+      shell.appendChild(content);
+    }
     shell.appendChild(createRail(banners[1]));
     return true;
   }
