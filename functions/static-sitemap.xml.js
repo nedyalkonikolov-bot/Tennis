@@ -38,7 +38,6 @@ export async function onRequestGet({ request }) {
   return new Response(body, {
     headers: {
       "content-type": "application/xml; charset=utf-8",
-      "content-encoding": "identity",
       "cache-control": "public, max-age=3600, no-transform",
     },
   });
