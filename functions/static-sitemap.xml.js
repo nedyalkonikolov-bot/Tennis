@@ -29,7 +29,9 @@ export async function onRequestGet({ request }) {
     urlEntry("/tennis-news/", "2026-05-28", "hourly", "0.85"),
     urlEntry("/tennis-betting/", "2026-05-28", "weekly", "0.9"),
     urlEntry("/tennis-betting-tips/", "2026-05-28", "daily", "0.92"),
-    urlEntry("/cloudbet-tennis-betting/", "2026-05-28", "weekly", "0.9"),
+    urlEntry("/cloudbet-tennis-betting/", "2026-06-04", "weekly", "0.92"),
+    urlEntry("/stake-tennis-betting/", "2026-06-04", "weekly", "0.9"),
+    urlEntry("/bc-game-tennis-betting/", "2026-06-04", "weekly", "0.9"),
     urlEntry("/crypto-tennis-betting/", "2026-05-28", "weekly", "0.9"),
     urlEntry("/betting-sites/", "2026-05-28", "weekly", "0.9"),
   ];

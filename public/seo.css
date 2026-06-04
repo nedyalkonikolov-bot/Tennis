@@ -206,6 +206,70 @@ section:not(.hero) {
   color: #bef264;
 }
 
+.article-grid {
+  display: grid;
+  gap: 18px;
+  margin-top: 22px;
+}
+
+.article-panel,
+.faq-panel {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 22px;
+}
+
+.article-panel h3,
+.faq-panel h3 {
+  margin: 0 0 10px;
+  color: #f8fafc;
+  font-size: 1.18rem;
+}
+
+.article-panel p,
+.faq-panel p {
+  margin-bottom: 0;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.comparison-table th,
+.comparison-table td {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  padding: 13px 14px;
+  color: #cbd5e1;
+  text-align: left;
+  vertical-align: top;
+}
+
+.comparison-table th {
+  background: rgba(15, 23, 42, 0.82);
+  color: #f8fafc;
+}
+
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.toc a {
+  border: 1px solid rgba(186, 230, 253, 0.24);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #bae6fd;
+  font-weight: 800;
+  text-decoration: none;
+}
+
 .visible-referral {
   max-width: 100%;
   margin-top: 18px;
