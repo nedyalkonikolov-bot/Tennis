@@ -100,7 +100,8 @@ export async function onRequestGet({ env, request }) {
   return new Response(body, {
     headers: {
       "content-type": "application/xml; charset=utf-8",
-      "cache-control": "public, max-age=3600",
+      "content-encoding": "identity",
+      "cache-control": "public, max-age=3600, no-transform",
     },
   });
 }

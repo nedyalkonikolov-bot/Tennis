@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "include": ["/api/*", "/predictions/*", "/articles/*", "/sitemap.xml", "/dynamic-sitemap.xml"],
+  "include": ["/api/*", "/predictions/*", "/articles/*", "/sitemap.xml", "/dynamic-sitemap.xml", "/static-sitemap.xml"],
   "exclude": ["/assets/*", "/favicon.svg"]
 }
