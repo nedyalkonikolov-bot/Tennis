@@ -367,7 +367,7 @@ function eventIsTourSingles(event) {
 function eventCanSettlePrediction(event) {
   const type = String(event.event_type_type || event.league_name || event.event_name || "").toLowerCase();
   if (type.includes("doubles") || /itf|boys|girls|junior/.test(type)) return false;
-  return Boolean(getApiTennisWinnerName(event)) || Boolean(event.event_final_result);
+  return Boolean(normalizeName(getApiTennisWinnerName(event)));
 }
 
 async function fetchOutcomeEvents(env, dates = []) {
@@ -599,6 +599,12 @@ async function syncRecentPlayerMatches(db, env, syncedMatches) {
 
 async function settleOutcomes(db, env) {
   if (!env.API_TENNIS_KEY) return { settled: 0, eventCount: 0, finishedEventCount: 0, pendingCandidateCount: 0, matchedEventCount: 0 };
+  const cleanup = await db.prepare(`
+    UPDATE prediction_outcomes
+    SET result_status = 'pending', correct = NULL, settled_at = NULL, updated_at = datetime('now')
+    WHERE result_status = 'settled'
+      AND (actual_winner_name IS NULL OR TRIM(actual_winner_name) = '')
+  `).run();
   const pending = await db.prepare(`
     SELECT m.id, m.start_time, m.player_a_id, m.player_b_id, m.player_a_name, m.player_b_name, p.id AS prediction_id, p.predicted_winner_name
     FROM matches m
@@ -609,7 +615,7 @@ async function settleOutcomes(db, env) {
         m.start_time IS NULL OR
         datetime(replace(substr(m.start_time, 1, 19), 'T', ' ')) <= datetime('now', '-3 hours')
       )
-    ORDER BY COALESCE(m.start_time, p.created_at) DESC
+    ORDER BY COALESCE(m.start_time, p.created_at) ASC
     LIMIT 250
   `).all();
   const pendingRows = pending.results || [];
@@ -626,6 +632,7 @@ async function settleOutcomes(db, env) {
 
   let settled = 0;
   let matchedEventCount = 0;
+  const unmatchedStatements = [];
   for (const row of pendingRows) {
     const candidateEvents = finishedEventsByDate.get(getMatchDate(row)) || [];
     const matchEvent = candidateEvents.find((event) => {
@@ -636,7 +643,16 @@ async function settleOutcomes(db, env) {
       if (!datesAreClose(getEventDate(event), getMatchDate(row))) return false;
       return (namesMatch(first, a) && namesMatch(second, b)) || (namesMatch(first, b) && namesMatch(second, a));
     });
-    if (!matchEvent) continue;
+    if (!matchEvent) {
+      if (getMatchDate(row) < todayIsoDate(-1)) {
+        unmatchedStatements.push(db.prepare(`
+          UPDATE prediction_outcomes
+          SET result_status = 'unmatched', updated_at = datetime('now')
+          WHERE prediction_id = ?
+        `).bind(row.prediction_id));
+      }
+      continue;
+    }
     matchedEventCount += 1;
 
     const actualWinnerName = getApiTennisWinnerName(matchEvent);
@@ -659,7 +675,16 @@ async function settleOutcomes(db, env) {
     ]);
     settled += 1;
   }
-  return { settled, eventCount: events.length, finishedEventCount: finishedEvents.length, pendingCandidateCount: pending.results?.length || 0, matchedEventCount };
+  await runBatches(db, unmatchedStatements);
+  return {
+    settled,
+    eventCount: events.length,
+    finishedEventCount: finishedEvents.length,
+    pendingCandidateCount: pendingRows.length,
+    matchedEventCount,
+    unmatchedMarked: unmatchedStatements.length,
+    badSettledReset: cleanup.meta?.changes || 0,
+  };
 }
 
 async function syncDatabase(request, env) {
