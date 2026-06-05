@@ -22,6 +22,23 @@ function normalizeName(value = "") {
     .trim();
 }
 
+function nameParts(value = "") {
+  const parts = normalizeName(value).split(" ").filter(Boolean);
+  return { first: parts[0] || "", last: parts[parts.length - 1] || "" };
+}
+
+function namesMatch(a = "", b = "") {
+  const normalizedA = normalizeName(a);
+  const normalizedB = normalizeName(b);
+  if (!normalizedA || !normalizedB) return false;
+  if (normalizedA === normalizedB) return true;
+  const left = nameParts(a);
+  const right = nameParts(b);
+  if (!left.last || !right.last || left.last !== right.last) return false;
+  if (!left.first || !right.first) return true;
+  return left.first[0] === right.first[0];
+}
+
 function asInt(value, fallback = 0) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -607,15 +624,15 @@ async function settleOutcomes(db, env) {
       const a = normalizeName(row.player_a_name);
       const b = normalizeName(row.player_b_name);
       if (!datesAreClose(getEventDate(event), getMatchDate(row))) return false;
-      return (first === a && second === b) || (first === b && second === a);
+      return (namesMatch(first, a) && namesMatch(second, b)) || (namesMatch(first, b) && namesMatch(second, a));
     });
     if (!matchEvent) continue;
     matchedEventCount += 1;
 
     const actualWinnerName = getApiTennisWinnerName(matchEvent);
     const actualNormalized = normalizeName(actualWinnerName);
-    const actualWinnerId = actualNormalized === normalizeName(row.player_a_name) ? row.player_a_id : actualNormalized === normalizeName(row.player_b_name) ? row.player_b_id : null;
-    const correct = actualNormalized && actualNormalized === normalizeName(row.predicted_winner_name) ? 1 : 0;
+    const actualWinnerId = namesMatch(actualWinnerName, row.player_a_name) ? row.player_a_id : namesMatch(actualWinnerName, row.player_b_name) ? row.player_b_id : null;
+    const correct = actualNormalized && namesMatch(actualWinnerName, row.predicted_winner_name) ? 1 : 0;
     const score = getApiTennisScore(matchEvent);
 
     await db.batch([
