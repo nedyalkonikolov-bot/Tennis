@@ -80,6 +80,16 @@ async function fetchApiTennis(env, method, params = {}) {
   return Array.isArray(result) ? result : [];
 }
 
+function recordApiTennisIssue(env, method, issue) {
+  if (!env.__apiTennisIssues) env.__apiTennisIssues = [];
+  env.__apiTennisIssues.push({
+    method,
+    error: issue?.error || null,
+    code: issue?.code || issue?.cod || null,
+    msg: issue?.msg || issue?.message || null,
+  });
+}
+
 async function fetchApiTennisRaw(env, method, params = {}) {
   if (!env.API_TENNIS_KEY) return null;
   const url = new URL(TENNIS_API_BASE);
@@ -89,9 +99,16 @@ async function fetchApiTennisRaw(env, method, params = {}) {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
   });
   const response = await fetch(url, { headers: { accept: "application/json" } });
-  if (!response.ok) return null;
+  if (!response.ok) {
+    recordApiTennisIssue(env, method, { error: response.status, message: response.statusText });
+    return null;
+  }
   const payload = await response.json();
-  if (payload?.error) return null;
+  if (payload?.error) {
+    const first = Array.isArray(payload.result) ? payload.result[0] : null;
+    recordApiTennisIssue(env, method, first || { error: payload.error });
+    return null;
+  }
   return payload.result || null;
 }
 
@@ -680,7 +697,7 @@ async function syncDatabase(request, env) {
     await db.prepare("UPDATE sync_runs SET recent_matches_upserted = ? WHERE id = ?").bind(recentMatchesUpserted, runId).run().catch(() => null);
     await db.prepare("UPDATE sync_runs SET player_profiles_upserted = ?, player_season_stats_upserted = ? WHERE id = ?").bind(playerProfilesUpserted, playerSeasonStatsUpserted, runId).run().catch(() => null);
 
-    return jsonResponse({ ok: true, runId, playersUpserted, matchesUpserted, predictionsUpserted, playerProfilesUpserted, playerSeasonStatsUpserted, recentMatchesUpserted, outcomesSettled, outcomeSync, diagnostics: { apiTennisKey: await secretFingerprint(env.API_TENNIS_KEY) }, recentFormSource: "API-Tennis get_fixtures by player_key", playerProfileSource: "API-Tennis get_players", liveDataSource: liveData.source, errors: liveData.errors || [] });
+    return jsonResponse({ ok: true, runId, playersUpserted, matchesUpserted, predictionsUpserted, playerProfilesUpserted, playerSeasonStatsUpserted, recentMatchesUpserted, outcomesSettled, outcomeSync, diagnostics: { apiTennisKey: await secretFingerprint(env.API_TENNIS_KEY), apiTennisIssues: env.__apiTennisIssues || [] }, recentFormSource: "API-Tennis get_fixtures by player_key", playerProfileSource: "API-Tennis get_players", liveDataSource: liveData.source, errors: liveData.errors || [] });
   } catch (error) {
     await db.prepare("UPDATE sync_runs SET status = 'error', finished_at = datetime('now'), error = ? WHERE id = ?").bind(error.message, runId).run();
     return jsonResponse({ ok: false, runId, error: error.message }, 500);
