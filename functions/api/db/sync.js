@@ -605,7 +605,10 @@ async function settleOutcomes(db, env) {
     JOIN predictions p ON p.match_id = m.id
     JOIN prediction_outcomes po ON po.prediction_id = p.id
     WHERE po.result_status = 'pending'
-      AND (m.start_time IS NULL OR date(substr(m.start_time, 1, 10)) <= date('now'))
+      AND (
+        m.start_time IS NULL OR
+        datetime(replace(substr(m.start_time, 1, 19), 'T', ' ')) <= datetime('now', '-3 hours')
+      )
     ORDER BY COALESCE(m.start_time, p.created_at) DESC
     LIMIT 250
   `).all();
