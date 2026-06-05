@@ -552,10 +552,10 @@ async function syncRecentPlayerMatches(db, env, syncedMatches) {
 }
 
 async function settleOutcomes(db, env) {
-  if (!env.API_TENNIS_KEY) return 0;
+  if (!env.API_TENNIS_KEY) return { settled: 0, eventCount: 0, finishedEventCount: 0, pendingCandidateCount: 0, matchedEventCount: 0 };
   const events = await fetchOutcomeEvents(env);
   const finishedEvents = events.filter(eventCanSettlePrediction);
-  if (!finishedEvents.length) return 0;
+  if (!finishedEvents.length) return { settled: 0, eventCount: events.length, finishedEventCount: 0, pendingCandidateCount: 0, matchedEventCount: 0 };
 
   const pending = await db.prepare(`
     SELECT m.id, m.start_time, m.player_a_id, m.player_b_id, m.player_a_name, m.player_b_name, p.id AS prediction_id, p.predicted_winner_name
@@ -569,6 +569,7 @@ async function settleOutcomes(db, env) {
   `).all();
 
   let settled = 0;
+  let matchedEventCount = 0;
   for (const row of pending.results || []) {
     const matchEvent = finishedEvents.find((event) => {
       const first = normalizeName(event.event_first_player || event.first_player || "");
@@ -579,6 +580,7 @@ async function settleOutcomes(db, env) {
       return (first === a && second === b) || (first === b && second === a);
     });
     if (!matchEvent) continue;
+    matchedEventCount += 1;
 
     const actualWinnerName = getApiTennisWinnerName(matchEvent);
     const actualNormalized = normalizeName(actualWinnerName);
@@ -600,7 +602,7 @@ async function settleOutcomes(db, env) {
     ]);
     settled += 1;
   }
-  return settled;
+  return { settled, eventCount: events.length, finishedEventCount: finishedEvents.length, pendingCandidateCount: pending.results?.length || 0, matchedEventCount };
 }
 
 async function syncDatabase(request, env) {
@@ -618,6 +620,7 @@ async function syncDatabase(request, env) {
   let recentMatchesUpserted = 0;
   let playerProfilesUpserted = 0;
   let playerSeasonStatsUpserted = 0;
+  let outcomeSync = { settled: 0, eventCount: 0, finishedEventCount: 0, pendingCandidateCount: 0, matchedEventCount: 0 };
 
   try {
     const liveUrl = new URL("/api/live-data", request.url);
@@ -655,7 +658,8 @@ async function syncDatabase(request, env) {
     }
 
     recentMatchesUpserted = await syncRecentPlayerMatches(db, env, syncedMatches);
-    outcomesSettled = await settleOutcomes(db, env);
+    outcomeSync = await settleOutcomes(db, env);
+    outcomesSettled = outcomeSync.settled;
 
     await db.prepare(`
       UPDATE sync_runs
@@ -665,7 +669,7 @@ async function syncDatabase(request, env) {
     await db.prepare("UPDATE sync_runs SET recent_matches_upserted = ? WHERE id = ?").bind(recentMatchesUpserted, runId).run().catch(() => null);
     await db.prepare("UPDATE sync_runs SET player_profiles_upserted = ?, player_season_stats_upserted = ? WHERE id = ?").bind(playerProfilesUpserted, playerSeasonStatsUpserted, runId).run().catch(() => null);
 
-    return jsonResponse({ ok: true, runId, playersUpserted, matchesUpserted, predictionsUpserted, playerProfilesUpserted, playerSeasonStatsUpserted, recentMatchesUpserted, outcomesSettled, recentFormSource: "API-Tennis get_fixtures by player_key", playerProfileSource: "API-Tennis get_players", liveDataSource: liveData.source, errors: liveData.errors || [] });
+    return jsonResponse({ ok: true, runId, playersUpserted, matchesUpserted, predictionsUpserted, playerProfilesUpserted, playerSeasonStatsUpserted, recentMatchesUpserted, outcomesSettled, outcomeSync, recentFormSource: "API-Tennis get_fixtures by player_key", playerProfileSource: "API-Tennis get_players", liveDataSource: liveData.source, errors: liveData.errors || [] });
   } catch (error) {
     await db.prepare("UPDATE sync_runs SET status = 'error', finished_at = datetime('now'), error = ? WHERE id = ?").bind(error.message, runId).run();
     return jsonResponse({ ok: false, runId, error: error.message }, 500);
