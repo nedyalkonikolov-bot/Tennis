@@ -93,6 +93,23 @@ section:not(.hero) {
   text-decoration: none;
 }
 
+.cta-secondary {
+  background: rgba(186, 230, 253, 0.1);
+  color: #bae6fd;
+  border: 1px solid rgba(186, 230, 253, 0.28);
+}
+
+.prediction-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.prediction-actions .cta {
+  margin-top: 0;
+}
+
 .links {
   display: flex;
   flex-wrap: wrap;
@@ -298,4 +315,5 @@ section:not(.hero) {
   .book-banner { min-height: 140px; padding: 18px; }
   .book-body { padding: 18px; }
   .book-quick-links a { width: 100%; }
+  .prediction-actions .cta { width: 100%; }
 }
