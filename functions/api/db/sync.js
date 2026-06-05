@@ -62,6 +62,19 @@ function isAuthorized(request, env) {
   return token && token === env.DATABASE_SYNC_TOKEN;
 }
 
+async function secretFingerprint(value = "") {
+  if (!value) return { present: false };
+  const bytes = new TextEncoder().encode(String(value));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return {
+    present: true,
+    length: String(value).length,
+    last4: String(value).slice(-4),
+    sha256Prefix: hash.slice(0, 12),
+  };
+}
+
 async function fetchApiTennis(env, method, params = {}) {
   const result = await fetchApiTennisRaw(env, method, params);
   return Array.isArray(result) ? result : [];
@@ -670,7 +683,7 @@ async function syncDatabase(request, env) {
     await db.prepare("UPDATE sync_runs SET recent_matches_upserted = ? WHERE id = ?").bind(recentMatchesUpserted, runId).run().catch(() => null);
     await db.prepare("UPDATE sync_runs SET player_profiles_upserted = ?, player_season_stats_upserted = ? WHERE id = ?").bind(playerProfilesUpserted, playerSeasonStatsUpserted, runId).run().catch(() => null);
 
-    return jsonResponse({ ok: true, runId, playersUpserted, matchesUpserted, predictionsUpserted, playerProfilesUpserted, playerSeasonStatsUpserted, recentMatchesUpserted, outcomesSettled, outcomeSync, recentFormSource: "API-Tennis get_fixtures by player_key", playerProfileSource: "API-Tennis get_players", liveDataSource: liveData.source, errors: liveData.errors || [] });
+    return jsonResponse({ ok: true, runId, playersUpserted, matchesUpserted, predictionsUpserted, playerProfilesUpserted, playerSeasonStatsUpserted, recentMatchesUpserted, outcomesSettled, outcomeSync, diagnostics: { apiTennisKey: await secretFingerprint(env.API_TENNIS_KEY) }, recentFormSource: "API-Tennis get_fixtures by player_key", playerProfileSource: "API-Tennis get_players", liveDataSource: liveData.source, errors: liveData.errors || [] });
   } catch (error) {
     await db.prepare("UPDATE sync_runs SET status = 'error', finished_at = datetime('now'), error = ? WHERE id = ?").bind(error.message, runId).run();
     return jsonResponse({ ok: false, runId, error: error.message }, 500);
