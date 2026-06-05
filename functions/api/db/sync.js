@@ -607,18 +607,25 @@ async function settleOutcomes(db, env) {
     WHERE po.result_status = 'pending'
       AND (m.start_time IS NULL OR date(substr(m.start_time, 1, 10)) <= date('now'))
     ORDER BY COALESCE(m.start_time, p.created_at) DESC
-    LIMIT 800
+    LIMIT 250
   `).all();
   const pendingRows = pending.results || [];
-  const dates = [...new Set(pendingRows.map(getMatchDate).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))].slice(0, 21);
+  const dates = [...new Set(pendingRows.map(getMatchDate).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))].slice(0, 7);
   const events = await fetchOutcomeEvents(env, dates);
   const finishedEvents = events.filter(eventCanSettlePrediction);
   if (!finishedEvents.length) return { settled: 0, eventCount: events.length, finishedEventCount: 0, pendingCandidateCount: pendingRows.length, matchedEventCount: 0 };
+  const finishedEventsByDate = new Map();
+  for (const event of finishedEvents) {
+    const date = getEventDate(event);
+    if (!finishedEventsByDate.has(date)) finishedEventsByDate.set(date, []);
+    finishedEventsByDate.get(date).push(event);
+  }
 
   let settled = 0;
   let matchedEventCount = 0;
   for (const row of pendingRows) {
-    const matchEvent = finishedEvents.find((event) => {
+    const candidateEvents = finishedEventsByDate.get(getMatchDate(row)) || [];
+    const matchEvent = candidateEvents.find((event) => {
       const first = normalizeName(event.event_first_player || event.first_player || "");
       const second = normalizeName(event.event_second_player || event.second_player || "");
       const a = normalizeName(row.player_a_name);
