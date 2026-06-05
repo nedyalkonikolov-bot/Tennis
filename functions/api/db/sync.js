@@ -692,6 +692,15 @@ async function syncDatabase(request, env) {
   if (!isAuthorized(request, env)) return jsonResponse({ error: "Unauthorized" }, 401);
 
   const db = env.TENNIS_DB;
+  await db.prepare(`
+    UPDATE sync_runs
+    SET status = 'error',
+        finished_at = datetime('now'),
+        error = COALESCE(error, 'Sync exceeded Cloudflare execution window')
+    WHERE status = 'running'
+      AND started_at < datetime('now', '-10 minutes')
+  `).run().catch(() => null);
+
   const runId = crypto.randomUUID();
   await db.prepare("INSERT INTO sync_runs (id, status) VALUES (?, 'running')").bind(runId).run();
 

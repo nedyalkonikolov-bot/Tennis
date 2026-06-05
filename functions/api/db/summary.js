@@ -28,6 +28,14 @@ export async function onRequestGet({ env }) {
     FROM prediction_outcomes
     WHERE result_status = 'settled'
   `).first();
+  await db.prepare(`
+    UPDATE sync_runs
+    SET status = 'error',
+        finished_at = datetime('now'),
+        error = COALESCE(error, 'Sync exceeded Cloudflare execution window')
+    WHERE status = 'running'
+      AND started_at < datetime('now', '-10 minutes')
+  `).run().catch(() => null);
   const latestSync = await db.prepare("SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1").first();
 
   return jsonResponse({
