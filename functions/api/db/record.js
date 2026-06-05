@@ -28,6 +28,36 @@ async function accuracyRow(db, where = "", bindings = []) {
   };
 }
 
+async function bettingRow(db, where = "", bindings = []) {
+  const row = await db.prepare(`
+    SELECT
+      COUNT(*) AS bets,
+      SUM(CASE WHEN po.correct = 1 THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN po.correct = 1 THEN CAST(COALESCE(p.predicted_odds, '0') AS REAL) ELSE 0 END) AS returns
+    FROM prediction_outcomes po
+    JOIN predictions p ON p.id = po.prediction_id
+    JOIN matches m ON m.id = po.match_id
+    WHERE po.result_status = 'settled'
+      AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) > 0
+    ${where}
+  `).bind(...bindings).first();
+
+  const bets = row?.bets || 0;
+  const wins = row?.wins || 0;
+  const returns = row?.returns || 0;
+  const profit = returns - bets;
+  return {
+    stakePerPick: 1,
+    bets,
+    wins,
+    losses: bets - wins,
+    totalStake: Math.round(bets * 100) / 100,
+    totalReturn: Math.round(returns * 100) / 100,
+    netProfit: Math.round(profit * 100) / 100,
+    roiPercent: bets ? Math.round((profit / bets) * 10000) / 100 : null,
+  };
+}
+
 export async function onRequestGet({ env }) {
   if (!env.TENNIS_DB) return jsonResponse({ ok: false, error: "Missing TENNIS_DB D1 binding" }, 500);
   const db = env.TENNIS_DB;
@@ -40,6 +70,17 @@ export async function onRequestGet({ env }) {
     accuracyRow(db, "AND LOWER(COALESCE(m.surface, '')) = ?", ["clay"]),
     accuracyRow(db, "AND LOWER(COALESCE(m.surface, '')) = ?", ["hard"]),
     accuracyRow(db, "AND LOWER(COALESCE(m.surface, '')) = ?", ["grass"]),
+  ]);
+  const [bettingAll, bettingPublicPicks] = await Promise.all([
+    bettingRow(db),
+    bettingRow(
+      db,
+      `AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) BETWEEN 1.01 AND 2.0
+       AND CAST(COALESCE(p.confidence, 0) AS INTEGER) >= 70
+       AND LOWER(COALESCE(m.tournament, '')) NOT LIKE '%doubles%'
+       AND COALESCE(m.player_a_name, '') NOT LIKE '%/%'
+       AND COALESCE(m.player_b_name, '') NOT LIKE '%/%'`
+    ),
   ]);
 
   const recent = await db.prepare(`
@@ -74,6 +115,10 @@ export async function onRequestGet({ env }) {
       tours: { ATP: atp, WTA: wta },
       last30,
       surfaces: { clay, hard, grass },
+      betting: {
+        allSettledPredictions: bettingAll,
+        publicPickFilter: bettingPublicPicks,
+      },
     },
     recent: (recent.results || []).map((row) => ({
       ...row,
