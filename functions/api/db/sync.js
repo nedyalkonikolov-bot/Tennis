@@ -353,9 +353,10 @@ function eventCanSettlePrediction(event) {
   return Boolean(getApiTennisWinnerName(event)) || Boolean(event.event_final_result);
 }
 
-async function fetchOutcomeEvents(env) {
-  const params = { date_start: todayIsoDate(-OUTCOME_SETTLE_LOOKBACK_DAYS), date_stop: todayIsoDate() };
-  const eventFeeds = await Promise.all([fetchApiTennis(env, "get_fixtures", params).catch(() => [])]);
+async function fetchOutcomeEvents(env, dates = []) {
+  const eventFeeds = await Promise.all(
+    dates.map((date) => fetchApiTennis(env, "get_fixtures", { date_start: date, date_stop: date }).catch(() => []))
+  );
   const byId = new Map();
   for (const event of eventFeeds.flat()) {
     byId.set(eventSourceId(event), event);
@@ -581,10 +582,6 @@ async function syncRecentPlayerMatches(db, env, syncedMatches) {
 
 async function settleOutcomes(db, env) {
   if (!env.API_TENNIS_KEY) return { settled: 0, eventCount: 0, finishedEventCount: 0, pendingCandidateCount: 0, matchedEventCount: 0 };
-  const events = await fetchOutcomeEvents(env);
-  const finishedEvents = events.filter(eventCanSettlePrediction);
-  if (!finishedEvents.length) return { settled: 0, eventCount: events.length, finishedEventCount: 0, pendingCandidateCount: 0, matchedEventCount: 0 };
-
   const pending = await db.prepare(`
     SELECT m.id, m.start_time, m.player_a_id, m.player_b_id, m.player_a_name, m.player_b_name, p.id AS prediction_id, p.predicted_winner_name
     FROM matches m
@@ -595,10 +592,15 @@ async function settleOutcomes(db, env) {
     ORDER BY COALESCE(m.start_time, p.created_at) DESC
     LIMIT 800
   `).all();
+  const pendingRows = pending.results || [];
+  const dates = [...new Set(pendingRows.map(getMatchDate).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))].slice(0, 21);
+  const events = await fetchOutcomeEvents(env, dates);
+  const finishedEvents = events.filter(eventCanSettlePrediction);
+  if (!finishedEvents.length) return { settled: 0, eventCount: events.length, finishedEventCount: 0, pendingCandidateCount: pendingRows.length, matchedEventCount: 0 };
 
   let settled = 0;
   let matchedEventCount = 0;
-  for (const row of pending.results || []) {
+  for (const row of pendingRows) {
     const matchEvent = finishedEvents.find((event) => {
       const first = normalizeName(event.event_first_player || event.first_player || "");
       const second = normalizeName(event.event_second_player || event.second_player || "");
