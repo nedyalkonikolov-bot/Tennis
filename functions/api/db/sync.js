@@ -78,6 +78,7 @@ async function fetchApiTennisRaw(env, method, params = {}) {
   const response = await fetch(url, { headers: { accept: "application/json" } });
   if (!response.ok) return null;
   const payload = await response.json();
+  if (payload?.error) return null;
   return payload.result || null;
 }
 
