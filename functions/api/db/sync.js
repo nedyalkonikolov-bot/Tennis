@@ -322,6 +322,19 @@ function eventCanSettlePrediction(event) {
   return Boolean(getApiTennisWinnerName(event)) || Boolean(event.event_final_result);
 }
 
+async function fetchOutcomeEvents(env) {
+  const params = { date_start: todayIsoDate(-OUTCOME_SETTLE_LOOKBACK_DAYS), date_stop: todayIsoDate() };
+  const eventFeeds = await Promise.all([
+    fetchApiTennis(env, "get_events", params).catch(() => []),
+    fetchApiTennis(env, "get_fixtures", params).catch(() => []),
+  ]);
+  const byId = new Map();
+  for (const event of eventFeeds.flat()) {
+    byId.set(eventSourceId(event), event);
+  }
+  return [...byId.values()];
+}
+
 function eventIsRecentFinished(event) {
   const date = getEventDate(event);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
@@ -540,7 +553,7 @@ async function syncRecentPlayerMatches(db, env, syncedMatches) {
 
 async function settleOutcomes(db, env) {
   if (!env.API_TENNIS_KEY) return 0;
-  const events = await fetchApiTennis(env, "get_fixtures", { date_start: todayIsoDate(-OUTCOME_SETTLE_LOOKBACK_DAYS), date_stop: todayIsoDate() });
+  const events = await fetchOutcomeEvents(env);
   const finishedEvents = events.filter(eventCanSettlePrediction);
   if (!finishedEvents.length) return 0;
 
