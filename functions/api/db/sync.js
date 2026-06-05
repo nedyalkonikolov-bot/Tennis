@@ -318,7 +318,7 @@ function eventIsTourSingles(event) {
 
 function eventCanSettlePrediction(event) {
   const type = String(event.event_type_type || event.league_name || event.event_name || "").toLowerCase();
-  if (type.includes("doubles") || /itf|challenger|boys|girls|junior/.test(type)) return false;
+  if (type.includes("doubles") || /itf|boys|girls|junior/.test(type)) return false;
   return Boolean(getApiTennisWinnerName(event)) || Boolean(event.event_final_result);
 }
 
