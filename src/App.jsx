@@ -172,6 +172,12 @@ function getRoute(pathname) {
   return { id: page?.id || "home" };
 }
 
+function getInitialRoute() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("app") === "predictions") return { id: "predictions" };
+  return getRoute(window.location.pathname);
+}
+
 function setMetaTag(selector, attribute, content) {
   let element = document.head.querySelector(selector);
   if (!element) {
@@ -573,7 +579,7 @@ function ResponsibleFooter() {
 }
 
 export default function TennisTipzApp() {
-  const [route, setRoute] = useState(() => getRoute(window.location.pathname));
+  const [route, setRoute] = useState(getInitialRoute);
   const [liveData, setLiveData] = useState(initialLiveData);
   const [dbData, setDbData] = useState(initialDbData);
   const [loading, setLoading] = useState(true);
