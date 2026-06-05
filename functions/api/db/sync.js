@@ -338,10 +338,7 @@ function eventCanSettlePrediction(event) {
 
 async function fetchOutcomeEvents(env) {
   const params = { date_start: todayIsoDate(-OUTCOME_SETTLE_LOOKBACK_DAYS), date_stop: todayIsoDate() };
-  const eventFeeds = await Promise.all([
-    fetchApiTennis(env, "get_events", params).catch(() => []),
-    fetchApiTennis(env, "get_fixtures", params).catch(() => []),
-  ]);
+  const eventFeeds = await Promise.all([fetchApiTennis(env, "get_fixtures", params).catch(() => [])]);
   const byId = new Map();
   for (const event of eventFeeds.flat()) {
     byId.set(eventSourceId(event), event);
