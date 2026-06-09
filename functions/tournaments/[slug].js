@@ -89,8 +89,8 @@ async function tournamentSummary(db, slug) {
     SELECT
       tournament,
       COUNT(*) AS match_count,
-      MIN(start_time) AS first_start,
-      MAX(start_time) AS last_start,
+      MIN(CASE WHEN date(substr(start_time, 1, 10)) >= date('2020-01-01') THEN start_time END) AS first_start,
+      MAX(CASE WHEN date(substr(start_time, 1, 10)) >= date('2020-01-01') THEN start_time END) AS last_start,
       GROUP_CONCAT(DISTINCT tour) AS tours,
       GROUP_CONCAT(DISTINCT surface) AS surfaces
     FROM matches
