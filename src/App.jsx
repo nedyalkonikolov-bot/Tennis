@@ -143,11 +143,22 @@ function normalizePlayer(player) {
     rank: Number(player.rank ?? player.current_rank ?? 999999),
     points: Number(player.points || 0),
     movement: player.movement || player.trend || "same",
+    birthday: player.player_bday || "",
+    photo: player.player_logo || "",
     recentMatches,
     recentWins,
     recentLosses,
     recentWinRate,
     form: recentWinRate ?? Number(player.form ?? player.form_rating ?? 0),
+    season: player.season || "2026",
+    seasonWins: Number(player.matches_won || 0),
+    seasonLosses: Number(player.matches_lost || 0),
+    titles: Number(player.titles || 0),
+    surfaces: {
+      hard: { wins: Number(player.hard_won || 0), losses: Number(player.hard_lost || 0) },
+      clay: { wins: Number(player.clay_won || 0), losses: Number(player.clay_lost || 0) },
+      grass: { wins: Number(player.grass_won || 0), losses: Number(player.grass_lost || 0) },
+    },
     predictionMentions: Number(player.prediction_mentions || 0),
     updatedAt: player.updated_at || "",
     url: player.url || `/players/${String(player.tour || player.sex || "ATP").toLowerCase()}/${slugify(player.name)}/`,
@@ -204,8 +215,8 @@ function buildDynamicMeta(route, dbData) {
     const player = dbData.playerPages.map(normalizePlayer).find((item) => item.tour === route.tour && item.slug === route.slug);
     if (player) {
       return {
-        title: `${player.name} Stats, Ranking & Tennis Betting Form | TennisTipz`,
-        description: `${player.name} ${player.tour} player profile with ranking, points, form rating, surface stats, and tennis betting research signals.`,
+        title: `${player.name} Predictions, Stats, Form & Tennis News | TennisTipz`,
+        description: `${player.name} ${player.tour} player profile with predictions, ranking, 2026 season record, 100-day form, surface stats, upcoming matches and TennisTipz news context.`,
         canonical: player.url,
       };
     }
@@ -315,7 +326,9 @@ function updateStructuredData(route, liveData, dbData) {
         name: player.name,
         url: `${siteUrl}${player.url}`,
         nationality: player.country,
-        athlete: true,
+        jobTitle: "Professional tennis player",
+        sport: "Tennis",
+        image: player.photo || `${siteUrl}/og-image.png`,
       });
     }
   }
@@ -547,7 +560,17 @@ function StatsPage({ route, livePlayers, dbData, onNavigate }) {
 function PlayerDetailPage({ route, dbData, onNavigate }) {
   const player = dbData.playerPages.map(normalizePlayer).find((item) => item.tour === route.tour && item.slug === route.slug);
   if (!player) return <NotFound title="Player profile loading" text="This player profile will appear after the database feed loads." />;
-  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><button type="button" onClick={() => onNavigate(`/players/${player.tour.toLowerCase()}/`)} className="mb-6 text-sm font-bold text-lime-300">Back to {player.tour} players</button><p className="text-sm font-semibold uppercase text-lime-300">{player.tour} player profile</p><h1 className="mt-2 text-5xl font-black">{player.name}</h1><p className="mt-3 max-w-2xl text-slate-400">Ranking, points, and verified 100-day singles form for {player.name} from stored API-Tennis fixture results.</p><div className="mt-8 grid gap-4 md:grid-cols-4"><Metric label="Rank" value={`#${player.rank}`} helper={player.country} /><Metric label="Points" value={player.points} /><Metric label="100d W-L" value={`${player.recentWins}-${player.recentLosses}`} /><Metric label="100d win rate" value={player.recentWinRate === null ? "N/A" : `${player.recentWinRate}%`} helper={`${player.recentMatches} matches`} /></div><div className="mt-8 grid gap-5 md:grid-cols-3"><Metric label="Recent wins" value={player.recentWins} /><Metric label="Recent losses" value={player.recentLosses} /><Metric label="Prediction mentions" value={player.predictionMentions} /></div><div className="mt-8 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Betting Research Notes</h2><p className="mt-4 leading-8 text-slate-400">Use {player.name}'s ranking, points, and 100-day win-loss record alongside Cloudbet odds, opponent form, tournament context and match timing before making any tennis betting decision. Synthetic hold, break and surface ratings have been removed until verified source data is available.</p></div></section>;
+  const relatedPredictions = dbData.matchPages.filter((match) => match.player_a_name === player.name || match.player_b_name === player.name).slice(0, 8);
+  const surfaceMetric = (name, data) => {
+    const total = data.wins + data.losses;
+    const rate = total ? `${Math.round((data.wins * 1000) / total) / 10}%` : "N/A";
+    return <Metric label={`${name} surface`} value={`${data.wins}-${data.losses}`} helper={total ? `${rate} win rate` : "Not enough verified data"} />;
+  };
+  const opponentLink = (match) => {
+    const opponent = match.player_a_name === player.name ? match.player_b_name : match.player_a_name;
+    return opponent ? <button key={`${match.match_id || match.id}-${opponent}`} type="button" onClick={() => onNavigate(`/players/${player.tour.toLowerCase()}/${slugify(opponent)}/`)} className="rounded-xl border border-white/15 px-4 py-2 text-sm font-bold text-white hover:bg-white/10">{opponent}</button> : null;
+  };
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><button type="button" onClick={() => onNavigate(`/players/${player.tour.toLowerCase()}/`)} className="mb-6 text-sm font-bold text-lime-300">Back to {player.tour} players</button><div className="grid gap-8 md:grid-cols-[1fr_auto] md:items-start"><div><p className="text-sm font-semibold uppercase text-lime-300">{player.tour} player profile</p><h1 className="mt-2 text-5xl font-black">{player.name} Predictions, Stats, Form & Tennis News</h1><p className="mt-3 max-w-3xl text-slate-400">{player.name} is tracked with ranking, points, 2026 season record, verified 100-day singles form, surface splits, prediction mentions, and internal research links. Missing sections update automatically when TennisTipz syncs fresh API-Tennis and prediction data.</p></div>{player.photo && <img src={player.photo} alt={`${player.name} tennis player`} className="h-40 w-40 border border-white/10 object-cover" />}</div><div className="mt-8 grid gap-4 md:grid-cols-4"><Metric label="Rank" value={player.rank >= 999999 ? "N/A" : `#${player.rank}`} helper={player.country} /><Metric label="Points" value={player.points} /><Metric label="100d W-L" value={`${player.recentWins}-${player.recentLosses}`} /><Metric label="100d win rate" value={player.recentWinRate === null ? "N/A" : `${player.recentWinRate}%`} helper={`${player.recentMatches} matches`} /></div><div className="mt-8 grid gap-5 md:grid-cols-4"><Metric label={`${player.season} season`} value={`${player.seasonWins}-${player.seasonLosses}`} helper={`${player.titles} titles stored`} />{surfaceMetric("Hard", player.surfaces.hard)}{surfaceMetric("Clay", player.surfaces.clay)}{surfaceMetric("Grass", player.surfaces.grass)}</div><div className="mt-8 grid gap-5 md:grid-cols-2"><div className="border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Latest Related Predictions</h2>{!relatedPredictions.length && <p className="mt-4 leading-7 text-slate-400">No indexed prediction page is attached to {player.name} yet. New Cloudbet ATP/WTA markets appear here when odds and model confidence pass public filters.</p>}{relatedPredictions.map((match) => <button key={match.match_id || match.url} type="button" onClick={() => onNavigate(match.url)} className="mt-4 block w-full border-t border-white/10 pt-4 text-left hover:text-lime-300"><p className="font-bold">{match.title}</p><p className="text-sm text-slate-500">{match.tour} - {match.tournament || "Tennis"} - Pick: {match.predicted_winner_name || "Pending"}</p></button>)}</div><div className="border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Opponent and Tournament Links</h2><p className="mt-4 leading-7 text-slate-400">Jump into related player pages and prediction hubs for faster research around {player.name}'s market context.</p><div className="mt-5 flex flex-wrap gap-3">{relatedPredictions.map(opponentLink)}<button type="button" onClick={() => onNavigate(`/${player.tour.toLowerCase()}-predictions/`)} className="rounded-xl bg-lime-400 px-4 py-2 text-sm font-bold text-slate-950">{player.tour} predictions</button><button type="button" onClick={() => onNavigate("/tennis-news/")} className="rounded-xl border border-white/15 px-4 py-2 text-sm font-bold text-white hover:bg-white/10">Latest tennis news</button></div></div></div><div className="mt-8 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Betting Research Notes</h2><p className="mt-4 leading-8 text-slate-400">Use {player.name}'s ranking, points, season record, 100-day form, surface splits, opponent profile, tournament context and current Cloudbet price before making any tennis betting decision. This page stays useful even while some fields are still syncing: unavailable values are shown clearly instead of being guessed.</p></div></section>;
 }
 
 function MatchDetailPage({ route, dbData, onNavigate }) {
