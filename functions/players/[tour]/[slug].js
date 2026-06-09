@@ -38,6 +38,10 @@ function predictionUrl(match) {
   return `/predictions/${slugify(`${match.tour} ${match.player_a_name} vs ${match.player_b_name}`)}/`;
 }
 
+function tournamentUrl(name) {
+  return `/tournaments/${slugify(name)}/`;
+}
+
 function formatDate(value) {
   if (!value) return "date TBC";
   const parsed = new Date(value);
@@ -192,7 +196,7 @@ function renderMatchList(matches, emptyText, player) {
   if (!matches.length) return `<p class="muted">${escapeHtml(emptyText)}</p>`;
   return `<div class="list-cards">${matches.map((match) => {
     const opponent = match.opponent_name || (match.player_a_id === player.id ? match.player_b_name : match.player_a_name);
-    const tournamentLink = match.tournament ? `<a href="/tennis-predictions/?tournament=${encodeURIComponent(match.tournament)}">${escapeHtml(match.tournament)}</a>` : "Tennis";
+    const tournamentLink = match.tournament ? `<a href="${tournamentUrl(match.tournament)}">${escapeHtml(match.tournament)}</a>` : "Tennis";
     const prediction = match.player_a_name ? `<a href="${predictionUrl(match)}">prediction page</a>` : "";
     return `<article class="row">
       <div><strong>${escapeHtml(opponent || "Opponent TBC")}</strong><p class="muted">${escapeHtml(formatDate(match.match_date || match.start_time))} · ${tournamentLink} · ${escapeHtml(match.surface || "Surface TBC")}</p></div>
@@ -311,7 +315,7 @@ function renderPlayerPage(player, latest, related, news, request) {
     <a href="/${String(player.tour).toLowerCase()}-predictions/">${escapeHtml(player.tour)} predictions</a>
     <a href="/tennis-news/">Tennis news</a>
     ${opponents.map((name) => `<a href="${playerUrl(player.tour, name)}">${escapeHtml(name)}</a>`).join("")}
-    ${tournaments.map((name) => `<a href="/tennis-predictions/?tournament=${encodeURIComponent(name)}">${escapeHtml(name)}</a>`).join("")}
+    ${tournaments.map((name) => `<a href="${tournamentUrl(name)}">${escapeHtml(name)}</a>`).join("")}
   </div>
 </section>
 <p class="muted section">18+ Bet responsibly. TennisTipz player pages are research signals and tennis context, not guaranteed betting outcomes.</p>

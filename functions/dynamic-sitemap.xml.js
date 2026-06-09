@@ -23,6 +23,15 @@ function slugify(value = "") {
     .replace(/^-+|-+$/g, "") || "item";
 }
 
+function canonicalTournamentSlug(name = "") {
+  const raw = slugify(name);
+  if (/roland-garros|french-open|france-open/.test(raw)) return "french-open";
+  if (/australian-open|aus-open/.test(raw)) return "australian-open";
+  if (/us-open|u-s-open|united-states-open/.test(raw)) return "us-open";
+  if (/wimbledon/.test(raw)) return "wimbledon";
+  return raw;
+}
+
 function sitemapDate(value) {
   const parsed = value ? new Date(value) : new Date();
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString().slice(0, 10) : parsed.toISOString().slice(0, 10);
@@ -53,7 +62,7 @@ export async function onRequestGet({ env, request }) {
   };
 
   if (env.TENNIS_DB) {
-    const [players, matches, articles] = await Promise.all([
+    const [players, matches, tournaments, articles] = await Promise.all([
       env.TENNIS_DB.prepare(`
         SELECT name, tour, updated_at
         FROM players
@@ -75,6 +84,30 @@ export async function onRequestGet({ env, request }) {
         LIMIT 500
       `).all(),
       env.TENNIS_DB.prepare(`
+        SELECT
+          tournament,
+          GROUP_CONCAT(DISTINCT tour) AS tours,
+          MAX(COALESCE(p.created_at, m.updated_at, m.start_time)) AS updated_at
+        FROM matches m
+        LEFT JOIN predictions p ON p.match_id = m.id
+        WHERE m.tournament IS NOT NULL
+          AND m.tournament <> ''
+          AND m.tour IN ('ATP', 'WTA')
+          AND COALESCE(m.player_a_name, '') NOT LIKE '%/%'
+          AND COALESCE(m.player_b_name, '') NOT LIKE '%/%'
+          AND (
+            m.tour = 'ATP'
+            OR LOWER(m.tournament) LIKE '%australian open%'
+            OR LOWER(m.tournament) LIKE '%french open%'
+            OR LOWER(m.tournament) LIKE '%roland garros%'
+            OR LOWER(m.tournament) LIKE '%wimbledon%'
+            OR LOWER(m.tournament) LIKE '%us open%'
+          )
+        GROUP BY tournament
+        ORDER BY MAX(datetime(COALESCE(m.start_time, p.created_at, m.updated_at))) DESC
+        LIMIT 250
+      `).all(),
+      env.TENNIS_DB.prepare(`
         SELECT slug, updated_at, created_at
         FROM seo_articles
         WHERE status = 'published'
@@ -89,6 +122,10 @@ export async function onRequestGet({ env, request }) {
 
     for (const match of matches.results || []) {
       addEntry(`/predictions/${slugify(`${match.tour} ${match.player_a_name} vs ${match.player_b_name}`)}/`, "0.74", "daily", match.updated_at);
+    }
+
+    for (const tournament of tournaments.results || []) {
+      addEntry(`/tournaments/${canonicalTournamentSlug(tournament.tournament)}/`, "0.73", "daily", tournament.updated_at);
     }
 
     for (const article of articles.results || []) {
