@@ -49,6 +49,19 @@ function playerUrl(tour, name) {
   return `/players/${String(tour || "").toLowerCase()}/${slugify(name)}/`;
 }
 
+function canonicalTournamentSlug(name = "") {
+  const raw = slugify(name);
+  if (/roland-garros|french-open|france-open/.test(raw)) return "french-open";
+  if (/australian-open|aus-open/.test(raw)) return "australian-open";
+  if (/us-open|u-s-open|united-states-open/.test(raw)) return "us-open";
+  if (/wimbledon/.test(raw)) return "wimbledon";
+  return raw;
+}
+
+function tournamentUrl(name) {
+  return name ? `/tournaments/${canonicalTournamentSlug(name)}/` : "/tennis-predictions/";
+}
+
 function formatDate(value) {
   if (!value) return "time TBC";
   const parsed = new Date(value);
@@ -68,6 +81,36 @@ function isoDateOrUndefined(value) {
   if (!value) return undefined;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+function roundLabel(match) {
+  const text = `${match.round || ""} ${match.status || ""}`.trim();
+  if (/final/i.test(text)) return "Final";
+  if (/semi/i.test(text)) return "Semifinal";
+  if (/quarter/i.test(text)) return "Quarterfinal";
+  return match.round || "Round not available in the current feed";
+}
+
+function winProbabilities(match) {
+  const confidence = Math.max(50, Math.min(84, asNumber(match.confidence, 50)));
+  const pick = String(match.predicted_winner_name || "").toLowerCase();
+  const playerA = String(match.player_a_name || "").toLowerCase();
+  const playerB = String(match.player_b_name || "").toLowerCase();
+  if (pick && playerA && pick === playerA) return { a: confidence, b: 100 - confidence };
+  if (pick && playerB && pick === playerB) return { a: 100 - confidence, b: confidence };
+  return { a: 50, b: 50 };
+}
+
+function statEdge(aValue, bValue, higherIsBetter = true) {
+  const a = asNumber(aValue, 0);
+  const b = asNumber(bValue, 0);
+  if (a === b) return "Even";
+  const aBetter = higherIsBetter ? a > b : a < b;
+  return aBetter ? "Player A" : "Player B";
+}
+
+function statRow(label, a, b, edge = "") {
+  return `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(a)}</td><td>${escapeHtml(b)}</td><td>${escapeHtml(edge || "Context")}</td></tr>`;
 }
 
 function buildAiPrediction(row) {
@@ -102,6 +145,7 @@ async function findMatchBySlug(db, slug) {
   const result = await db.prepare(`
     SELECT
       m.id AS match_id, m.tour, m.tournament, m.start_time, m.status, m.live, m.surface,
+      m.player_a_id, m.player_b_id,
       m.player_a_name, m.player_b_name, m.score, m.winner_name,
       pa.current_rank AS player_a_rank, pb.current_rank AS player_b_rank,
       pa.points AS player_a_points, pb.points AS player_b_points,
@@ -147,18 +191,47 @@ async function findMatchBySlug(db, slug) {
   return (result.results || []).find((row) => slugify(`${row.tour} ${row.player_a_name} vs ${row.player_b_name}`) === slug);
 }
 
-function html(match, slug, request) {
+async function h2hStats(db, match) {
+  if (!match.player_a_id || !match.player_b_id) return { total: 0, aWins: 0, bWins: 0, rows: [] };
+  const result = await db.prepare(`
+    SELECT player_id, opponent_name, match_date, tournament, surface, score, result, source_event_id
+    FROM player_recent_matches
+    WHERE (
+      player_id = ? AND LOWER(opponent_name) = LOWER(?)
+    ) OR (
+      player_id = ? AND LOWER(opponent_name) = LOWER(?)
+    )
+    ORDER BY match_date DESC
+    LIMIT 12
+  `).bind(match.player_a_id, match.player_b_name, match.player_b_id, match.player_a_name).all();
+  const rows = [];
+  const seen = new Set();
+  for (const row of result.results || []) {
+    const key = row.source_event_id || `${row.match_date}:${row.tournament}:${row.score}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(row);
+  }
+  const aWins = rows.filter((row) => (row.player_id === match.player_a_id && row.result === "win") || (row.player_id === match.player_b_id && row.result === "loss")).length;
+  const bWins = rows.filter((row) => (row.player_id === match.player_b_id && row.result === "win") || (row.player_id === match.player_a_id && row.result === "loss")).length;
+  return { total: rows.length, aWins, bWins, rows };
+}
+
+function html(match, slug, request, h2h) {
   const title = `${match.player_a_name} vs ${match.player_b_name}`;
   const pageTitle = `${title} Prediction | TennisTipz ${match.tour} Betting Tips`;
   const canonical = `${SITE_URL}/predictions/${slug}/`;
   const previewImage = socialPreviewImage(request, `${match.match_id || ""}:${slug}`);
   const ai = buildAiPrediction(match);
   const startDate = isoDateOrUndefined(match.start_time);
-  const description = `${title} prediction: ${match.predicted_winner_name || "AI pick"}, ${match.confidence || "model"}% confidence, ${match.surface || "tennis"} surface, Cloudbet odds ${match.predicted_odds || "available"}.`;
+  const round = roundLabel(match);
+  const probabilities = winProbabilities(match);
+  const description = `${title} prediction with win probability, key stats, H2H, form, ${match.tournament || "tournament"} context, ${match.surface || "surface"} surface and responsible betting insight.`;
   const tourHub = match.tour === "WTA" ? "/wta-predictions/" : "/atp-predictions/";
   const tourHubName = match.tour === "WTA" ? "WTA predictions" : "ATP predictions";
   const playerALink = playerUrl(match.tour, match.player_a_name);
   const playerBLink = playerUrl(match.tour, match.player_b_name);
+  const eventTournamentUrl = tournamentUrl(match.tournament);
   const verdict = `${match.predicted_winner_name || "The model pick"} is the current TennisTipz AI lean at ${match.confidence || "pending"}% confidence. The pick is based on odds, ranking, 2026 singles record, last-100-days form and listed surface context.`;
   const checklist = [
     `Current pick price: ${match.predicted_odds || "odds pending"} on the Cloudbet-linked market.`,
@@ -194,6 +267,11 @@ function html(match, slug, request) {
     eventStatus: match.live ? "https://schema.org/EventInProgress" : "https://schema.org/EventScheduled",
     competitor: [{ "@type": "Person", name: match.player_a_name }, { "@type": "Person", name: match.player_b_name }],
     location: { "@type": "Place", name: match.tournament || "Tennis tournament" },
+    subEvent: {
+      "@type": "Event",
+      name: `${title} ${round}`,
+      url: canonical,
+    },
   };
   const articleSchema = {
     "@context": "https://schema.org",
@@ -205,6 +283,8 @@ function html(match, slug, request) {
     publisher: { "@type": "Organization", name: "TennisTipz" },
     mainEntityOfPage: canonical,
     image: previewImage,
+    about: schema,
+    additionalType: "https://schema.org/Prediction",
   };
   const breadcrumbSchema = {
     "@context": "https://schema.org",
@@ -249,31 +329,49 @@ function html(match, slug, request) {
 <script type="application/ld+json">${JSON.stringify(articleSchema)}</script>
 <script type="application/ld+json">${JSON.stringify(breadcrumbSchema)}</script>
 <script type="application/ld+json">${JSON.stringify(faqSchema)}</script>
-<style>body{margin:0;background:#07111f;color:#e5edf7;font-family:Arial,sans-serif;line-height:1.6}.wrap{max-width:1040px;margin:auto;padding:32px 18px}.crumb,.muted{color:#94a3b8}a{color:#bef264}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}.card{background:#111c2d;border:1px solid rgba(255,255,255,.1);padding:18px}.pill{display:inline-block;background:#bef264;color:#08111f;font-weight:700;padding:6px 10px}.cta{display:inline-block;margin-top:16px;background:#bef264;color:#08111f;padding:12px 16px;font-weight:700;text-decoration:none}.split{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(260px,.8fr);gap:22px}.list{padding-left:20px}.note{border-left:4px solid #bef264;background:#0d1728;padding:16px 18px}@media(max-width:760px){.split{grid-template-columns:1fr}}h1{font-size:clamp(34px,6vw,62px);line-height:1.05}h2{margin-top:34px}</style>
+<style>body{margin:0;background:#07111f;color:#e5edf7;font-family:Arial,sans-serif;line-height:1.6}.wrap{max-width:1040px;margin:auto;padding:32px 18px}.crumb,.muted{color:#94a3b8}a{color:#bef264}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}.card{background:#111c2d;border:1px solid rgba(255,255,255,.1);padding:18px}.pill{display:inline-block;background:#bef264;color:#08111f;font-weight:700;padding:6px 10px}.cta{display:inline-block;margin-top:16px;background:#bef264;color:#08111f;padding:12px 16px;font-weight:700;text-decoration:none}.split{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(260px,.8fr);gap:22px}.list{padding-left:20px}.note{border-left:4px solid #bef264;background:#0d1728;padding:16px 18px}.prob{height:12px;background:#1e293b;overflow:hidden}.prob span{display:block;height:12px;background:#bef264}.table{width:100%;border-collapse:collapse;background:#111c2d}.table th,.table td{border:1px solid rgba(255,255,255,.1);padding:12px;text-align:left}.table th{color:#cbd5e1}.inline-links{display:flex;flex-wrap:wrap;gap:10px}.inline-links a{background:#111c2d;border:1px solid rgba(255,255,255,.12);padding:8px 10px;text-decoration:none}@media(max-width:760px){.split{grid-template-columns:1fr}.table{font-size:14px}}h1{font-size:clamp(34px,6vw,62px);line-height:1.05}h2{margin-top:34px}</style>
 </head><body><main class="wrap">
 <p class="crumb"><a href="/">TennisTipz</a> / <a href="/tennis-predictions/">Tennis predictions</a> / <a href="${tourHub}">${escapeHtml(match.tour)}</a></p>
 <span class="pill">${escapeHtml(match.live ? "Live" : match.status || "Upcoming")}</span>
 <h1>${escapeHtml(title)} Prediction</h1>
-<p class="muted">${escapeHtml(match.tournament || "Tennis")} · ${escapeHtml(formatDate(match.start_time))} UTC · ${escapeHtml(match.surface || "Surface TBC")}</p>
+<p class="muted">${escapeHtml(formatDate(match.start_time))} UTC · <a href="${eventTournamentUrl}">${escapeHtml(match.tournament || "Tournament TBC")}</a> · ${escapeHtml(match.surface || "Surface TBC")} · ${escapeHtml(round)}</p>
 <div class="grid">
   <div class="card"><strong>AI Pick</strong><br>${escapeHtml(match.predicted_winner_name || "Pending")}</div>
   <div class="card"><strong>Confidence</strong><br>${escapeHtml(match.confidence ? `${match.confidence}%` : "Pending")}</div>
   <div class="card"><strong>Cloudbet Odds</strong><br>${escapeHtml(match.predicted_odds || "Available soon")}</div>
-  <div class="card"><strong>Result</strong><br>${escapeHtml(match.result_status || "pending")}</div>
+  <div class="card"><strong>Round</strong><br>${escapeHtml(round)}</div>
+</div>
+<h2>Win Probability</h2>
+<div class="grid">
+  <div class="card"><strong>${escapeHtml(match.player_a_name)}</strong><br><span style="font-size:32px;font-weight:900">${probabilities.a}%</span><div class="prob"><span style="width:${probabilities.a}%"></span></div></div>
+  <div class="card"><strong>${escapeHtml(match.player_b_name)}</strong><br><span style="font-size:32px;font-weight:900">${probabilities.b}%</span><div class="prob"><span style="width:${probabilities.b}%"></span></div></div>
 </div>
 <h2>AI Prediction Analysis</h2>
-<div class="split"><article><p>${escapeHtml(ai.summary)}</p><p>${escapeHtml(verdict)} This preview is built for tennis betting research, so the key question is whether the available price still matches the model edge by the time you check the market.</p><p class="note">Best use: compare the pick with player news, late market movement, match timing and your own bankroll rules before making any decision.</p></article><aside class="card"><strong>Quick links</strong><br><a href="${playerALink}">${escapeHtml(match.player_a_name)} stats</a><br><a href="${playerBLink}">${escapeHtml(match.player_b_name)} stats</a><br><a href="${tourHub}">${escapeHtml(tourHubName)}</a><br><a href="/tennis-predictions-today/">Tennis predictions today</a></aside></div>
+<div class="split"><article><p>${escapeHtml(ai.summary)}</p><p>${escapeHtml(verdict)} This preview is built for tennis betting research, so the key question is whether the available price still matches the model edge by the time you check the market.</p><p class="note">Betting-style insight: the model prefers ${escapeHtml(match.predicted_winner_name || "the listed value side")}, but the page does not guarantee an outcome. Treat the odds, form and H2H context as inputs, then recheck late news, withdrawals, market movement and match conditions.</p></article><aside class="card"><strong>Quick links</strong><br><a href="${playerALink}">${escapeHtml(match.player_a_name)} stats</a><br><a href="${playerBLink}">${escapeHtml(match.player_b_name)} stats</a><br><a href="${eventTournamentUrl}">${escapeHtml(match.tournament || "Tournament hub")}</a><br><a href="${tourHub}">${escapeHtml(tourHubName)}</a><br><a href="/tennis-predictions-today/">Tennis predictions today</a></aside></div>
 <div class="grid">${ai.reasons.map((reason) => `<div class="card">${escapeHtml(reason)}</div>`).join("")}</div>
-<h2>Betting Research Checklist</h2>
-<ul class="list">${checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-<h2>Player Form</h2>
+<h2>Key Stats Comparison</h2>
+<table class="table"><thead><tr><th>Stat</th><th>${escapeHtml(match.player_a_name)}</th><th>${escapeHtml(match.player_b_name)}</th><th>Edge</th></tr></thead><tbody>
+${statRow("Current rank", match.player_a_rank ? `#${match.player_a_rank}` : "N/A", match.player_b_rank ? `#${match.player_b_rank}` : "N/A", statEdge(match.player_a_rank || 999999, match.player_b_rank || 999999, false))}
+${statRow("Ranking points", match.player_a_points || "N/A", match.player_b_points || "N/A", statEdge(match.player_a_points, match.player_b_points))}
+${statRow("100-day record", wl(match.player_a_recent_wins, match.player_a_recent_losses), wl(match.player_b_recent_wins, match.player_b_recent_losses), statEdge(match.player_a_recent_win_rate, match.player_b_recent_win_rate))}
+${statRow("100-day win rate", pct(match.player_a_recent_win_rate), pct(match.player_b_recent_win_rate), statEdge(match.player_a_recent_win_rate, match.player_b_recent_win_rate))}
+${statRow("2026 season", wl(match.player_a_season_wins, match.player_a_season_losses), wl(match.player_b_season_wins, match.player_b_season_losses), statEdge(asNumber(match.player_a_season_wins) - asNumber(match.player_a_season_losses), asNumber(match.player_b_season_wins) - asNumber(match.player_b_season_losses)))}
+</tbody></table>
+<h2>Head-to-Head</h2>
+<div class="card"><strong>Stored H2H sample:</strong> ${escapeHtml(`${h2h.aWins}-${h2h.bWins}`)} (${escapeHtml(String(h2h.total))} recent rows found)<p class="muted">${h2h.total ? "H2H is calculated from stored API-Tennis recent match rows. Use it as context, not as a standalone betting signal." : "No verified H2H rows are currently stored for these players, so the model leans more on ranking, form, surface and market data."}</p></div>
+${h2h.rows.length ? `<ul class="list">${h2h.rows.slice(0, 5).map((row) => `<li>${escapeHtml(formatDate(row.match_date))}: ${escapeHtml(row.tournament || "Tournament")} · ${escapeHtml(row.surface || "Surface TBC")} · ${escapeHtml(row.score || row.result || "Result stored")}</li>`).join("")}</ul>` : ""}
+<h2>Recent Form</h2>
 <div class="grid">
   <div class="card"><strong><a href="${playerALink}">${escapeHtml(match.player_a_name)} stats</a></strong><br>Rank: ${escapeHtml(match.player_a_rank ? `#${match.player_a_rank}` : "N/A")} · Points: ${escapeHtml(match.player_a_points || "N/A")}<br>100-day form: ${escapeHtml(wl(match.player_a_recent_wins, match.player_a_recent_losses))} (${escapeHtml(pct(match.player_a_recent_win_rate))})<br>2026: ${escapeHtml(wl(match.player_a_season_wins, match.player_a_season_losses))}</div>
   <div class="card"><strong><a href="${playerBLink}">${escapeHtml(match.player_b_name)} stats</a></strong><br>Rank: ${escapeHtml(match.player_b_rank ? `#${match.player_b_rank}` : "N/A")} · Points: ${escapeHtml(match.player_b_points || "N/A")}<br>100-day form: ${escapeHtml(wl(match.player_b_recent_wins, match.player_b_recent_losses))} (${escapeHtml(pct(match.player_b_recent_win_rate))})<br>2026: ${escapeHtml(wl(match.player_b_season_wins, match.player_b_season_losses))}</div>
 </div>
+<h2>Betting Research Checklist</h2>
+<ul class="list">${checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+<h2>Internal Research Links</h2>
+<div class="inline-links"><a href="${playerALink}">${escapeHtml(match.player_a_name)} player page</a><a href="${playerBLink}">${escapeHtml(match.player_b_name)} player page</a><a href="${eventTournamentUrl}">${escapeHtml(match.tournament || "Tournament page")}</a><a href="${tourHub}">${escapeHtml(tourHubName)}</a><a href="/tennis-predictions/">All predictions</a></div>
 <h2>${escapeHtml(title)} FAQ</h2>
 ${faqs.map((faq) => `<section class="card"><h3>${escapeHtml(faq.q)}</h3><p>${escapeHtml(faq.a)}</p></section>`).join("")}
-<p class="muted">18+ Bet responsibly. This is prediction research, not a guaranteed outcome.</p>
+<p class="muted">Disclaimer: informational only, not financial advice. 18+ Bet responsibly. This page is prediction research and does not guarantee any outcome or profit.</p>
 <a class="cta" href="${CLOUDBET_URL}" rel="sponsored nofollow">Open Cloudbet tennis odds</a>
 <p><a href="/tennis-predictions/">More tennis predictions today</a> · <a href="/atp-predictions/">ATP predictions</a> · <a href="/wta-predictions/">WTA predictions</a> · <a href="/player-stats/">ATP/WTA player stats</a></p>
 </main><script src="/ad-banners.js?v=navy-rails" defer></script></body></html>`;
@@ -286,7 +384,8 @@ export async function onRequestGet({ request, params, env }) {
   const slug = params.slug;
   const match = await findMatchBySlug(env.TENNIS_DB, slug);
   if (!match) return new Response("Prediction not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
-  return new Response(html(match, slug, request), {
+  const h2h = await h2hStats(env.TENNIS_DB, match);
+  return new Response(html(match, slug, request, h2h), {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "public, max-age=300, stale-while-revalidate=1800",
