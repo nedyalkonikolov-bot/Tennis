@@ -91,13 +91,17 @@ async function postHumanThreads(env) {
 }
 
 async function generateSeoArticle(env) {
-  const result = await callSite(env, "/api/automation/articles?limit=1&source=mixed", { method: "POST", authenticated: true });
+  const result = await callSite(env, "/api/automation/articles", { method: "POST", authenticated: true });
   return {
-    task: "seo-article",
+    task: "content-autopublish",
     ok: result.payload?.ok === true,
-    generated: result.payload?.generated?.length || 0,
-    skipped: result.payload?.skipped || null,
-    article: result.payload?.generated?.[0]?.article?.url || null,
+    enabled: result.payload?.enabled !== false,
+    requested: result.payload?.requested || null,
+    published: result.payload?.published?.length || 0,
+    skippedDuplicates: result.payload?.skippedDuplicates?.length || 0,
+    failedGenerations: result.payload?.failedGenerations?.length || 0,
+    model: result.payload?.model || null,
+    articles: (result.payload?.published || []).map((item) => item.url).filter(Boolean),
   };
 }
 
@@ -119,6 +123,7 @@ async function runTask(task, env, request) {
   if (task === "threads") return postThreadsPrediction(env, new URL(request.url).searchParams.get("lang") || "en");
   if (task === "human-threads") return postHumanThreads(env);
   if (task === "seo-article") return generateSeoArticle(env);
+  if (task === "content-autopublish") return generateSeoArticle(env);
   if (task === "scheduled") {
     const url = new URL(request.url);
     const scheduledTime = url.searchParams.get("at") ? Date.parse(url.searchParams.get("at")) : Date.now();
@@ -150,8 +155,9 @@ async function runScheduled(controller, env) {
   if (cron === "0 */4 * * *") {
     results.push(await runSafely("threads-human-autopost", () => postHumanThreads(env)));
   }
-  if (cron === "30 */12 * * *") {
-    results.push(await runSafely("seo-article", () => generateSeoArticle(env)));
+  const configuredDailyCron = env.CONTENT_AUTOPUBLISH_CRON || "0 6 * * *";
+  if (cron === configuredDailyCron || cron === "0 6 * * *") {
+    results.push(await runSafely("content-autopublish", () => generateSeoArticle(env)));
   }
   return { ok: true, cron, ranAt: new Date().toISOString(), results };
 }

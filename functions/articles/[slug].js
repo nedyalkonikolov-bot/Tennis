@@ -92,22 +92,33 @@ async function buildInternalLinkContext(db, article) {
 }
 
 function articleHtml(article, linkContext = { candidates: [], relatedArticles: [] }) {
-  const canonical = `${SITE_URL}/articles/${article.slug}/`;
-  const title = `${article.title} | TennisTipz`;
-  const description = article.description || article.excerpt || "TennisTipz article with ATP/WTA tennis news, predictions, player context, and responsible betting research.";
+  let seo = {};
+  try { seo = JSON.parse(article.seo_json || "{}"); } catch { seo = {}; }
+  const canonical = seo.canonical_url || `${SITE_URL}/articles/${article.slug}/`;
+  const title = seo.meta_title || `${article.title} | TennisTipz`;
+  const description = seo.meta_description || article.description || article.excerpt || "TennisTipz article with ATP/WTA tennis news, predictions, player context, and responsible betting research.";
   const image = `${SITE_URL}/og-image.png`;
   const schema = {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: article.title,
     description,
-    datePublished: article.created_at,
+    datePublished: article.published_at || article.created_at,
     dateModified: article.updated_at || article.created_at,
     author: { "@type": "Organization", name: "TennisTipz" },
     publisher: { "@type": "Organization", name: "TennisTipz" },
     mainEntityOfPage: canonical,
     image,
+    keywords: article.tags_json || article.keywords_json || undefined,
   };
+  const label = {
+    match_prediction: "Match prediction",
+    player_analysis: "Player analysis",
+    tournament_preview: "Tournament preview",
+    news_reaction: "Tennis news reaction",
+    evergreen_article: "Tennis guide",
+    prediction: "Prediction analysis",
+  }[article.content_type || article.source_type] || "Tennis analysis";
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -116,21 +127,21 @@ function articleHtml(article, linkContext = { candidates: [], relatedArticles: [
 <meta name="robots" content="index, follow, max-image-preview:large">
 <link rel="canonical" href="${canonical}">
 <meta property="og:site_name" content="TennisTipz">
-<meta property="og:title" content="${escapeHtml(article.title)}">
-<meta property="og:description" content="${escapeHtml(description)}">
+<meta property="og:title" content="${escapeHtml(seo.og_title || article.title)}">
+<meta property="og:description" content="${escapeHtml(seo.og_description || description)}">
 <meta property="og:url" content="${canonical}">
 <meta property="og:type" content="article">
 <meta property="og:image" content="${image}">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="${escapeHtml(article.title)}">
-<meta name="twitter:description" content="${escapeHtml(description)}">
+<meta name="twitter:title" content="${escapeHtml(seo.og_title || article.title)}">
+<meta name="twitter:description" content="${escapeHtml(seo.og_description || description)}">
 <meta name="twitter:image" content="${image}">
 <link rel="stylesheet" href="/ad-banners.css?v=navy-rails">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>
 <style>body{margin:0;background:#07111f;color:#e5edf7;font-family:Arial,sans-serif;line-height:1.72}.wrap{max-width:920px;margin:auto;padding:32px 18px}.crumb,.muted{color:#94a3b8}a{color:#bef264}.pill{display:inline-block;background:#bef264;color:#08111f;font-weight:700;padding:6px 10px}.article{font-size:18px}.article h2{margin-top:34px;color:#fff}.article h3{margin-top:26px;color:#fff}.article p{margin:18px 0}.source{background:#111c2d;border:1px solid rgba(255,255,255,.1);padding:18px;margin-top:30px}h1{font-size:clamp(34px,6vw,60px);line-height:1.05}</style>
 </head><body><main class="wrap">
 <p class="crumb"><a href="/">TennisTipz</a> / <a href="/tennis-news/">Tennis news</a></p>
-<span class="pill">${escapeHtml(article.source_type === "prediction" ? "Prediction analysis" : "Tennis news analysis")}</span>
+<span class="pill">${escapeHtml(label)}</span>
 <h1>${escapeHtml(article.title)}</h1>
 <p class="muted">${escapeHtml(article.excerpt || article.description)}</p>
 <article class="article">${linkArticleBody(safeBodyHtml(article.body_html), linkContext.candidates)}</article>
