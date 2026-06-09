@@ -149,6 +149,7 @@ async function findMatchBySlug(db, slug) {
 
 function html(match, slug, request) {
   const title = `${match.player_a_name} vs ${match.player_b_name}`;
+  const pageTitle = `${title} Prediction | TennisTipz ${match.tour} Betting Tips`;
   const canonical = `${SITE_URL}/predictions/${slug}/`;
   const previewImage = socialPreviewImage(request, `${match.match_id || ""}:${slug}`);
   const ai = buildAiPrediction(match);
@@ -227,10 +228,11 @@ function html(match, slug, request) {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtml(title)} Prediction | ${escapeHtml(match.tour)} Tennis Betting Tips</title>
+<title>${escapeHtml(pageTitle)}</title>
 <meta name="description" content="${escapeHtml(description)}">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <link rel="canonical" href="${canonical}">
+<meta property="og:site_name" content="TennisTipz">
 <meta property="og:title" content="${escapeHtml(title)} Prediction">
 <meta property="og:description" content="${escapeHtml(description)}">
 <meta property="og:url" content="${canonical}">
@@ -239,6 +241,8 @@ function html(match, slug, request) {
 <meta property="og:image:width" content="1024">
 <meta property="og:image:height" content="1024">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${escapeHtml(title)} Prediction">
+<meta name="twitter:description" content="${escapeHtml(description)}">
 <meta name="twitter:image" content="${previewImage}">
 <link rel="stylesheet" href="/ad-banners.css?v=navy-rails">
 <script type="application/ld+json">${JSON.stringify(schema)}</script>

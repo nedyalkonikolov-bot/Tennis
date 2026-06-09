@@ -236,13 +236,21 @@ function buildDynamicMeta(route, dbData) {
 function updateDocumentSeo(route, dbData) {
   const meta = buildDynamicMeta(route, dbData);
   const canonicalUrl = `${siteUrl}${meta.canonical}`;
+  const image = `${siteUrl}/og-image.png`;
+  const ogType = ["match-detail", "player-detail", "news", "tips", "betting"].includes(route.id) ? "article" : "website";
   document.title = meta.title;
   setMetaTag('meta[name="description"]', "name", meta.description);
+  setMetaTag('meta[name="robots"]', "name", "index, follow, max-image-preview:large");
+  setMetaTag('meta[property="og:site_name"]', "property", "TennisTipz");
+  setMetaTag('meta[property="og:type"]', "property", ogType);
   setMetaTag('meta[property="og:title"]', "property", meta.title);
   setMetaTag('meta[property="og:description"]', "property", meta.description);
   setMetaTag('meta[property="og:url"]', "property", canonicalUrl);
+  setMetaTag('meta[property="og:image"]', "property", image);
+  setMetaTag('meta[name="twitter:card"]', "name", "summary_large_image");
   setMetaTag('meta[name="twitter:title"]', "name", meta.title);
   setMetaTag('meta[name="twitter:description"]', "name", meta.description);
+  setMetaTag('meta[name="twitter:image"]', "name", image);
 
   let canonical = document.head.querySelector('link[rel="canonical"]');
   if (!canonical) {
