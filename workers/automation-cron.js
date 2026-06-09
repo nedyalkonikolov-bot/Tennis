@@ -120,24 +120,6 @@ function maintenanceOffset(scheduledAt, pageSize, windowSize) {
   return (runIndex * pageSize) % windowSize;
 }
 
-async function syncRecentMatches(env, scheduledAt, tour) {
-  const limit = Number.parseInt(env.DB_MAINTENANCE_RECENT_LIMIT || "20", 10);
-  const windowSize = Number.parseInt(env.DB_MAINTENANCE_PLAYER_WINDOW || "500", 10);
-  const offset = maintenanceOffset(scheduledAt, limit, windowSize);
-  const result = await callSite(env, `/api/db/sync-recent-matches?tour=${encodeURIComponent(tour)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`, { method: "POST", authenticated: true });
-  return {
-    task: `sync-recent-matches-${tour.toLowerCase()}`,
-    ok: result.payload?.ok === true,
-    offset,
-    limit,
-    nextOffset: result.payload?.nextOffset || null,
-    requestedPlayers: result.payload?.requestedPlayers || 0,
-    fetchedEvents: result.payload?.fetchedEvents || 0,
-    matchesUpserted: result.payload?.matchesUpserted || 0,
-    playersWithoutFixtures: result.payload?.playersWithoutFixtures || 0,
-  };
-}
-
 async function syncProfiles(env, scheduledAt, tour) {
   const limit = Number.parseInt(env.DB_MAINTENANCE_PROFILE_LIMIT || "12", 10);
   const windowSize = Number.parseInt(env.DB_MAINTENANCE_PLAYER_WINDOW || "500", 10);
@@ -159,10 +141,8 @@ async function runDbMaintenance(env, scheduledAt = new Date()) {
   const tour = Math.floor(scheduledAt.getUTCHours() / 2) % 2 === 0 ? "ATP" : "WTA";
   const results = [];
   results.push(await runSafely("refresh-predictions", () => refreshPredictions(env)));
-  results.push(await runSafely("db-sync", () => syncDatabase(env)));
   results.push(await runSafely("sync-outcomes", () => syncOutcomes(env, env.DB_MAINTENANCE_OUTCOME_DAYS || 180, env.DB_MAINTENANCE_OUTCOME_LIMIT || 60)));
   results.push(await runSafely("cleanup-recent-matches", () => cleanupRecentMatches(env)));
-  results.push(await runSafely(`sync-recent-matches-${tour.toLowerCase()}`, () => syncRecentMatches(env, scheduledAt, tour)));
   results.push(await runSafely(`sync-profiles-${tour.toLowerCase()}`, () => syncProfiles(env, scheduledAt, tour)));
   return {
     task: "db-maintenance",

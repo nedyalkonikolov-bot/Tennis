@@ -7,15 +7,13 @@ This worker runs TennisTipz automation inside Cloudflare so it does not depend o
 - `*/15 * * * *` refreshes `/api/live-data`, which also upserts the current Cloudbet matches and predictions into D1.
 - `0 */2 * * *` runs database maintenance independent from any PC:
   - `/api/live-data?refresh=1`
-  - `/api/db/sync`
   - `/api/db/sync-outcomes`
   - `/api/db/cleanup-recent`
-  - `/api/db/sync-recent-matches`
   - `/api/db/sync-profiles`
 - `0 */4 * * *` posts one authentic Threads update through `/api/automation/promote?platform=threads&mode=human&limit=1`.
 - `0 6 * * *` runs the OpenAI content autopublishing job.
 
-The two-hour maintenance run rotates ATP/WTA and paginated player offsets so the database stays clean and current without exceeding Cloudflare or API-Tennis limits.
+The two-hour maintenance run rotates ATP/WTA profile offsets so the database stays clean and current without exceeding Cloudflare or API-Tennis limits. The heavier recent-match backfill endpoint is intentionally not in the unattended cron because it can exceed Cloudflare CPU limits; outcome settlement still uses stored recent matches and API-Tennis fixture fallbacks.
 
 ## Deploy from any machine once
 
