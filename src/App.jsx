@@ -37,8 +37,8 @@ const navPages = [
 
 const pageMeta = {
   home: {
-    title: "TennisTipz | Crypto Tennis Betting Tips, Predictions & Player Stats",
-    description: "TennisTipz delivers live tennis predictions, crypto tennis betting insights, Cloudbet odds, ATP and WTA player stats, tennis tips, and market news for responsible bettors.",
+    title: "AI Tennis Predictions, Stats & News | TennisTipz",
+    description: "TennisTipz gives bettors a fast homepage for AI tennis predictions, ATP and WTA stats, tennis news, upcoming tournaments, betting analysis and crypto tennis betting hubs.",
     canonical: "/",
   },
   predictions: {
@@ -432,19 +432,81 @@ function Header({ route, onNavigate }) {
   );
 }
 
+function HomeSection({ eyebrow, title, text, href, onNavigate, children }) {
+  return (
+    <section className="mx-auto max-w-7xl px-5 py-10 md:px-6 md:py-12">
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-sm font-semibold uppercase text-lime-300">{eyebrow}</p>
+          <h2 className="mt-2 text-3xl font-black tracking-tight md:text-4xl">{title}</h2>
+          {text && <p className="mt-3 max-w-3xl leading-7 text-slate-400">{text}</p>}
+        </div>
+        {href && <a href={href} onClick={(event) => { event.preventDefault(); onNavigate(href); }} className="inline-flex w-fit items-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-sm font-bold text-white no-underline hover:bg-white/10">Open hub <ExternalLink size={15} /></a>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function HomePage({ onNavigate, liveData, dbData }) {
+  const publicMatches = useMemo(() => {
+    const liveSource = liveData.matches
+      .filter((match) => ["ATP", "WTA"].includes(match.tour))
+      .filter((match) => {
+        const odds = pickOdds(match);
+        return odds >= minPublicPickOdds && odds <= maxPublicPickOdds && (Number(match.confidence) || 0) >= minPublicPickConfidence;
+      })
+      .map((match) => ({ ...match, prediction: getPrediction(match), anticipation: getAnticipationScore(match), slug: slugify(`${match.tour} ${match.playerA} vs ${match.playerB}`) }));
+    const dbSource = dbData.matchPages.map((match) => ({
+      ...match,
+      playerA: match.player_a_name,
+      playerB: match.player_b_name,
+      predictedWinner: match.predicted_winner_name,
+      predictedWinnerOdds: match.predicted_odds,
+      confidence: match.confidence,
+      startTime: match.start_time || match.match_date || "",
+      live: Boolean(match.live),
+      prediction: getPrediction(match),
+      anticipation: Number(match.confidence) || 0,
+      slug: match.slug,
+      url: match.url,
+    }));
+    return (liveSource.length ? liveSource : dbSource)
+      .filter((match) => match.playerA && match.playerB)
+      .sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0) || b.anticipation - a.anticipation)
+      .slice(0, 6);
+  }, [liveData.matches, dbData.matchPages]);
+
+  const trendingPlayers = useMemo(() => {
+    const players = (dbData.playerPages.length ? dbData.playerPages : liveData.players).map(normalizePlayer);
+    return players
+      .filter((player) => ["ATP", "WTA"].includes(player.tour) && player.rank < 999999)
+      .sort((a, b) => b.predictionMentions - a.predictionMentions || b.recentMatches - a.recentMatches || a.rank - b.rank)
+      .slice(0, 8);
+  }, [dbData.playerPages, liveData.players]);
+
+  const latestNews = useMemo(() => liveData.news.slice(0, 6), [liveData.news]);
+  const featuredAnalysis = useMemo(() => dbData.matchPages.slice(0, 4), [dbData.matchPages]);
+  const upcomingTournaments = [
+    { name: "Wimbledon", slug: "wimbledon", surface: "Grass", note: "Grand Slam grass-court hub" },
+    { name: "US Open", slug: "us-open", surface: "Hard", note: "Grand Slam hard-court hub" },
+    { name: "French Open", slug: "french-open", surface: "Clay", note: "Roland Garros clay-court hub" },
+    { name: "Australian Open", slug: "australian-open", surface: "Hard", note: "Grand Slam hard-court hub" },
+  ];
   const liveMatches = liveData.matches.filter((match) => match.live).length;
-  const upcomingMatches = liveData.matches.length - liveMatches;
+  const upcomingMatches = Math.max(liveData.matches.length - liveMatches, publicMatches.filter((match) => !match.live).length);
+
   return (
     <>
-      <section className="mx-auto grid max-w-7xl gap-10 px-5 py-14 md:grid-cols-[1.05fr_0.95fr] md:px-6 md:py-20">
+      <section className="mx-auto grid max-w-7xl gap-10 px-5 py-12 md:grid-cols-[1.05fr_0.95fr] md:px-6 md:py-16">
         <div className="flex flex-col justify-center">
-          <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-lime-400/30 bg-lime-400/10 px-4 py-2 text-sm text-lime-300"><TrendingUp size={16} /> Cloudbet odds plus last-100-days form</div>
-          <h1 className="max-w-3xl text-4xl font-black leading-tight tracking-tight md:text-6xl">Crypto tennis betting tips, predictions, stats, and news.</h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">TennisTipz combines live tennis betting markets, 100-day player form, top-500 ATP/WTA rankings, Cloudbet prices, crypto betting context and market-relevant tennis headlines.</p>
+          <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-lime-400/30 bg-lime-400/10 px-4 py-2 text-sm text-lime-300"><TrendingUp size={16} /> ATP and WTA predictions updated from live data</div>
+          <h1 className="max-w-3xl text-4xl font-black leading-tight tracking-tight md:text-6xl">AI Tennis Predictions, Stats & News</h1>
+          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">Start with today's strongest tennis predictions, then research player form, tournament context, latest news and crypto betting guides from one fast TennisTipz homepage.</p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <button type="button" onClick={() => onNavigate("/tennis-predictions/")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 shadow-xl shadow-lime-400/20 hover:bg-lime-300">View Predictions</button>
-            <button type="button" onClick={() => onNavigate("/player-stats/")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">Compare Players</button>
+            <button type="button" onClick={() => onNavigate("/tennis-predictions/")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 shadow-xl shadow-lime-400/20 hover:bg-lime-300">Today's Predictions</button>
+            <button type="button" onClick={() => onNavigate("/player-stats/")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">Trending Players</button>
+            <button type="button" onClick={() => onNavigate("/tennis-news/")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">Latest News</button>
           </div>
           <p className="mt-4 text-xs text-slate-500">18+. Tips are opinions, not guaranteed outcomes. Bet responsibly.</p>
         </div>
@@ -458,8 +520,50 @@ function HomePage({ onNavigate, liveData, dbData }) {
               <Metric label="Stored players" value={dbData.summary?.counts?.players || liveData.players.length} />
               <Metric label="Stored predictions" value={dbData.summary?.counts?.predictions || 0} />
             </div>
-            <div className="mt-5 bg-slate-800 p-5 text-sm leading-6 text-slate-400">Predictions are grouped into live and upcoming Cloudbet tennis betting markets and sorted by anticipation.</div>
+            <div className="mt-5 bg-slate-800 p-5 text-sm leading-6 text-slate-400">Prediction pages, player pages, tournament hubs and betting guides are linked from the homepage to help users and search engines reach the important research pages quickly.</div>
           </div>
+        </div>
+      </section>
+      <HomeSection eyebrow="Today's top predictions" title="Best tennis picks on the board" text="High-confidence ATP and WTA prediction pages with odds, player form and match context." href="/tennis-predictions/" onNavigate={onNavigate}>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {publicMatches.map((match) => <a key={match.url || match.slug} href={match.url || `/predictions/${match.slug}/`} onClick={(event) => { event.preventDefault(); onNavigate(match.url || `/predictions/${match.slug}/`); }} className="border border-white/10 bg-white/[0.04] p-5 no-underline hover:border-lime-400/40"><div className="mb-4 flex items-center justify-between gap-3 text-xs text-slate-500"><span>{match.tour} {match.live ? "Live" : "Upcoming"}</span><span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{match.prediction.confidence}%</span></div><h3 className="text-xl font-black text-white">{match.playerA} vs {match.playerB}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{match.tournament || "Tennis"} {match.surface ? `- ${match.surface}` : ""}</p><p className="mt-4 text-sm text-slate-300">AI pick: <span className="font-bold text-white">{match.prediction.pick}</span></p></a>)}
+          {!publicMatches.length && <div className="border border-white/10 bg-white/[0.04] p-6 text-slate-400 md:col-span-2 lg:col-span-3">No public prediction markets are available right now. The Cloudbet feed refreshes automatically when ATP and WTA matches open for betting.</div>}
+        </div>
+      </HomeSection>
+      <HomeSection eyebrow="Trending players" title="ATP and WTA players to research" text="Fast links into player stats, recent form and related prediction pages." href="/player-stats/" onNavigate={onNavigate}>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {trendingPlayers.map((player) => <a key={`${player.tour}-${player.slug}`} href={player.url} onClick={(event) => { event.preventDefault(); onNavigate(player.url); }} className="border border-white/10 bg-slate-900 p-4 no-underline hover:border-lime-400/40"><div className="flex items-center justify-between gap-3"><h3 className="font-bold text-white">{player.name}</h3><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{player.tour}</span></div><p className="mt-2 text-sm text-slate-500">Rank #{player.rank} - {player.country}</p><p className="mt-3 text-sm text-slate-300">100d: {player.recentWins}-{player.recentLosses}{player.recentWinRate !== null ? ` (${player.recentWinRate}%)` : ""}</p></a>)}
+        </div>
+      </HomeSection>
+      <HomeSection eyebrow="Latest tennis news" title="News that can move tennis markets" text="Current ATP and WTA headlines selected for betting research, injuries, form swings and tournament context." href="/tennis-news/" onNavigate={onNavigate}>
+        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+          {latestNews.map((item) => <article key={item.id || item.title} className="overflow-hidden border border-white/10 bg-white/[0.04]"><NewsImage item={item} /><div className="p-5"><div className="mb-3 flex items-center justify-between gap-3 text-xs text-slate-500"><span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category || "News"}</span><span>{item.time}</span></div><h3 className="text-lg font-black leading-tight">{item.title}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{item.summary}</p>{item.url && item.url !== "#" && <a href={item.url} target="_blank" rel="noreferrer" className="mt-4 inline-flex text-sm font-bold text-lime-300">Read source</a>}</div></article>)}
+        </div>
+      </HomeSection>
+      <HomeSection eyebrow="Upcoming tournaments" title="Tournament hubs for the biggest events" text="Grand Slam hubs are built for schedule, surface, key players, news and predictions." href="/tennis-predictions/" onNavigate={onNavigate}>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {upcomingTournaments.map((tournament) => <a key={tournament.slug} href={`/tournaments/${tournament.slug}/`} className="border border-white/10 bg-white/[0.04] p-5 no-underline hover:border-lime-400/40"><CalendarDays className="text-lime-300" size={22} /><h3 className="mt-4 text-xl font-black text-white">{tournament.name}</h3><p className="mt-2 text-sm text-slate-500">{tournament.surface}</p><p className="mt-3 text-sm leading-6 text-slate-400">{tournament.note}</p></a>)}
+        </div>
+      </HomeSection>
+      <HomeSection eyebrow="Featured analysis" title="Deep match pages and betting guides" text="Indexable analysis pages connect predictions, players, tournaments and sportsbook research." href="/tennis-betting-tips/" onNavigate={onNavigate}>
+        <div className="grid gap-4 md:grid-cols-2">
+          {featuredAnalysis.map((match) => <a key={match.url || match.match_id} href={match.url} onClick={(event) => { event.preventDefault(); onNavigate(match.url); }} className="border border-white/10 bg-slate-900 p-5 no-underline hover:border-lime-400/40"><p className="text-xs font-bold uppercase text-lime-300">{match.tour} prediction analysis</p><h3 className="mt-2 text-xl font-black text-white">{match.title}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{match.tournament || "Tennis"} - Pick: {match.predicted_winner_name || "Value watch"}</p></a>)}
+          <a href="/cloudbet-tennis-betting/" className="border border-white/10 bg-slate-900 p-5 no-underline hover:border-lime-400/40"><p className="text-xs font-bold uppercase text-lime-300">Sportsbook guide</p><h3 className="mt-2 text-xl font-black text-white">Cloudbet Tennis Betting</h3><p className="mt-3 text-sm leading-6 text-slate-400">How TennisTipz uses Cloudbet odds alongside player form and prediction confidence.</p></a>
+          <a href="/crypto-tennis-betting/" className="border border-white/10 bg-slate-900 p-5 no-underline hover:border-lime-400/40"><p className="text-xs font-bold uppercase text-lime-300">Crypto guide</p><h3 className="mt-2 text-xl font-black text-white">Crypto Tennis Betting</h3><p className="mt-3 text-sm leading-6 text-slate-400">A responsible guide for researching tennis markets with bitcoin-friendly betting sites.</p></a>
+        </div>
+      </HomeSection>
+      <section className="mx-auto max-w-7xl px-5 py-10 md:px-6">
+        <div className="grid gap-6 border border-white/10 bg-white/[0.04] p-6 md:grid-cols-[1fr_auto] md:items-center">
+          <div>
+            <p className="text-sm font-semibold uppercase text-lime-300">Newsletter placeholder</p>
+            <h2 className="mt-2 text-3xl font-black">Get the next TennisTipz update</h2>
+            <p className="mt-3 max-w-2xl leading-7 text-slate-400">A lightweight signup block is ready for your email provider: daily AI predictions, player form alerts, tournament links and latest tennis news.</p>
+          </div>
+          <form className="flex flex-col gap-3 sm:flex-row" onSubmit={(event) => event.preventDefault()}>
+            <label className="sr-only" htmlFor="home-newsletter-email">Email address</label>
+            <input id="home-newsletter-email" type="email" placeholder="Email address" className="min-h-12 bg-slate-950 px-4 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-500 focus:ring-lime-300" />
+            <button type="submit" className="min-h-12 rounded-xl bg-lime-400 px-5 font-bold text-slate-950 hover:bg-lime-300">Notify me</button>
+          </form>
         </div>
       </section>
       <SeoHubLinks onNavigate={onNavigate} />
@@ -467,7 +571,7 @@ function HomePage({ onNavigate, liveData, dbData }) {
   );
 }
 
-function SeoHubLinks() {
+function SeoHubLinks({ onNavigate }) {
   const links = [
     ["/tennis-predictions-today/", "Tennis Predictions Today", "Daily ATP and WTA picks with odds and form signals."],
     ["/atp-predictions/", "ATP Predictions", "Men's tennis betting tips and Cloudbet markets."],
@@ -479,7 +583,7 @@ function SeoHubLinks() {
     ["/players/atp/", "ATP Player Profiles", "Top ATP player stats and betting research pages."],
     ["/players/wta/", "WTA Player Profiles", "Top WTA player stats and betting research pages."],
   ];
-  return <section className="mx-auto grid max-w-7xl gap-5 px-5 py-10 md:grid-cols-2 lg:grid-cols-3 md:px-6">{links.map(([href, title, text]) => <a key={href} href={href} className="border border-white/10 bg-white/[0.04] p-6 text-left no-underline hover:border-lime-400/40"><h3 className="text-xl font-bold text-white">{title}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{text}</p></a>)}</section>;
+  return <section className="mx-auto max-w-7xl px-5 py-10 md:px-6"><div className="mb-6"><p className="text-sm font-semibold uppercase text-lime-300">Important hubs</p><h2 className="mt-2 text-3xl font-black">Explore TennisTipz</h2></div><div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">{links.map(([href, title, text]) => <a key={href} href={href} onClick={(event) => { event.preventDefault(); onNavigate(href); }} className="border border-white/10 bg-white/[0.04] p-6 text-left no-underline hover:border-lime-400/40"><h3 className="text-xl font-bold text-white">{title}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{text}</p></a>)}</div></section>;
 }
 
 function OddsLink({ match, fallbackBetUrl }) {
