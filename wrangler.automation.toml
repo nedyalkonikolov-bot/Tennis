@@ -5,6 +5,7 @@ compatibility_date = "2026-05-16"
 [triggers]
 crons = [
   "*/15 * * * *",
+  "0 */2 * * *",
   "0 */4 * * *",
   "0 6 * * *"
 ]
@@ -12,3 +13,9 @@ crons = [
 [vars]
 SITE_ORIGIN = "https://tennistipz.win"
 CONTENT_AUTOPUBLISH_CRON = "0 6 * * *"
+DB_MAINTENANCE_CRON = "0 */2 * * *"
+DB_MAINTENANCE_RECENT_LIMIT = "20"
+DB_MAINTENANCE_PROFILE_LIMIT = "12"
+DB_MAINTENANCE_PLAYER_WINDOW = "500"
+DB_MAINTENANCE_OUTCOME_DAYS = "180"
+DB_MAINTENANCE_OUTCOME_LIMIT = "60"

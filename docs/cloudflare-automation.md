@@ -5,8 +5,17 @@ This worker runs TennisTipz automation inside Cloudflare so it does not depend o
 ## Schedules
 
 - `*/15 * * * *` refreshes `/api/live-data`, which also upserts the current Cloudbet matches and predictions into D1.
-- `7 * * * *` posts one prediction to Threads through `/api/automation/promote?platform=threads&limit=1`.
-- `23 2 * * *` runs the heavier `/api/db/sync` job for players, recent matches, predictions, and outcomes.
+- `0 */2 * * *` runs database maintenance independent from any PC:
+  - `/api/live-data?refresh=1`
+  - `/api/db/sync`
+  - `/api/db/sync-outcomes`
+  - `/api/db/cleanup-recent`
+  - `/api/db/sync-recent-matches`
+  - `/api/db/sync-profiles`
+- `0 */4 * * *` posts one authentic Threads update through `/api/automation/promote?platform=threads&mode=human&limit=1`.
+- `0 6 * * *` runs the OpenAI content autopublishing job.
+
+The two-hour maintenance run rotates ATP/WTA and paginated player offsets so the database stays clean and current without exceeding Cloudflare or API-Tennis limits.
 
 ## Deploy from any machine once
 
@@ -21,6 +30,12 @@ Manual test after deployment:
 
 ```bash
 curl "https://tennistipz-automation-cron.<your-subdomain>.workers.dev/?task=all" -H "x-sync-token: <SYNC_TOKEN>"
+```
+
+Manual two-hour DB maintenance test:
+
+```bash
+curl "https://tennistipz-automation-cron.<your-subdomain>.workers.dev/?task=db-maintenance" -H "x-sync-token: <SYNC_TOKEN>"
 ```
 
 ## Optional GitHub Actions deploy

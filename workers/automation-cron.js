@@ -105,6 +105,73 @@ async function generateSeoArticle(env) {
   };
 }
 
+async function cleanupRecentMatches(env) {
+  const result = await callSite(env, "/api/db/cleanup-recent", { method: "POST", authenticated: true });
+  return {
+    task: "cleanup-recent-matches",
+    ok: result.payload?.ok === true,
+    removed: result.payload?.removed || 0,
+    remaining: result.payload?.remaining || 0,
+  };
+}
+
+function maintenanceOffset(scheduledAt, pageSize, windowSize) {
+  const runIndex = Math.floor(scheduledAt.getTime() / (2 * 60 * 60 * 1000));
+  return (runIndex * pageSize) % windowSize;
+}
+
+async function syncRecentMatches(env, scheduledAt, tour) {
+  const limit = Number.parseInt(env.DB_MAINTENANCE_RECENT_LIMIT || "20", 10);
+  const windowSize = Number.parseInt(env.DB_MAINTENANCE_PLAYER_WINDOW || "500", 10);
+  const offset = maintenanceOffset(scheduledAt, limit, windowSize);
+  const result = await callSite(env, `/api/db/sync-recent-matches?tour=${encodeURIComponent(tour)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`, { method: "POST", authenticated: true });
+  return {
+    task: `sync-recent-matches-${tour.toLowerCase()}`,
+    ok: result.payload?.ok === true,
+    offset,
+    limit,
+    nextOffset: result.payload?.nextOffset || null,
+    requestedPlayers: result.payload?.requestedPlayers || 0,
+    fetchedEvents: result.payload?.fetchedEvents || 0,
+    matchesUpserted: result.payload?.matchesUpserted || 0,
+    playersWithoutFixtures: result.payload?.playersWithoutFixtures || 0,
+  };
+}
+
+async function syncProfiles(env, scheduledAt, tour) {
+  const limit = Number.parseInt(env.DB_MAINTENANCE_PROFILE_LIMIT || "12", 10);
+  const windowSize = Number.parseInt(env.DB_MAINTENANCE_PLAYER_WINDOW || "500", 10);
+  const offset = maintenanceOffset(scheduledAt, limit, windowSize);
+  const result = await callSite(env, `/api/db/sync-profiles?tour=${encodeURIComponent(tour)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`, { method: "POST", authenticated: true });
+  return {
+    task: `sync-profiles-${tour.toLowerCase()}`,
+    ok: result.payload?.ok === true,
+    offset,
+    limit,
+    requestedPlayers: result.payload?.requestedPlayers || 0,
+    profilesFetched: result.payload?.profilesFetched || 0,
+    seasonStatsUpserted: result.payload?.seasonStatsUpserted || 0,
+    playersWithoutProfiles: result.payload?.playersWithoutProfiles || 0,
+  };
+}
+
+async function runDbMaintenance(env, scheduledAt = new Date()) {
+  const tour = Math.floor(scheduledAt.getUTCHours() / 2) % 2 === 0 ? "ATP" : "WTA";
+  const results = [];
+  results.push(await runSafely("refresh-predictions", () => refreshPredictions(env)));
+  results.push(await runSafely("db-sync", () => syncDatabase(env)));
+  results.push(await runSafely("sync-outcomes", () => syncOutcomes(env, env.DB_MAINTENANCE_OUTCOME_DAYS || 180, env.DB_MAINTENANCE_OUTCOME_LIMIT || 60)));
+  results.push(await runSafely("cleanup-recent-matches", () => cleanupRecentMatches(env)));
+  results.push(await runSafely(`sync-recent-matches-${tour.toLowerCase()}`, () => syncRecentMatches(env, scheduledAt, tour)));
+  results.push(await runSafely(`sync-profiles-${tour.toLowerCase()}`, () => syncProfiles(env, scheduledAt, tour)));
+  return {
+    task: "db-maintenance",
+    cadence: "every-2-hours",
+    selectedTour: tour,
+    results,
+  };
+}
+
 async function runSafely(task, action) {
   try {
     return await action();
@@ -116,6 +183,7 @@ async function runSafely(task, action) {
 async function runTask(task, env, request) {
   if (task === "refresh") return refreshPredictions(env);
   if (task === "db-sync") return syncDatabase(env);
+  if (task === "db-maintenance") return runDbMaintenance(env, new Date());
   if (task === "sync-outcomes") {
     const url = new URL(request.url);
     return syncOutcomes(env, url.searchParams.get("days") || 180, url.searchParams.get("limit") || 20);
@@ -133,9 +201,8 @@ async function runTask(task, env, request) {
     const results = [];
     results.push(await refreshPredictions(env));
     results.push(await postHumanThreads(env));
-    results.push(await syncOutcomes(env));
+    results.push(await runDbMaintenance(env, new Date()));
     results.push(await generateSeoArticle(env));
-    results.push(await syncDatabase(env));
     return { task: "all", results };
   }
   throw new Error(`Unknown task: ${task}`);
@@ -147,10 +214,10 @@ async function runScheduled(controller, env) {
   const results = [];
   if (cron === "*/15 * * * *") {
     results.push(await runSafely("refresh-predictions", () => refreshPredictions(env)));
-    if (scheduledAt.getUTCHours() === 2 && scheduledAt.getUTCMinutes() === 15) {
-      results.push(await runSafely("db-sync", () => syncDatabase(env)));
-      results.push(await runSafely("sync-outcomes", () => syncOutcomes(env)));
-    }
+  }
+  const configuredMaintenanceCron = env.DB_MAINTENANCE_CRON || "0 */2 * * *";
+  if (cron === configuredMaintenanceCron || cron === "0 */2 * * *") {
+    results.push(await runDbMaintenance(env, scheduledAt));
   }
   if (cron === "0 */4 * * *") {
     results.push(await runSafely("threads-human-autopost", () => postHumanThreads(env)));
