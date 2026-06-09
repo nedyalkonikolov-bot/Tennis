@@ -1,3 +1,5 @@
+import { canonicalTournamentSlug, linkArticleBody, relatedArticleLinks, slugify } from "../lib/internal-links.js";
+
 const SITE_URL = "https://www.tennistipz.win";
 
 function escapeHtml(value = "") {
@@ -10,7 +12,86 @@ function safeBodyHtml(value = "") {
     .replace(/\son\w+="[^"]*"/gi, "");
 }
 
-function articleHtml(article) {
+const MIN_INDEXED_PICK_ODDS = 1.01;
+const MAX_INDEXED_PICK_ODDS = 2.0;
+const MIN_INDEXED_CONFIDENCE = 70;
+
+async function buildInternalLinkContext(db, article) {
+  const text = `${article.title || ""} ${article.description || ""} ${article.excerpt || ""} ${article.body_html || ""}`.toLowerCase();
+  const [players, tournaments, predictions, articles] = await Promise.all([
+    db.prepare(`
+      SELECT name, tour
+      FROM players
+      WHERE tour IN ('ATP', 'WTA') AND current_rank IS NOT NULL
+      ORDER BY current_rank ASC
+      LIMIT 1000
+    `).all().catch(() => ({ results: [] })),
+    db.prepare(`
+      SELECT tournament, GROUP_CONCAT(DISTINCT tour) AS tours
+      FROM matches
+      WHERE tournament IS NOT NULL
+        AND tournament <> ''
+        AND tour IN ('ATP', 'WTA')
+        AND (
+          tour = 'ATP'
+          OR LOWER(tournament) LIKE '%australian open%'
+          OR LOWER(tournament) LIKE '%french open%'
+          OR LOWER(tournament) LIKE '%roland garros%'
+          OR LOWER(tournament) LIKE '%wimbledon%'
+          OR LOWER(tournament) LIKE '%us open%'
+        )
+      GROUP BY tournament
+      ORDER BY MAX(datetime(COALESCE(start_time, updated_at))) DESC
+      LIMIT 250
+    `).all().catch(() => ({ results: [] })),
+    db.prepare(`
+      SELECT m.tour, m.player_a_name, m.player_b_name
+      FROM matches m
+      JOIN predictions p ON p.match_id = m.id
+      WHERE m.tour IN ('ATP', 'WTA')
+        AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) BETWEEN ${MIN_INDEXED_PICK_ODDS} AND ${MAX_INDEXED_PICK_ODDS}
+        AND CAST(COALESCE(p.confidence, 0) AS INTEGER) >= ${MIN_INDEXED_CONFIDENCE}
+        AND LOWER(COALESCE(m.tournament, '')) NOT LIKE '%doubles%'
+        AND COALESCE(m.player_a_name, '') NOT LIKE '%/%'
+        AND COALESCE(m.player_b_name, '') NOT LIKE '%/%'
+      ORDER BY p.created_at DESC, m.updated_at DESC
+      LIMIT 500
+    `).all().catch(() => ({ results: [] })),
+    db.prepare(`
+      SELECT slug, title
+      FROM seo_articles
+      WHERE status = 'published' AND slug <> ?
+      ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
+      LIMIT 24
+    `).bind(article.slug).all().catch(() => ({ results: [] })),
+  ]);
+
+  const candidates = [];
+  for (const player of players.results || []) {
+    if (text.includes(String(player.name || "").toLowerCase())) {
+      candidates.push({ label: player.name, url: `/players/${String(player.tour).toLowerCase()}/${slugify(player.name)}/`, type: "player" });
+    }
+  }
+  for (const tournament of tournaments.results || []) {
+    const name = tournament.tournament || "";
+    if (text.includes(name.toLowerCase())) {
+      candidates.push({ label: name, url: `/tournaments/${canonicalTournamentSlug(name)}/`, type: "tournament" });
+    }
+  }
+  for (const match of predictions.results || []) {
+    const label = `${match.player_a_name} vs ${match.player_b_name}`;
+    if (text.includes(label.toLowerCase())) {
+      candidates.push({ label, url: `/predictions/${slugify(`${match.tour} ${label}`)}/`, type: "prediction" });
+    }
+  }
+  const relatedArticles = relatedArticleLinks(article.slug, articles.results || []);
+  for (const related of relatedArticles) {
+    if (text.includes(related.label.toLowerCase())) candidates.push(related);
+  }
+  return { candidates, relatedArticles };
+}
+
+function articleHtml(article, linkContext = { candidates: [], relatedArticles: [] }) {
   const canonical = `${SITE_URL}/articles/${article.slug}/`;
   const title = `${article.title} | TennisTipz`;
   const description = article.description || article.excerpt || "TennisTipz article with ATP/WTA tennis news, predictions, player context, and responsible betting research.";
@@ -52,7 +133,8 @@ function articleHtml(article) {
 <span class="pill">${escapeHtml(article.source_type === "prediction" ? "Prediction analysis" : "Tennis news analysis")}</span>
 <h1>${escapeHtml(article.title)}</h1>
 <p class="muted">${escapeHtml(article.excerpt || article.description)}</p>
-<article class="article">${safeBodyHtml(article.body_html)}</article>
+<article class="article">${linkArticleBody(safeBodyHtml(article.body_html), linkContext.candidates)}</article>
+${linkContext.relatedArticles.length ? `<section class="source"><strong>Related TennisTipz articles:</strong><ul>${linkContext.relatedArticles.map((item) => `<li><a href="${escapeHtml(item.url)}">${escapeHtml(item.label)}</a></li>`).join("")}</ul></section>` : ""}
 ${article.source_url ? `<div class="source"><strong>Source context:</strong> <a href="${escapeHtml(article.source_url)}" rel="nofollow noreferrer" target="_blank">${escapeHtml(article.source_title || "Original source")}</a></div>` : ""}
 <p class="muted">18+ Bet responsibly. TennisTipz articles are research and opinion, not guaranteed betting outcomes.</p>
 <p><a href="/tennis-predictions/">Latest tennis predictions</a> · <a href="/tennis-news/">Tennis news</a> · <a href="/player-stats/">Player stats</a></p>
@@ -73,7 +155,8 @@ export async function onRequestGet({ params, env }) {
     if (!String(error.message || "").includes("seo_articles")) throw error;
   }
   if (!article) return new Response("Article not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
-  return new Response(articleHtml(article), {
+  const linkContext = await buildInternalLinkContext(env.TENNIS_DB, article);
+  return new Response(articleHtml(article, linkContext), {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "public, max-age=300, stale-while-revalidate=1800",

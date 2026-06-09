@@ -11,6 +11,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test:links": "node tests/internal-links.test.js",
     "threads:dry-run": "node src/index.js --dry-run",
     "threads:post": "node src/index.js"
   },
