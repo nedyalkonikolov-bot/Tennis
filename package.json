@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:links": "node tests/internal-links.test.js",
+    "validate:seo": "node tests/seo-validation.js",
     "threads:dry-run": "node src/index.js --dry-run",
     "threads:post": "node src/index.js"
   },
