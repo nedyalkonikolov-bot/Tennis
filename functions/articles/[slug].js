@@ -12,6 +12,20 @@ function safeBodyHtml(value = "") {
     .replace(/\son\w+="[^"]*"/gi, "");
 }
 
+function jsonLd(data) {
+  return JSON.stringify(data).replace(/</g, "\\u003c");
+}
+
+function parseJsonArray(value) {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter(Boolean).map(String) : undefined;
+  } catch {
+    return String(value).split(",").map((item) => item.trim()).filter(Boolean) || undefined;
+  }
+}
+
 const MIN_INDEXED_PICK_ODDS = 1.01;
 const MAX_INDEXED_PICK_ODDS = 2.0;
 const MIN_INDEXED_CONFIDENCE = 70;
@@ -98,18 +112,35 @@ function articleHtml(article, linkContext = { candidates: [], relatedArticles: [
   const title = seo.meta_title || `${article.title} | TennisTipz`;
   const description = seo.meta_description || article.description || article.excerpt || "TennisTipz article with ATP/WTA tennis news, predictions, player context, and responsible betting research.";
   const image = `${SITE_URL}/og-image.png`;
+  const organization = {
+    "@type": "Organization",
+    "@id": `${SITE_URL}/#organization`,
+    name: "TennisTipz",
+    url: `${SITE_URL}/`,
+    logo: { "@type": "ImageObject", url: `${SITE_URL}/favicon.svg` },
+  };
   const schema = {
     "@context": "https://schema.org",
     "@type": "Article",
+    "@id": `${canonical}#article`,
     headline: article.title,
     description,
     datePublished: article.published_at || article.created_at,
     dateModified: article.updated_at || article.created_at,
-    author: { "@type": "Organization", name: "TennisTipz" },
-    publisher: { "@type": "Organization", name: "TennisTipz" },
-    mainEntityOfPage: canonical,
+    author: { "@id": `${SITE_URL}/#organization` },
+    publisher: { "@id": `${SITE_URL}/#organization` },
+    mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
     image,
-    keywords: article.tags_json || article.keywords_json || undefined,
+    keywords: parseJsonArray(article.tags_json || article.keywords_json),
+  };
+  const breadcrumbSchema = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "TennisTipz", item: `${SITE_URL}/` },
+      { "@type": "ListItem", position: 2, name: "Tennis news", item: `${SITE_URL}/tennis-news/` },
+      { "@type": "ListItem", position: 3, name: article.title, item: canonical },
+    ],
   };
   const label = {
     match_prediction: "Match prediction",
@@ -137,7 +168,7 @@ function articleHtml(article, linkContext = { candidates: [], relatedArticles: [
 <meta name="twitter:description" content="${escapeHtml(seo.og_description || description)}">
 <meta name="twitter:image" content="${image}">
 <link rel="stylesheet" href="/ad-banners.css?v=navy-rails">
-<script type="application/ld+json">${JSON.stringify(schema)}</script>
+<script type="application/ld+json">${jsonLd({ "@context": "https://schema.org", "@graph": [organization, schema, breadcrumbSchema] })}</script>
 <style>body{margin:0;background:#07111f;color:#e5edf7;font-family:Arial,sans-serif;line-height:1.72}.wrap{max-width:920px;margin:auto;padding:32px 18px}.crumb,.muted{color:#94a3b8}a{color:#bef264}.pill{display:inline-block;background:#bef264;color:#08111f;font-weight:700;padding:6px 10px}.article{font-size:18px}.article h2{margin-top:34px;color:#fff}.article h3{margin-top:26px;color:#fff}.article p{margin:18px 0}.source{background:#111c2d;border:1px solid rgba(255,255,255,.1);padding:18px;margin-top:30px}h1{font-size:clamp(34px,6vw,60px);line-height:1.05}</style>
 </head><body><main class="wrap">
 <p class="crumb"><a href="/">TennisTipz</a> / <a href="/tennis-news/">Tennis news</a></p>

@@ -229,15 +229,17 @@ function renderPlayerPage(player, latest, related, news, request) {
   const surfaces = surfaceRows(player);
   const personSchema = {
     "@context": "https://schema.org",
-    "@type": "Person",
+    "@type": ["Person", "SportsPerson"],
+    "@id": `${canonical}#person`,
     name: player.name,
     url: canonical,
-    image,
+    image: player.player_logo || undefined,
     nationality: player.country || undefined,
     birthDate: isoDateOrUndefined(player.player_bday)?.slice(0, 10),
     jobTitle: "Professional tennis player",
     sport: "Tennis",
     description,
+    mainEntityOfPage: canonical,
   };
   const breadcrumbSchema = {
     "@context": "https://schema.org",

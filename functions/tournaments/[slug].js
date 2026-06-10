@@ -217,9 +217,13 @@ function renderTournamentPage(summary, matches, news) {
   const overview = tournamentOverview(summary, matches);
   const startDate = isoDateOrUndefined(summary.first_start);
   const endDate = isoDateOrUndefined(summary.last_start);
+  const competitors = [...new Set(matches.flatMap((match) => [match.player_a_name, match.player_b_name]).filter(Boolean))]
+    .slice(0, 12)
+    .map((name) => ({ "@type": "Person", name, sport: "Tennis" }));
   const schema = {
     "@context": "https://schema.org",
-    "@type": "SportsEvent",
+    "@type": ["Event", "SportsEvent"],
+    "@id": `${canonical}#event`,
     name: summary.tournament,
     url: canonical,
     sport: "Tennis",
@@ -227,8 +231,9 @@ function renderTournamentPage(summary, matches, news) {
     startDate,
     endDate,
     eventStatus: "https://schema.org/EventScheduled",
-    location: { "@type": "Place", name: location },
-    organizer: { "@type": "Organization", name: "ATP/WTA tennis" },
+    location: meta.location ? { "@type": "Place", name: meta.location } : undefined,
+    eventAttendanceMode: meta.location ? "https://schema.org/OfflineEventAttendanceMode" : undefined,
+    performer: competitors.length ? competitors : undefined,
   };
   const breadcrumbSchema = {
     "@context": "https://schema.org",

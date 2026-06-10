@@ -287,7 +287,7 @@ function updateStructuredData(route, liveData, dbData) {
       "@id": `${siteUrl}/#organization`,
       name: "TennisTipz",
       url: `${siteUrl}/`,
-      logo: `${siteUrl}/favicon.svg`,
+      logo: { "@type": "ImageObject", url: `${siteUrl}/favicon.svg` },
     },
     {
       "@type": "WebSite",
@@ -298,6 +298,15 @@ function updateStructuredData(route, liveData, dbData) {
       audience: { "@type": "PeopleAudience", requiredMinAge: 18 },
     },
   ];
+  const routeName = pageMeta[route.id]?.title?.replace(/\s\| TennisTipz$/, "") || "TennisTipz";
+  const routePath = pageMeta[route.id]?.canonical || window.location.pathname;
+  graph.push({
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "TennisTipz", item: `${siteUrl}/` },
+      { "@type": "ListItem", position: 2, name: routeName, item: `${siteUrl}${routePath}` },
+    ],
+  });
 
   if (route.id === "match-detail") {
     const match = dbData.matchPages.find((item) => item.slug === route.slug);
@@ -309,10 +318,10 @@ function updateStructuredData(route, liveData, dbData) {
         sport: "Tennis",
         eventStatus: match.live ? "https://schema.org/EventInProgress" : "https://schema.org/EventScheduled",
         startDate: isoDateOrUndefined(match.start_time),
-        location: { "@type": "Place", name: match.tournament || "Tennis tournament" },
+        location: match.tournament ? { "@type": "Place", name: match.tournament } : undefined,
         competitor: [
-          { "@type": "SportsTeam", name: match.player_a_name },
-          { "@type": "SportsTeam", name: match.player_b_name },
+          { "@type": "Person", name: match.player_a_name, sport: "Tennis" },
+          { "@type": "Person", name: match.player_b_name, sport: "Tennis" },
         ],
       });
     }
@@ -322,13 +331,13 @@ function updateStructuredData(route, liveData, dbData) {
     const player = dbData.playerPages.map(normalizePlayer).find((item) => item.tour === route.tour && item.slug === route.slug);
     if (player) {
       graph.push({
-        "@type": "Person",
+        "@type": ["Person", "SportsPerson"],
         name: player.name,
         url: `${siteUrl}${player.url}`,
-        nationality: player.country,
+        nationality: player.country || undefined,
         jobTitle: "Professional tennis player",
         sport: "Tennis",
-        image: player.photo || `${siteUrl}/og-image.png`,
+        image: player.photo || undefined,
       });
     }
   }
@@ -349,8 +358,9 @@ function updateStructuredData(route, liveData, dbData) {
       name: `${match.playerA} vs ${match.playerB}`,
       sport: "Tennis",
       eventStatus: match.live ? "https://schema.org/EventInProgress" : "https://schema.org/EventScheduled",
-      location: { "@type": "Place", name: match.tournament || "Tennis tournament" },
-      competitor: [{ "@type": "SportsTeam", name: match.playerA }, { "@type": "SportsTeam", name: match.playerB }],
+      startDate: isoDateOrUndefined(match.startIso || match.startTime),
+      location: match.tournament ? { "@type": "Place", name: match.tournament } : undefined,
+      competitor: [{ "@type": "Person", name: match.playerA, sport: "Tennis" }, { "@type": "Person", name: match.playerB, sport: "Tennis" }],
     })));
   }
 
