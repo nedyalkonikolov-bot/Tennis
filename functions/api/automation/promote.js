@@ -601,6 +601,15 @@ function normalizeTextForDuplicate(text) {
     .trim();
 }
 
+function canonicalMatchTargetId(match) {
+  const players = [match?.player_a_name || "", match?.player_b_name || ""]
+    .map(normalizeTextForDuplicate)
+    .sort()
+    .join("-vs-");
+  const date = String(match?.start_time || "").slice(0, 10) || "date-tbc";
+  return `prediction:${String(match?.tour || "tennis").toLowerCase()}:${players}:${date}`;
+}
+
 function tokenOverlap(left, right) {
   const leftTokens = new Set(normalizeTextForDuplicate(left).split(" ").filter((token) => token.length > 3));
   const rightTokens = normalizeTextForDuplicate(right).split(" ").filter((token) => token.length > 3);
@@ -642,7 +651,7 @@ function cleanHumanPostText(text) {
 function hasUnsupportedHumanClaim(candidate, text) {
   if (candidate.type !== "prediction") return false;
   if (!candidate.match?.live && /\b(what a start|come out firing|today|right now|so far|already)\b/i.test(String(text || ""))) return true;
-  if (/\b(confidence level|confidence sitting|recent confidence|deep run|higher-ranked players|gut feeling|crucial clay)\b/i.test(String(text || ""))) return true;
+  if (/\b(confidence level|confidence sitting|recent confidence|deep run|higher-ranked players|gut feeling|crucial clay|clay has|clay court game|skills on clay)\b/i.test(String(text || ""))) return true;
   if (candidate.match?.ai_summary || candidate.match?.ai_betting_angle) return false;
   return /\b(recent form|this season|lately|has improved|improved significantly|building momentum|momentum|footwork|groundstrokes|clay court game|skills on clay|defense|statistically|historically|numbers show|stats say)\b/i.test(String(text || ""));
 }
@@ -666,7 +675,7 @@ function fallbackHumanVariants(candidate) {
     ? `${match.player_a_name} is ranked ${match.player_a_rank}, ${match.player_b_name} is ${match.player_b_rank}`
     : title;
   return [
-    { type: "hot_take", text: `${title} feels closer than the rankings make it look. ${rankLine}, but clay has a way of making matches awkward fast. Am I overthinking it?` },
+    { type: "hot_take", text: `${title} feels closer than the rankings make it look. ${rankLine}, but this has the shape of an awkward match fast. Am I overthinking it?` },
     { type: "stat_angle", text: `${rankLine}. That should matter, but this still feels like the kind of matchup where one nervous service game changes the whole read.` },
     { type: "live_match_reaction", text: `${title} has that tight-match feel where every hold could start to feel heavy. Who would you trust more if it gets messy late?` },
     { type: "debate_question", text: `${title}: who is actually being underrated here? I can see the case for ${pick}, but I do not think this is automatic.` },
@@ -716,7 +725,7 @@ async function callOpenAiHumanVariants(env, candidate) {
       input: [
         {
           role: "system",
-          content: `Create authentic human tennis-fan Threads posts for TennisTipz. Use only supplied fresh ESPN/TennisHead news or current live/upcoming Top ATP/WTA 30 match context. Return strict JSON only: {"variants":[{"type":"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction","text":"..."}]}. Create exactly 5 variants, one of each type. Max 450 characters each. Do not invent stats, recent form, injuries, technique changes, momentum, or season trends unless they are explicitly supplied. Never refer to news older than ${NEWS_MAX_AGE_HOURS} hours. No links, URLs, affiliate names, referral language, odds, betting offers, or calls to bet. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, like a real tennis fan starting a conversation. Mention tennistipz.win only rarely and naturally.`,
+          content: `Create authentic human tennis-fan Threads posts for TennisTipz. Use only supplied fresh ESPN/TennisHead news or current live/upcoming Top ATP/WTA 30 match context. Return strict JSON only: {"variants":[{"type":"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction","text":"..."}]}. Create exactly 5 variants, one of each type. Max 450 characters each. Do not invent stats, recent form, injuries, technique changes, momentum, surface, or season trends unless they are explicitly supplied. Do not mention clay, grass, hard court, or surface unless the supplied prediction.surface is present and certain. Never refer to news older than ${NEWS_MAX_AGE_HOURS} hours. No links, URLs, affiliate names, referral language, odds, betting offers, or calls to bet. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, like a real tennis fan starting a conversation. Mention tennistipz.win only rarely and naturally.`,
         },
         { role: "user", content: JSON.stringify(input) },
       ],
@@ -964,6 +973,18 @@ async function isAlreadyPosted(db, platform, targetId) {
   return Boolean(result);
 }
 
+async function isAlreadyPostedOnThreads(db, targetId, hours = 168) {
+  const result = await db.prepare(`
+    SELECT id
+    FROM automation_posts
+    WHERE (platform = 'threads' OR platform LIKE 'threads:%')
+      AND target_id = ?
+      AND created_at >= datetime('now', ?)
+    LIMIT 1
+  `).bind(targetId, `-${hours} hours`).first();
+  return Boolean(result);
+}
+
 async function recordAutomationPost(db, platform, targetId, url, payload) {
   await db.prepare(`
     INSERT OR IGNORE INTO automation_posts (id, platform, target_type, target_id, url, status, response_json)
@@ -979,6 +1000,17 @@ async function getRecentAutomationPosts(db, platform, hours = 24) {
       AND created_at >= datetime('now', ?)
     ORDER BY created_at DESC
   `).bind(platform, `-${hours} hours`).all();
+  return result.results || [];
+}
+
+async function getRecentThreadAutomationPosts(db, hours = 24) {
+  const result = await db.prepare(`
+    SELECT platform, target_type, target_id, url, response_json, created_at
+    FROM automation_posts
+    WHERE (platform = 'threads' OR platform LIKE 'threads:%')
+      AND created_at >= datetime('now', ?)
+    ORDER BY created_at DESC
+  `).bind(`-${hours} hours`).all();
   return result.results || [];
 }
 
@@ -1035,7 +1067,7 @@ function selectHumanCandidate(matches, newsHooks) {
   for (const match of matches.slice(0, 8)) {
     candidates.push({
       type: "prediction",
-      targetId: `prediction:${match.prediction_id}`,
+      targetId: canonicalMatchTargetId(match),
       url: predictionUrl(match, "human"),
       match,
     });
@@ -1056,9 +1088,9 @@ function selectHumanCandidate(matches, newsHooks) {
 async function promoteHumanThreads(request, env, dryRun) {
   const db = env.TENNIS_DB;
   await ensureAutomationTable(db);
-  const recentRows = await getRecentAutomationPosts(db, HUMAN_THREADS_PLATFORM, 72);
+  const recentRows = await getRecentThreadAutomationPosts(db, 168);
   const postedTargets = new Set(recentRows.map((row) => row.target_id));
-  const matches = (await getPostableMatches(db, 30)).filter((match) => !postedTargets.has(`prediction:${match.prediction_id}`));
+  const matches = (await getPostableMatches(db, 30)).filter((match) => !postedTargets.has(canonicalMatchTargetId(match)) && !postedTargets.has(`prediction:${match.prediction_id}`));
   const topPlayerNames = await getTopPlayerNames(db);
   const newsHooks = (await getRecentNewsHooks(16))
     .filter((news) => !postedTargets.has(`news:${slugify(news.url || news.title || news.id || "espn")}`))
@@ -1155,6 +1187,7 @@ async function promote(request, env) {
   const threads = [];
 
   for (const match of matches) {
+    const canonicalTargetId = canonicalMatchTargetId(match);
     const postStyle = choosePostStyle(match, requestedPostStyle);
     const newsHook = postStyle === "news" ? chooseNewsHook(match, newsHooks) : null;
     const tweet = useAiPosts
@@ -1164,7 +1197,7 @@ async function promote(request, env) {
       ? await composeAiSocialPost(env, match, { platform: "threads", referral: referralOverride, language: threadsLanguage, newsHook, postStyle })
       : composeThreadsPost(match, { referral: referralOverride, language: threadsLanguage, newsHook, postStyle });
     const twitterPosted = await isAlreadyPosted(db, "twitter", match.prediction_id);
-    const threadsPosted = await isAlreadyPosted(db, threadsPlatform, match.prediction_id);
+    const threadsPosted = await isAlreadyPostedOnThreads(db, canonicalTargetId) || await isAlreadyPosted(db, threadsPlatform, match.prediction_id);
 
     if (postTwitterEnabled && !twitterPosted && tweets.length < limit) {
       if (dryRun) {
@@ -1182,7 +1215,7 @@ async function promote(request, env) {
       } else {
         const result = await postThreads(env, threadsPost.text);
         threads.push({ predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, result });
-        if (result.ok) await recordAutomationPost(db, threadsPlatform, match.prediction_id, threadsPost.url, result.payload);
+        if (result.ok) await recordAutomationPost(db, threadsPlatform, canonicalTargetId, threadsPost.url, result.payload);
       }
     }
 
