@@ -389,7 +389,7 @@ function Metric({ label, value, helper }) {
 }
 
 function NewsImage({ item }) {
-  if (item.imageUrl) return <img src={item.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-48 w-full object-cover" />;
+  if (item.imageUrl) return <img src={item.imageUrl} alt="" width="640" height="360" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-48 w-full object-cover" />;
   return <div className="flex h-48 w-full items-center justify-center bg-slate-900"><Newspaper size={42} className="text-lime-300/70" /></div>;
 }
 
@@ -592,7 +592,7 @@ function OddsLink({ match, fallbackBetUrl }) {
 }
 
 function BcGameTopBanner() {
-  return <a href={bcGameUrl} target="_blank" rel="noreferrer sponsored" aria-label="Open BC.Game sponsored offer" className="mb-8 block overflow-hidden rounded-lg border border-lime-300/20 bg-slate-900 shadow-2xl shadow-black/30 transition hover:-translate-y-0.5 hover:brightness-105"><img src="/ads/bc-game-banner-970x250.gif" alt="BC.Game crypto casino sponsored offer" width="970" height="250" loading="lazy" className="mx-auto block h-auto w-full max-w-[970px]" /></a>;
+  return <a href={bcGameUrl} target="_blank" rel="noreferrer sponsored" aria-label="Open BC.Game sponsored offer" className="mb-8 block overflow-hidden rounded-lg border border-lime-300/20 bg-slate-900 shadow-2xl shadow-black/30 transition hover:-translate-y-0.5 hover:brightness-105"><img src="/ads/bc-game-banner-970x250.gif" alt="BC.Game crypto casino sponsored offer" width="970" height="250" loading="lazy" decoding="async" fetchPriority="low" className="mx-auto block h-auto w-full max-w-[970px]" /></a>;
 }
 
 function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
@@ -726,16 +726,25 @@ export default function TennisTipzApp() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  async function loadPlayerPages() {
+    const [atpPlayersResponse, wtaPlayersResponse] = await Promise.allSettled([
+      fetch("/api/db/player-pages?tour=ATP&limit=500"),
+      fetch("/api/db/player-pages?tour=WTA&limit=500"),
+    ]);
+    const players = [];
+    if (atpPlayersResponse.status === "fulfilled" && atpPlayersResponse.value.ok) players.push(...((await atpPlayersResponse.value.json()).players || []));
+    if (wtaPlayersResponse.status === "fulfilled" && wtaPlayersResponse.value.ok) players.push(...((await wtaPlayersResponse.value.json()).players || []));
+    if (players.length) setDbData((current) => ({ ...current, playerPages: players }));
+  }
+
   async function loadLiveData() {
     setLoading(true);
     setError("");
     try {
-      const [liveResponse, summaryResponse, matchPagesResponse, atpPlayersResponse, wtaPlayersResponse] = await Promise.allSettled([
+      const [liveResponse, summaryResponse, matchPagesResponse] = await Promise.allSettled([
         fetch("/api/live-data"),
         fetch("/api/db/summary"),
         fetch("/api/db/match-pages?limit=100"),
-        fetch("/api/db/player-pages?tour=ATP&limit=500"),
-        fetch("/api/db/player-pages?tour=WTA&limit=500"),
       ]);
 
       if (liveResponse.status === "fulfilled" && liveResponse.value.ok) {
@@ -752,11 +761,8 @@ export default function TennisTipzApp() {
       const nextDbData = { ...initialDbData };
       if (summaryResponse.status === "fulfilled" && summaryResponse.value.ok) nextDbData.summary = await summaryResponse.value.json();
       if (matchPagesResponse.status === "fulfilled" && matchPagesResponse.value.ok) { const payload = await matchPagesResponse.value.json(); nextDbData.matchPages = payload.matches || []; }
-      const players = [];
-      if (atpPlayersResponse.status === "fulfilled" && atpPlayersResponse.value.ok) players.push(...((await atpPlayersResponse.value.json()).players || []));
-      if (wtaPlayersResponse.status === "fulfilled" && wtaPlayersResponse.value.ok) players.push(...((await wtaPlayersResponse.value.json()).players || []));
-      nextDbData.playerPages = players;
       setDbData(nextDbData);
+      if (["stats", "player-detail"].includes(route.id)) await loadPlayerPages();
     } catch (loadError) {
       setLiveData(initialLiveData);
       setError(loadError.message);
@@ -766,6 +772,9 @@ export default function TennisTipzApp() {
   }
 
   useEffect(() => { loadLiveData(); }, []);
+  useEffect(() => {
+    if (["stats", "player-detail"].includes(route.id) && !dbData.playerPages.length) loadPlayerPages();
+  }, [route.id, dbData.playerPages.length]);
   useEffect(() => { updateDocumentSeo(route, dbData); updateStructuredData(route, liveData, dbData); }, [route, liveData, dbData]);
   useEffect(() => { const onPopState = () => setRoute(getRoute(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
 

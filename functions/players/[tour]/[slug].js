@@ -279,7 +279,7 @@ function renderPlayerPage(player, latest, related, news, request) {
     <p class="muted">${escapeHtml(bio)}</p>
     <a class="link-cloud" href="${CLOUDBET_URL}" rel="sponsored nofollow noreferrer" target="_blank">Compare tennis odds</a>
   </div>
-  <div>${player.player_logo ? `<img class="avatar" src="${escapeHtml(player.player_logo)}" alt="${escapeHtml(player.name)} tennis player photo">` : `<div class="avatar"></div>`}</div>
+  <div>${player.player_logo ? `<img class="avatar" src="${escapeHtml(player.player_logo)}" alt="${escapeHtml(player.name)} tennis player photo" width="260" height="260" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : `<div class="avatar"></div>`}</div>
 </section>
 <section class="section grid">
   ${renderMetric("Rank", player.current_rank ? `#${player.current_rank}` : "N/A", player.country || "Country unavailable")}
