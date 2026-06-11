@@ -10,7 +10,6 @@ const DEFAULT_OPENAI_PREDICTION_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_NEWS_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_PREMIUM_MODEL = "gpt-5.4";
 const DEFAULT_BET_URL = "https://www.cloudbet.com/en/sports/tennis";
-const DEFAULT_NEWS_IMAGE = "https://images.tennis.com/image/upload/t_q-best/tenniscom-prd/colectyfnidvc41bazww.jpg";
 const PLAYER_CACHE_KEY = "players:standings:v1";
 const PLAYER_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PLAYER_LIMIT = 500;
@@ -31,7 +30,7 @@ const fallbackPlayers = [
   { id: "demo-2", playerKey: "", name: "Carlos Alcaraz", sex: "ATP", tour: "ATP", rank: 2, points: 8850, country: "Spain", movement: "same", form: 84, hold: 88, breakRate: 31, clay: 91, hard: 86, grass: 83, trend: "+3" },
   { id: "demo-3", playerKey: "", name: "Iga Swiatek", sex: "WTA", tour: "WTA", rank: 1, points: 9200, country: "Poland", movement: "same", form: 92, hold: 82, breakRate: 46, clay: 96, hard: 88, grass: 73, trend: "+8" },
 ];
-const fallbackNews = [{ id: "fallback-news", title: "Tennis news loading", category: "News", time: "Latest", summary: "Live Tennis.com RSS headlines will appear after the feed responds.", url: "#", imageUrl: DEFAULT_NEWS_IMAGE, source: "TennisTipz" }];
+const fallbackNews = [{ id: "fallback-news", title: "Tennis news loading", category: "News", time: "Latest", summary: "Live ESPN and TennisHead RSS headlines will appear after the feed responds.", url: "#", imageUrl: "", source: "TennisTipz" }];
 
 function json(payload, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=300, stale-while-revalidate=900", ...extraHeaders } });
@@ -656,7 +655,13 @@ async function syncLivePredictionsToDb(env, matches, diagnostics) {
   diagnostics.dbPredictionsUpserted = validMatches.length;
 }
 function rssTag(item, tag) { return cleanText(item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`, "i"))?.[1] || ""); }
-function rssImage(item) { return item.match(/<media:content[^>]+url=["']([^"']+)/i)?.[1] || item.match(/<enclosure[^>]+url=["']([^"']+)/i)?.[1] || DEFAULT_NEWS_IMAGE; }
+function rssImage(item) {
+  return item.match(/<media:content[^>]+url=["']([^"']+)/i)?.[1]
+    || item.match(/<media:thumbnail[^>]+url=["']([^"']+)/i)?.[1]
+    || item.match(/<enclosure[^>]+url=["']([^"']+)/i)?.[1]
+    || item.match(/<image[^>]+href=["']([^"']+)/i)?.[1]
+    || "";
+}
 function newsCategory(title) { return /rank|stat/i.test(title) ? "Trend" : /open|masters|draw|schedule|garros|wimbledon|slam/i.test(title) ? "Tournament" : /injur|withdraw|fitness|return/i.test(title) ? "Player News" : "News"; }
 function formatNewsTime(date) { return Number.isNaN(date.getTime()) ? "Latest" : date.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
 function parseJinaMarkdownNews(text, feed) {
@@ -666,7 +671,7 @@ function parseJinaMarkdownNews(text, feed) {
       const title = cleanText(match[1]);
       const url = match[2];
       const published = new Date(match[3]);
-      return { id: url || `${feed.name}-${index}`, title, category: newsCategory(title), time: formatNewsTime(published), publishedAt: Number.isNaN(published.getTime()) ? "" : published.toISOString(), summary: "Read the latest TennisHead update.", url, imageUrl: DEFAULT_NEWS_IMAGE, source: feed.name };
+      return { id: url || `${feed.name}-${index}`, title, category: newsCategory(title), time: formatNewsTime(published), publishedAt: Number.isNaN(published.getTime()) ? "" : published.toISOString(), summary: "Read the latest TennisHead update.", url, imageUrl: "", source: feed.name };
     });
 }
 async function getNewsFromFeed(feed) {

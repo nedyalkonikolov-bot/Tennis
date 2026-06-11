@@ -31,7 +31,7 @@ const navPages = [
   { id: "predictions", label: "Predictions", path: "/tennis-predictions/", icon: Target },
   { id: "tips", label: "Betting Tips", path: "/tennis-betting-tips/", icon: Gauge },
   { id: "stats", label: "Player Stats", path: "/player-stats/", icon: Users },
-  { id: "news", label: "News", path: "/tennis-news/", icon: Newspaper },
+  { id: "news", label: "News & Articles", path: "/tennis-news/", icon: Newspaper },
   { id: "betting", label: "Betting Sites", path: "/betting-sites/", icon: Landmark },
 ];
 
@@ -52,8 +52,8 @@ const pageMeta = {
     canonical: "/player-stats/",
   },
   news: {
-    title: "Tennis News for Betting | ATP, WTA & Market Updates",
-    description: "Latest tennis news for betting research, including ATP and WTA player updates, tournament context, market angles, and injury signals.",
+    title: "Tennis News & Articles | ATP, WTA & Market Updates",
+    description: "Latest tennis news and TennisTipz original articles for ATP and WTA betting research, tournament context, market angles, and player updates.",
     canonical: "/tennis-news/",
   },
   betting: {
@@ -94,7 +94,7 @@ const matchCategories = [
   { id: "live", label: "Live" },
   { id: "upcoming", label: "Upcoming" },
 ];
-const newsCategories = ["All", "Setup", "News", "Tournament", "Player News", "Market", "Trend"];
+const newsCategories = ["All", "News", "Articles", "Prediction Article", "Player Analysis", "Tournament Preview", "News Reaction", "Tournament", "Player News", "Market", "Trend"];
 
 const initialLiveData = {
   generatedAt: null,
@@ -112,6 +112,7 @@ const initialDbData = {
   recentResults: [],
   matchPages: [],
   playerPages: [],
+  articles: [],
 };
 
 function slugify(value = "") {
@@ -399,8 +400,23 @@ function Metric({ label, value, helper }) {
 }
 
 function NewsImage({ item }) {
-  if (item.imageUrl) return <img src={item.imageUrl} alt="" width="640" height="360" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-48 w-full object-cover" />;
+  const src = item.kind === "article" ? "/og-image.png" : item.imageUrl;
+  if (src) return <img src={src} alt="" width="640" height="360" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-48 w-full object-cover" />;
   return <div className="flex h-48 w-full items-center justify-center bg-slate-900"><Newspaper size={42} className="text-lime-300/70" /></div>;
+}
+
+function mergeNewsAndArticles(news = [], articles = []) {
+  const normalizedNews = news.map((item) => ({ ...item, kind: item.kind || "news" }));
+  const normalizedArticles = articles.map((item) => ({ ...item, kind: "article", imageUrl: "/og-image.png", source: item.source || "TennisTipz" }));
+  const seen = new Set();
+  return [...normalizedArticles, ...normalizedNews]
+    .filter((item) => {
+      const key = item.url || item.id || item.title;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
 }
 
 function DataStatus({ liveData, loading, error, onRefresh }) {
@@ -495,7 +511,7 @@ function HomePage({ onNavigate, liveData, dbData }) {
       .slice(0, 8);
   }, [dbData.playerPages, liveData.players]);
 
-  const latestNews = useMemo(() => liveData.news.slice(0, 6), [liveData.news]);
+  const latestNews = useMemo(() => mergeNewsAndArticles(liveData.news, dbData.articles).slice(0, 6), [liveData.news, dbData.articles]);
   const featuredAnalysis = useMemo(() => dbData.matchPages.slice(0, 4), [dbData.matchPages]);
   const upcomingTournaments = [
     { name: "Wimbledon", slug: "wimbledon", surface: "Grass", note: "Grand Slam grass-court hub" },
@@ -516,7 +532,7 @@ function HomePage({ onNavigate, liveData, dbData }) {
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button type="button" onClick={() => onNavigate("/tennis-predictions/")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 shadow-xl shadow-lime-400/20 hover:bg-lime-300">Today's Predictions</button>
             <button type="button" onClick={() => onNavigate("/player-stats/")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">Trending Players</button>
-            <button type="button" onClick={() => onNavigate("/tennis-news/")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">Latest News</button>
+            <button type="button" onClick={() => onNavigate("/tennis-news/")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">News & Articles</button>
           </div>
           <p className="mt-4 text-xs text-slate-500">18+. Tips are opinions, not guaranteed outcomes. Bet responsibly.</p>
         </div>
@@ -545,9 +561,9 @@ function HomePage({ onNavigate, liveData, dbData }) {
           {trendingPlayers.map((player) => <a key={`${player.tour}-${player.slug}`} href={player.url} className="border border-white/10 bg-slate-900 p-4 no-underline hover:border-lime-400/40"><div className="flex items-center justify-between gap-3"><h3 className="font-bold text-white">{player.name}</h3><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{player.tour}</span></div><p className="mt-2 text-sm text-slate-500">Rank #{player.rank} - {player.country}</p><p className="mt-3 text-sm text-slate-300">100d: {player.recentWins}-{player.recentLosses}{player.recentWinRate !== null ? ` (${player.recentWinRate}%)` : ""}</p></a>)}
         </div>
       </HomeSection>
-      <HomeSection eyebrow="Latest tennis news" title="News that can move tennis markets" text="Current ATP and WTA headlines selected for betting research, injuries, form swings and tournament context." href="/tennis-news/" onNavigate={onNavigate}>
+      <HomeSection eyebrow="Latest tennis news and articles" title="News that can move tennis markets" text="Current ATP and WTA headlines plus TennisTipz original analysis selected for betting research, form swings and tournament context." href="/tennis-news/" onNavigate={onNavigate}>
         <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-          {latestNews.map((item) => <article key={item.id || item.title} className="overflow-hidden border border-white/10 bg-white/[0.04]"><NewsImage item={item} /><div className="p-5"><div className="mb-3 flex items-center justify-between gap-3 text-xs text-slate-500"><span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category || "News"}</span><span>{item.time}</span></div><h3 className="text-lg font-black leading-tight">{item.title}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{item.summary}</p>{item.url && item.url !== "#" && <a href={item.url} target="_blank" rel="noreferrer" className="mt-4 inline-flex text-sm font-bold text-lime-300">Read source</a>}</div></article>)}
+          {latestNews.map((item) => <article key={item.id || item.title} className="overflow-hidden border border-white/10 bg-white/[0.04]"><NewsImage item={item} /><div className="p-5"><div className="mb-3 flex items-center justify-between gap-3 text-xs text-slate-500"><span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category || "News"}</span><span>{item.time}</span></div><h3 className="text-lg font-black leading-tight">{item.title}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{item.summary}</p>{item.url && item.url !== "#" && (item.kind === "article" ? <a href={item.url} className="mt-4 inline-flex text-sm font-bold text-lime-300">Read article</a> : <a href={item.url} target="_blank" rel="noreferrer" className="mt-4 inline-flex text-sm font-bold text-lime-300">Read source</a>)}</div></article>)}
         </div>
       </HomeSection>
       <HomeSection eyebrow="Upcoming tournaments" title="Tournament hubs for the biggest events" text="Grand Slam hubs are built for schedule, surface, key players, news and predictions." href="/tennis-predictions/" onNavigate={onNavigate}>
@@ -694,10 +710,11 @@ function MatchDetailPage({ route, dbData, onNavigate }) {
   return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><button type="button" onClick={() => onNavigate("/tennis-predictions/")} className="mb-6 text-sm font-bold text-lime-300">Back to predictions</button><p className="text-sm font-semibold uppercase text-lime-300">{match.tour} AI prediction page</p><h1 className="mt-2 text-5xl font-black">{match.title} Prediction</h1><p className="mt-3 max-w-3xl text-slate-400">Cloudbet odds, AI prediction confidence, 100-day player form, 2026 season context, surface notes, and stored result tracking for {match.title}.</p><div className="mt-8 grid gap-4 md:grid-cols-4"><Metric label="AI pick" value={match.predicted_winner_name || "Value watch"} /><Metric label="Confidence" value={match.confidence ? `${match.confidence}%` : "Pending"} /><Metric label="Odds" value={match.predicted_odds || "N/A"} /><Metric label="Status" value={match.live ? "Live" : match.status || "Scheduled"} /></div><div className="mt-8 grid gap-5 md:grid-cols-3"><Metric label="Tournament" value={match.tournament || "Tennis"} /><Metric label="Surface" value={match.surface || "TBC"} /><Metric label="Result" value={match.result_status || "pending"} helper={match.actual_winner_name ? `Winner: ${match.actual_winner_name}` : "Outcome updates after settlement"} /></div><div className="mt-8 grid gap-5 md:grid-cols-2"><Metric label={`${match.player_a_name} 100d form`} value={`${match.player_a_recent_wins || 0}-${match.player_a_recent_losses || 0}`} helper={match.player_a_recent_win_rate === null || match.player_a_recent_win_rate === undefined ? "Not enough data" : `${match.player_a_recent_win_rate}% win rate`} /><Metric label={`${match.player_b_name} 100d form`} value={`${match.player_b_recent_wins || 0}-${match.player_b_recent_losses || 0}`} helper={match.player_b_recent_win_rate === null || match.player_b_recent_win_rate === undefined ? "Not enough data" : `${match.player_b_recent_win_rate}% win rate`} /><Metric label={`${match.player_a_name} 2026 season`} value={`${match.player_a_season_wins || 0}-${match.player_a_season_losses || 0}`} helper={match.player_a_rank ? `Rank #${match.player_a_rank}` : "Rank unavailable"} /><Metric label={`${match.player_b_name} 2026 season`} value={`${match.player_b_season_wins || 0}-${match.player_b_season_losses || 0}`} helper={match.player_b_rank ? `Rank #${match.player_b_rank}` : "Rank unavailable"} /></div><div className="mt-8 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">AI Prediction Analysis</h2><p className="mt-4 leading-8 text-slate-300">{match.ai_summary || "The TennisTipz AI model combines market-implied probability, ATP/WTA context, available form, surface ratings, ranking signals and live status."}</p>{reasons.length > 0 && <div className="mt-5 grid gap-3 md:grid-cols-2">{reasons.map((reason) => <div key={reason} className="bg-slate-900 p-4 text-sm leading-6 text-slate-300">{reason}</div>)}</div>}<p className="mt-5 leading-8 text-slate-400">{match.ai_betting_angle || "Use this prediction as research only; tennis betting has risk and no outcome is guaranteed."}</p><a href={cloudbetUrl} target="_blank" rel="noreferrer sponsored" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Open Cloudbet odds <ExternalLink size={16} /></a></div></section>;
 }
 
-function NewsPage({ news }) {
+function NewsPage({ news, articles }) {
   const [category, setCategory] = useState("All");
-  const filteredNews = useMemo(() => news.filter((item) => category === "All" || item.category === category).slice(0, 16), [news, category]);
-  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between"><div><p className="text-sm font-semibold uppercase text-lime-300">Live newsroom</p><h1 className="mt-2 text-4xl font-black">Tennis News for Betting</h1><p className="mt-3 max-w-2xl text-slate-400">Filter ATP and WTA updates by tournament context, player availability, market movement and trend signals.</p></div><CalendarDays className="text-slate-500" /></div><div className="mt-8 flex gap-2 overflow-x-auto">{newsCategories.map((item) => <button key={item} type="button" onClick={() => setCategory(item)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${category === item ? "bg-white text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{item}</button>)}</div><div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">{filteredNews.map((item) => <article key={item.id || item.title} className="overflow-hidden border border-white/10 bg-white/[0.04] hover:border-lime-400/40"><NewsImage item={item} /><div className="p-6"><div className="mb-4 flex items-center justify-between gap-3 text-sm"><span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category}</span><span className="text-slate-500">{item.time}</span></div><h2 className="text-xl font-black leading-tight">{item.title}</h2><p className="mt-4 leading-7 text-slate-400">{item.summary}</p>{item.url && item.url !== "#" && <a href={item.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">Read from {item.source}</a>}</div></article>)}</div></section>;
+  const mergedItems = useMemo(() => mergeNewsAndArticles(news, articles), [news, articles]);
+  const filteredNews = useMemo(() => mergedItems.filter((item) => category === "All" || item.category === category || (category === "Articles" && item.kind === "article")).slice(0, 16), [mergedItems, category]);
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between"><div><p className="text-sm font-semibold uppercase text-lime-300">Live newsroom and TennisTipz articles</p><h1 className="mt-2 text-4xl font-black">Tennis News & Articles</h1><p className="mt-3 max-w-2xl text-slate-400">Original RSS images are used for source news. TennisTipz analysis, previews and prediction articles use the Yacht Ape mascot.</p></div><CalendarDays className="text-slate-500" /></div><div className="mt-8 flex gap-2 overflow-x-auto">{newsCategories.map((item) => <button key={item} type="button" onClick={() => setCategory(item)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${category === item ? "bg-white text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{item}</button>)}</div><div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">{filteredNews.map((item) => <article key={item.id || item.title} className="overflow-hidden border border-white/10 bg-white/[0.04] hover:border-lime-400/40"><NewsImage item={item} /><div className="p-6"><div className="mb-4 flex items-center justify-between gap-3 text-sm"><span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{item.category || "News"}</span><span className="text-slate-500">{item.time}</span></div><h2 className="text-xl font-black leading-tight">{item.title}</h2><p className="mt-4 leading-7 text-slate-400">{item.summary}</p>{item.url && item.url !== "#" && (item.kind === "article" ? <a href={item.url} className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">Read TennisTipz article</a> : <a href={item.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex font-bold text-lime-300 hover:text-lime-200">Read from {item.source}</a>)}</div></article>)}</div></section>;
 }
 
 function TipsPage({ onNavigate }) {
@@ -751,10 +768,11 @@ export default function TennisTipzApp() {
     setLoading(true);
     setError("");
     try {
-      const [liveResponse, summaryResponse, matchPagesResponse] = await Promise.allSettled([
+      const [liveResponse, summaryResponse, matchPagesResponse, articlesResponse] = await Promise.allSettled([
         fetch("/api/live-data"),
         fetch("/api/db/summary"),
         fetch("/api/db/match-pages?limit=100"),
+        fetch("/api/db/articles?limit=24"),
       ]);
 
       if (liveResponse.status === "fulfilled" && liveResponse.value.ok) {
@@ -771,6 +789,7 @@ export default function TennisTipzApp() {
       const nextDbData = { ...initialDbData };
       if (summaryResponse.status === "fulfilled" && summaryResponse.value.ok) nextDbData.summary = await summaryResponse.value.json();
       if (matchPagesResponse.status === "fulfilled" && matchPagesResponse.value.ok) { const payload = await matchPagesResponse.value.json(); nextDbData.matchPages = payload.matches || []; }
+      if (articlesResponse.status === "fulfilled" && articlesResponse.value.ok) { const payload = await articlesResponse.value.json(); nextDbData.articles = payload.articles || []; }
       setDbData(nextDbData);
       if (["stats", "player-detail"].includes(route.id)) await loadPlayerPages();
     } catch (loadError) {
@@ -788,5 +807,5 @@ export default function TennisTipzApp() {
   useEffect(() => { updateDocumentSeo(route, dbData); updateStructuredData(route, liveData, dbData); }, [route, liveData, dbData]);
   useEffect(() => { const onPopState = () => setRoute(getRoute(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
 
-  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} />}{route.id === "betting" && <BettingHubPage />}</main><ResponsibleFooter /></div>;
+  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} articles={dbData.articles} />}{route.id === "betting" && <BettingHubPage />}</main><ResponsibleFooter /></div>;
 }

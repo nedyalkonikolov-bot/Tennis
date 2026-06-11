@@ -90,7 +90,7 @@ export const fallbackNews = [
     time: "12 min ago",
     summary: "Several elite returners land in the same section, which could push totals lower in early rounds and create upset value.",
     url: "#",
-    imageUrl: "https://images.unsplash.com/photo-1595435934249-5df7ed86e1c0?auto=format&fit=crop&w=900&q=80",
+    imageUrl: "",
     source: "TennisTipz",
   },
   {
@@ -100,7 +100,7 @@ export const fallbackNews = [
     time: "48 min ago",
     summary: "The market has stabilized after a short injury scare, but live movement should still be watched before first serve.",
     url: "#",
-    imageUrl: "https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?auto=format&fit=crop&w=900&q=80",
+    imageUrl: "",
     source: "TennisTipz",
   },
   {
@@ -110,7 +110,7 @@ export const fallbackNews = [
     time: "2 hr ago",
     summary: "Cooler conditions are slowing the court and making return games more valuable than raw serve rankings.",
     url: "#",
-    imageUrl: "https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=900&q=80",
+    imageUrl: "",
     source: "TennisTipz",
   },
   {
@@ -120,7 +120,7 @@ export const fallbackNews = [
     time: "4 hr ago",
     summary: "Top seeds with strong second-serve return numbers are separating earlier in sets across the current clay swing.",
     url: "#",
-    imageUrl: "https://images.unsplash.com/photo-1542144582-1ba00456b5e3?auto=format&fit=crop&w=900&q=80",
+    imageUrl: "",
     source: "TennisTipz",
   },
 ];
