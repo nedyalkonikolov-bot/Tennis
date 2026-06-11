@@ -15,7 +15,8 @@ const PLAYER_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PLAYER_LIMIT = 500;
 const AI_CACHE_TTL_SECONDS = 30 * 60;
 const AI_NEWS_CACHE_TTL_SECONDS = 60 * 60;
-const LIVE_DATA_CACHE_KEY = "live-data:homepage:v2";
+const NEWS_IMAGE_POLICY_VERSION = "rss-originals-and-mascot-articles-v1";
+const LIVE_DATA_CACHE_KEY = "live-data:homepage:v3";
 const LIVE_DATA_FRESH_MS = 5 * 60 * 1000;
 const LIVE_DATA_CACHE_TTL_SECONDS = 20 * 60;
 const CLOUDBET_MARKETS_QUERY = "?markets=tennis.winner&markets=tennis.winner_and_total";
@@ -704,7 +705,7 @@ async function enhanceNewsWithOpenAi(env, news, diagnostics) {
     return news;
   }
   const cache = getPlayerCache(env);
-  const cacheKey = `ai:news:espn-tennishead:v3:${news.slice(0, 8).map((item) => item.id).join("|").slice(0, 700)}`;
+  const cacheKey = `ai:news:espn-tennishead:v4:${news.slice(0, 8).map((item) => item.id).join("|").slice(0, 700)}`;
   const cached = cache ? await cache.get(cacheKey, "json").catch(() => null) : null;
   if (cached?.news?.length) {
     diagnostics.openAiNews = "cached";
@@ -758,7 +759,7 @@ async function enhanceNewsWithOpenAi(env, news, diagnostics) {
 async function buildLiveDataPayload(env) {
   const betUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_BET_URL).trim();
   const errors = [];
-  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasOpenAiKey: Boolean(env.OPENAI_API_KEY), openAiModel: getOpenAiModel(env), openAiModels: { prediction: getOpenAiModel(env, "prediction"), news: getOpenAiModel(env, "news") }, hasPlayerCache: Boolean(getPlayerCache(env)), hasD1: Boolean(env.TENNIS_DB), predictionSource: hasOpenAi(env) ? "OpenAI structured prediction layer using Cloudbet odds, API-Tennis/player DB form, rankings and surface data" : "Cloudbet ATP/WTA match markets. Direct tennis.winner when available; derived winner side from tennis.winner_and_total when direct winner is absent.", playerStats: "Top 500 ATP + Top 500 WTA", newsProvider: hasOpenAi(env) ? "OpenAI summaries from ESPN + TennisHead RSS" : "ESPN + TennisHead RSS" };
+  const diagnostics = { hasApiTennisKey: Boolean(env.API_TENNIS_KEY), hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY), hasCloudbetAffiliateUrl: Boolean(env.CLOUDBET_AFFILIATE_URL), hasOpenAiKey: Boolean(env.OPENAI_API_KEY), openAiModel: getOpenAiModel(env), openAiModels: { prediction: getOpenAiModel(env, "prediction"), news: getOpenAiModel(env, "news") }, hasPlayerCache: Boolean(getPlayerCache(env)), hasD1: Boolean(env.TENNIS_DB), predictionSource: hasOpenAi(env) ? "OpenAI structured prediction layer using Cloudbet odds, API-Tennis/player DB form, rankings and surface data" : "Cloudbet ATP/WTA match markets. Direct tennis.winner when available; derived winner side from tennis.winner_and_total when direct winner is absent.", playerStats: "Top 500 ATP + Top 500 WTA", newsProvider: hasOpenAi(env) ? "OpenAI summaries from ESPN + TennisHead RSS" : "ESPN + TennisHead RSS", newsImagePolicy: NEWS_IMAGE_POLICY_VERSION };
   let players = [];
   let matches = [];
   let news = [];

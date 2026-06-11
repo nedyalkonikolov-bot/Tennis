@@ -8,9 +8,10 @@ export default defineConfig({
     cssCodeSplit: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom'],
-          icons: ['lucide-react'],
+        manualChunks(id) {
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) return 'react'
+          if (id.includes('node_modules/lucide-react')) return 'icons'
+          return undefined
         },
       },
     },
