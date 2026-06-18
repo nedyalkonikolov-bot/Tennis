@@ -9,7 +9,15 @@ function escapeHtml(value = "") {
 function safeBodyHtml(value = "") {
   return String(value)
     .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/\son\w+="[^"]*"/gi, "");
+    .replace(/\son\w+="[^"]*"/gi, "")
+    .replace(/\sstyle="[^"]*"/gi, "")
+    .replace(/\sclass="[^"]*"/gi, "")
+    .replace(/\sfont-size="[^"]*"/gi, "")
+    .replace(/<\/?font\b[^>]*>/gi, "")
+    .replace(/<\/?big\b[^>]*>/gi, "")
+    .replace(/<\/?small\b[^>]*>/gi, "")
+    .replace(/<h1\b[^>]*>/gi, "<h2>")
+    .replace(/<\/h1>/gi, "</h2>");
 }
 
 function jsonLd(data) {
@@ -169,7 +177,7 @@ function articleHtml(article, linkContext = { candidates: [], relatedArticles: [
 <meta name="twitter:image" content="${image}">
 <link rel="stylesheet" href="/ad-banners.css?v=navy-rails">
 <script type="application/ld+json">${jsonLd({ "@context": "https://schema.org", "@graph": [organization, schema, breadcrumbSchema] })}</script>
-<style>body{margin:0;background:#07111f;color:#e5edf7;font-family:Arial,sans-serif;line-height:1.72}.wrap{max-width:920px;margin:auto;padding:32px 18px}.crumb,.muted{color:#94a3b8}a{color:#bef264}.pill{display:inline-block;background:#bef264;color:#08111f;font-weight:700;padding:6px 10px}.article{font-size:18px}.article h2{margin-top:34px;color:#fff}.article h3{margin-top:26px;color:#fff}.article p{margin:18px 0}.source{background:#111c2d;border:1px solid rgba(255,255,255,.1);padding:18px;margin-top:30px}h1{font-size:clamp(34px,6vw,60px);line-height:1.05}</style>
+<style>html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{margin:0;background:#07111f;color:#e5edf7;font-family:Arial,sans-serif;font-size:16px;line-height:1.72}.wrap{max-width:920px;margin:auto;padding:32px 18px}.crumb,.muted{color:#94a3b8}a{color:#bef264}.pill{display:inline-block;background:#bef264;color:#08111f;font-size:14px;font-weight:700;padding:6px 10px}.article{font-size:18px;line-height:1.72}.article>*{font-size:inherit;line-height:inherit}.article h2{margin:34px 0 12px;color:#fff;font-size:26px;line-height:1.2}.article h3{margin:26px 0 10px;color:#fff;font-size:21px;line-height:1.25}.article p{margin:18px 0}.article ul,.article ol{margin:18px 0;padding-left:24px}.article li{margin:8px 0}.article strong{font-weight:800}.article a{font-size:inherit}.source{background:#111c2d;border:1px solid rgba(255,255,255,.1);padding:18px;margin-top:30px}h1{font-size:clamp(34px,6vw,60px);line-height:1.05}@media(max-width:640px){body{font-size:16px}.article{font-size:17px}.article h2{font-size:23px}.article h3{font-size:20px}}</style>
 </head><body><main class="wrap">
 <p class="crumb"><a href="/">TennisTipz</a> / <a href="/tennis-news/">Tennis news</a></p>
 <span class="pill">${escapeHtml(label)}</span>
