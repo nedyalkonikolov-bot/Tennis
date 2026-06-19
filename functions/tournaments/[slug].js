@@ -4,10 +4,38 @@ const CLOUDBET_URL = "https://cldbt.cloud/go/en/landing/bitcoin-betting?af_token
 
 const TOURNAMENT_META = {
   "australian-open": { location: "Melbourne, Australia", level: "Grand Slam", surface: "Hard" },
-  "french-open": { location: "Paris, France", level: "Grand Slam", surface: "Clay" },
-  "roland-garros": { location: "Paris, France", level: "Grand Slam", surface: "Clay" },
-  "wimbledon": { location: "London, United Kingdom", level: "Grand Slam", surface: "Grass" },
-  "us-open": { location: "New York, United States", level: "Grand Slam", surface: "Hard" },
+  "french-open": {
+    location: "Paris, France",
+    level: "Grand Slam",
+    surface: "Clay",
+    venue: "Stade Roland-Garros",
+    organizer: "Federation Francaise de Tennis",
+    address: { streetAddress: "2 avenue Gordon Bennett", addressLocality: "Paris", postalCode: "75016", addressCountry: "FR" },
+  },
+  "roland-garros": {
+    location: "Paris, France",
+    level: "Grand Slam",
+    surface: "Clay",
+    venue: "Stade Roland-Garros",
+    organizer: "Federation Francaise de Tennis",
+    address: { streetAddress: "2 avenue Gordon Bennett", addressLocality: "Paris", postalCode: "75016", addressCountry: "FR" },
+  },
+  "wimbledon": {
+    location: "London, United Kingdom",
+    level: "Grand Slam",
+    surface: "Grass",
+    venue: "The All England Lawn Tennis Club",
+    organizer: "The All England Lawn Tennis Club (Championships) Limited",
+    address: { streetAddress: "Church Road", addressLocality: "Wimbledon", addressRegion: "London", postalCode: "SW19 5AE", addressCountry: "GB" },
+  },
+  "us-open": {
+    location: "New York, United States",
+    level: "Grand Slam",
+    surface: "Hard",
+    venue: "USTA Billie Jean King National Tennis Center",
+    organizer: "United States Tennis Association",
+    address: { streetAddress: "Flushing Meadows - Corona Park", addressLocality: "Flushing", addressRegion: "NY", postalCode: "11368", addressCountry: "US" },
+  },
 };
 
 function escapeHtml(value = "") {
@@ -52,10 +80,24 @@ function formatDateOnly(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function isoDateOrUndefined(value) {
-  if (!value) return undefined;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+function tournamentOccurrenceDates(matches) {
+  const dates = matches
+    .map((match) => match.start_time ? new Date(match.start_time) : null)
+    .filter((date) => date && !Number.isNaN(date.getTime()));
+  if (!dates.length) return { startDate: undefined, endDate: undefined };
+  const latestYear = Math.max(...dates.map((date) => date.getUTCFullYear()));
+  const occurrence = dates.filter((date) => date.getUTCFullYear() === latestYear).sort((a, b) => a - b);
+  return {
+    startDate: occurrence[0]?.toISOString(),
+    endDate: occurrence[occurrence.length - 1]?.toISOString(),
+  };
+}
+
+function eventStatus(startDate, endDate) {
+  const now = Date.now();
+  if (Date.parse(endDate) < now) return "https://schema.org/EventCompleted";
+  if (Date.parse(startDate) <= now) return "https://schema.org/EventInProgress";
+  return "https://schema.org/EventScheduled";
 }
 
 function playerUrl(tour, name) {
@@ -215,26 +257,41 @@ function renderTournamentPage(summary, matches, news) {
   const title = `${summary.tournament} Predictions, Schedule, Draw & Tennis News | TennisTipz`;
   const description = `${summary.tournament} tournament hub with schedule, ${surface} surface notes, key players, latest predictions, draw links, related news, and TennisTipz betting research.`;
   const overview = tournamentOverview(summary, matches);
-  const startDate = isoDateOrUndefined(summary.first_start);
-  const endDate = isoDateOrUndefined(summary.last_start);
+  const { startDate, endDate } = tournamentOccurrenceDates(matches);
   const competitors = [...new Set(matches.flatMap((match) => [match.player_a_name, match.player_b_name]).filter(Boolean))]
     .slice(0, 12)
     .map((name) => ({ "@type": "Person", name, sport: "Tennis" }));
-  const schema = {
+  const pageSchema = {
     "@context": "https://schema.org",
-    "@type": ["Event", "SportsEvent"],
+    "@type": "CollectionPage",
+    "@id": `${canonical}#webpage`,
+    name: summary.tournament,
+    url: canonical,
+    description,
+    image: `${SITE_URL}/og-image.png`,
+    about: { "@type": "Thing", name: summary.tournament, description: `${level} tennis tournament` },
+  };
+  const eventSchema = startDate && endDate && meta.venue && meta.organizer && meta.address ? {
+    "@context": "https://schema.org",
+    "@type": "SportsEvent",
     "@id": `${canonical}#event`,
     name: summary.tournament,
     url: canonical,
     sport: "Tennis",
     description,
+    image: `${SITE_URL}/og-image.png`,
     startDate,
     endDate,
-    eventStatus: "https://schema.org/EventScheduled",
-    location: meta.location ? { "@type": "Place", name: meta.location } : undefined,
-    eventAttendanceMode: meta.location ? "https://schema.org/OfflineEventAttendanceMode" : undefined,
+    eventStatus: eventStatus(startDate, endDate),
+    eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
+    location: {
+      "@type": "Place",
+      name: meta.venue,
+      address: { "@type": "PostalAddress", ...meta.address },
+    },
+    organizer: { "@type": "Organization", name: meta.organizer },
     performer: competitors.length ? competitors : undefined,
-  };
+  } : null;
   const breadcrumbSchema = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
@@ -262,7 +319,8 @@ function renderTournamentPage(summary, matches, news) {
 <meta name="twitter:description" content="${escapeHtml(description)}">
 <meta name="twitter:image" content="${SITE_URL}/og-image.png">
 <link rel="stylesheet" href="/ad-banners.css?v=navy-rails">
-<script type="application/ld+json">${jsonLd(schema)}</script>
+<script type="application/ld+json">${jsonLd(pageSchema)}</script>
+${eventSchema ? `<script type="application/ld+json">${jsonLd(eventSchema)}</script>` : ""}
 <script type="application/ld+json">${jsonLd(breadcrumbSchema)}</script>
 <style>body{margin:0;background:#07111f;color:#e5edf7;font-family:Arial,sans-serif;line-height:1.65}.wrap{max-width:1120px;margin:auto;padding:32px 18px}.crumb,.muted{color:#94a3b8}a{color:#bef264}.pill{display:inline-block;background:#bef264;color:#08111f;font-weight:700;padding:6px 10px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}.card,.row{background:#111c2d;border:1px solid rgba(255,255,255,.1);padding:18px}.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;margin-top:10px}.big{font-size:28px;font-weight:900;color:#fff}.section{margin-top:34px}.link-cloud{display:inline-block;background:#bef264;color:#08111f;font-weight:900;text-decoration:none;padding:12px 16px;margin-top:12px}.inline-links{display:flex;flex-wrap:wrap;gap:10px}.inline-links a{background:#111c2d;border:1px solid rgba(255,255,255,.12);padding:8px 10px;text-decoration:none}@media(max-width:760px){.row{grid-template-columns:1fr}}h1{font-size:clamp(36px,6vw,64px);line-height:1.05;margin-bottom:12px}h2{margin-top:0}</style>
 </head><body><main class="wrap">

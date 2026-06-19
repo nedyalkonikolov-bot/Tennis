@@ -125,12 +125,6 @@ function slugify(value = "") {
     .replace(/^-+|-+$/g, "") || "item";
 }
 
-function isoDateOrUndefined(value) {
-  if (!value) return undefined;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
-}
-
 function normalizePlayer(player) {
   const recentMatches = Number(player.recent_matches ?? player.stored_matches ?? 0);
   const recentWins = Number(player.recent_wins ?? player.stored_wins ?? 0);
@@ -313,17 +307,19 @@ function updateStructuredData(route, liveData, dbData) {
     const match = dbData.matchPages.find((item) => item.slug === route.slug);
     if (match) {
       graph.push({
-        "@type": "SportsEvent",
-        name: match.title,
+        "@type": "Article",
+        headline: `${match.title} Prediction`,
+        description: match.ai_summary || `${match.title} tennis prediction with player form, odds and model context.`,
         url: `${siteUrl}${match.url}`,
-        sport: "Tennis",
-        eventStatus: match.live ? "https://schema.org/EventInProgress" : "https://schema.org/EventScheduled",
-        startDate: isoDateOrUndefined(match.start_time),
-        location: match.tournament ? { "@type": "Place", name: match.tournament } : undefined,
-        competitor: [
+        mainEntityOfPage: `${siteUrl}${match.url}`,
+        image: `${siteUrl}/og-image.png`,
+        author: { "@id": `${siteUrl}/#organization` },
+        publisher: { "@id": `${siteUrl}/#organization` },
+        about: [
           { "@type": "Person", name: match.player_a_name, sport: "Tennis" },
           { "@type": "Person", name: match.player_b_name, sport: "Tennis" },
-        ],
+          match.tournament ? { "@type": "Thing", name: match.tournament } : null,
+        ].filter(Boolean),
       });
     }
   }
@@ -351,18 +347,6 @@ function updateStructuredData(route, liveData, dbData) {
         { "@type": "Question", name: "Does TennisTipz provide guaranteed picks?", acceptedAnswer: { "@type": "Answer", text: "No. TennisTipz predictions are analytical opinions based on available data and are not guaranteed betting results." } },
       ],
     });
-  }
-
-  if (route.id === "predictions") {
-    graph.push(...liveData.matches.slice(0, 10).map((match) => ({
-      "@type": "SportsEvent",
-      name: `${match.playerA} vs ${match.playerB}`,
-      sport: "Tennis",
-      eventStatus: match.live ? "https://schema.org/EventInProgress" : "https://schema.org/EventScheduled",
-      startDate: isoDateOrUndefined(match.startIso || match.startTime),
-      location: match.tournament ? { "@type": "Place", name: match.tournament } : undefined,
-      competitor: [{ "@type": "Person", name: match.playerA, sport: "Tennis" }, { "@type": "Person", name: match.playerB, sport: "Tennis" }],
-    })));
   }
 
   script.textContent = JSON.stringify({ "@context": "https://schema.org", "@graph": graph });

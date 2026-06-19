@@ -77,12 +77,6 @@ function canonicalRedirect(request) {
   return Response.redirect(url.toString(), 301);
 }
 
-function isoDateOrUndefined(value) {
-  if (!value) return undefined;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
-}
-
 function roundLabel(match) {
   const text = `${match.round || ""} ${match.status || ""}`.trim();
   if (/final/i.test(text)) return "Final";
@@ -223,7 +217,6 @@ function html(match, slug, request, h2h) {
   const canonical = `${SITE_URL}/predictions/${slug}/`;
   const previewImage = socialPreviewImage(request, `${match.match_id || ""}:${slug}`);
   const ai = buildAiPrediction(match);
-  const startDate = isoDateOrUndefined(match.start_time);
   const round = roundLabel(match);
   const probabilities = winProbabilities(match);
   const description = `${title} prediction with win probability, key stats, H2H, form, ${match.tournament || "tournament"} context, ${match.surface || "surface"} surface and responsible betting insight.`;
@@ -257,22 +250,11 @@ function html(match, slug, request, h2h) {
       a: `Use the TennisTipz ${tourHubName} hub and the main tennis predictions page for other live and upcoming ATP/WTA picks.`,
     },
   ];
-  const schema = {
-    "@context": "https://schema.org",
-    "@type": "SportsEvent",
-    name: title,
-    url: canonical,
-    sport: "Tennis",
-    startDate,
-    eventStatus: match.live ? "https://schema.org/EventInProgress" : "https://schema.org/EventScheduled",
-    competitor: [{ "@type": "Person", name: match.player_a_name }, { "@type": "Person", name: match.player_b_name }],
-    location: { "@type": "Place", name: match.tournament || "Tennis tournament" },
-    subEvent: {
-      "@type": "Event",
-      name: `${title} ${round}`,
-      url: canonical,
-    },
-  };
+  const articleSubjects = [
+    { "@type": "Person", name: match.player_a_name },
+    { "@type": "Person", name: match.player_b_name },
+    match.tournament ? { "@type": "Thing", name: match.tournament } : null,
+  ].filter(Boolean);
   const articleSchema = {
     "@context": "https://schema.org",
     "@type": "Article",
@@ -283,7 +265,8 @@ function html(match, slug, request, h2h) {
     publisher: { "@type": "Organization", name: "TennisTipz" },
     mainEntityOfPage: canonical,
     image: previewImage,
-    about: schema,
+    about: articleSubjects,
+    mentions: articleSubjects,
     additionalType: "https://schema.org/Prediction",
   };
   const breadcrumbSchema = {
@@ -325,7 +308,6 @@ function html(match, slug, request, h2h) {
 <meta name="twitter:description" content="${escapeHtml(description)}">
 <meta name="twitter:image" content="${previewImage}">
 <link rel="stylesheet" href="/ad-banners.css?v=navy-rails">
-<script type="application/ld+json">${JSON.stringify(schema)}</script>
 <script type="application/ld+json">${JSON.stringify(articleSchema)}</script>
 <script type="application/ld+json">${JSON.stringify(breadcrumbSchema)}</script>
 <script type="application/ld+json">${JSON.stringify(faqSchema)}</script>
