@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "include": ["/api/*", "/predictions/*", "/articles/*", "/players/*", "/tournaments/*", "/sitemap.xml", "/dynamic-sitemap.xml", "/static-sitemap.xml"],
-  "exclude": ["/assets/*", "/favicon.svg"]
+  "include": ["/*"],
+  "exclude": ["/sitemap.xml", "/robots.txt", "/static-sitemap.xml"]
 }
