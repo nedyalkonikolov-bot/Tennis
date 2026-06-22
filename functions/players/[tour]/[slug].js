@@ -77,8 +77,45 @@ function surfaceRows(player) {
 
 async function findPlayer(db, tour, slug) {
   const result = await db.prepare(`
+    WITH recent AS (
+      SELECT
+        canonical.id AS player_id,
+        COUNT(DISTINCT rm.id) AS recent_matches,
+        SUM(CASE WHEN rm.result = 'win' THEN 1 ELSE 0 END) AS recent_wins,
+        SUM(CASE WHEN rm.result = 'loss' THEN 1 ELSE 0 END) AS recent_losses,
+        MAX(rm.match_date) AS latest_recent_match_date
+      FROM players canonical
+      JOIN player_recent_matches rm ON
+        rm.player_id = canonical.id
+        OR (
+          rm.player_key IS NOT NULL AND rm.player_key != ''
+          AND canonical.player_key = rm.player_key
+          AND canonical.tour = rm.tour
+        )
+      WHERE rm.match_date >= date('now', '-100 days')
+        AND rm.source LIKE 'api-tennis%'
+      GROUP BY canonical.id
+    ), season AS (
+      SELECT
+        canonical.id AS canonical_player_id,
+        ss.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY canonical.id
+          ORDER BY CASE WHEN ss.player_id = canonical.id THEN 0 ELSE 1 END, datetime(ss.updated_at) DESC
+        ) AS row_number
+      FROM players canonical
+      JOIN player_season_stats ss ON
+        ss.player_id = canonical.id
+        OR (
+          ss.player_key IS NOT NULL AND ss.player_key != ''
+          AND canonical.player_key = ss.player_key
+          AND canonical.tour = ss.tour
+        )
+      WHERE ss.season = ? AND LOWER(ss.type) = 'singles'
+    )
     SELECT
       p.id,
+      p.player_key,
       p.name,
       p.tour,
       p.country,
@@ -88,6 +125,7 @@ async function findPlayer(db, tour, slug) {
       p.player_bday,
       p.player_logo,
       p.updated_at,
+      r.latest_recent_match_date,
       COALESCE(r.recent_matches, 0) AS recent_matches,
       COALESCE(r.recent_wins, 0) AS recent_wins,
       COALESCE(r.recent_losses, 0) AS recent_losses,
@@ -105,17 +143,8 @@ async function findPlayer(db, tour, slug) {
       s.grass_lost,
       (SELECT COUNT(*) FROM predictions pr JOIN matches m ON m.id = pr.match_id WHERE m.player_a_id = p.id OR m.player_b_id = p.id) AS prediction_mentions
     FROM players p
-    LEFT JOIN (
-      SELECT
-        player_id,
-        COUNT(*) AS recent_matches,
-        SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) AS recent_wins,
-        SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) AS recent_losses
-      FROM player_recent_matches
-      WHERE match_date >= date('now', '-100 days') AND source = 'api-tennis-fixtures'
-      GROUP BY player_id
-    ) r ON r.player_id = p.id
-    LEFT JOIN player_season_stats s ON s.player_id = p.id AND s.type = 'singles' AND s.season = ?
+    LEFT JOIN recent r ON r.player_id = p.id
+    LEFT JOIN season s ON s.canonical_player_id = p.id AND s.row_number = 1
     WHERE p.tour = ?
     ORDER BY COALESCE(p.current_rank, 999999) ASC, p.name ASC
     LIMIT 700
@@ -123,14 +152,15 @@ async function findPlayer(db, tour, slug) {
   return (result.results || []).find((row) => slugify(row.name) === slug);
 }
 
-async function latestMatches(db, playerId) {
+async function latestMatches(db, player) {
   const result = await db.prepare(`
     SELECT match_date, tournament, surface, opponent_name, score, result, event_status, source_event_id
     FROM player_recent_matches
     WHERE player_id = ?
+      OR (player_key IS NOT NULL AND player_key != '' AND player_key = ? AND tour = ?)
     ORDER BY match_date DESC
     LIMIT 10
-  `).bind(playerId).all();
+  `).bind(player.id, player.player_key || "", player.tour).all();
   return result.results || [];
 }
 
@@ -341,7 +371,7 @@ export async function onRequestGet({ params, request, env }) {
   }
 
   const [latest, related, news] = await Promise.all([
-    latestMatches(env.TENNIS_DB, player.id),
+    latestMatches(env.TENNIS_DB, player),
     relatedMatches(env.TENNIS_DB, player.id),
     relatedNews(env.TENNIS_DB, player.name),
   ]);

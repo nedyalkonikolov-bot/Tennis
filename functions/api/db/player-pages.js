@@ -32,6 +32,42 @@ export async function onRequestGet({ request, env }) {
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const result = await env.TENNIS_DB.prepare(`
+    WITH recent AS (
+      SELECT
+        canonical.id AS player_id,
+        COUNT(DISTINCT rm.id) AS recent_matches,
+        SUM(CASE WHEN rm.result = 'win' THEN 1 ELSE 0 END) AS recent_wins,
+        SUM(CASE WHEN rm.result = 'loss' THEN 1 ELSE 0 END) AS recent_losses,
+        MAX(rm.match_date) AS latest_recent_match_date
+      FROM players canonical
+      JOIN player_recent_matches rm ON
+        rm.player_id = canonical.id
+        OR (
+          rm.player_key IS NOT NULL AND rm.player_key != ''
+          AND canonical.player_key = rm.player_key
+          AND canonical.tour = rm.tour
+        )
+      WHERE rm.match_date >= date('now', '-100 days')
+        AND rm.source LIKE 'api-tennis%'
+      GROUP BY canonical.id
+    ), season AS (
+      SELECT
+        canonical.id AS canonical_player_id,
+        ss.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY canonical.id
+          ORDER BY CASE WHEN ss.player_id = canonical.id THEN 0 ELSE 1 END, datetime(ss.updated_at) DESC
+        ) AS row_number
+      FROM players canonical
+      JOIN player_season_stats ss ON
+        ss.player_id = canonical.id
+        OR (
+          ss.player_key IS NOT NULL AND ss.player_key != ''
+          AND canonical.player_key = ss.player_key
+          AND canonical.tour = ss.tour
+        )
+      WHERE ss.season = ? AND LOWER(ss.type) = 'singles'
+    )
     SELECT
       p.id,
       p.name,
@@ -43,6 +79,7 @@ export async function onRequestGet({ request, env }) {
       p.player_bday,
       p.player_logo,
       p.updated_at,
+      r.latest_recent_match_date,
       COALESCE(r.recent_matches, 0) AS recent_matches,
       COALESCE(r.recent_wins, 0) AS recent_wins,
       COALESCE(r.recent_losses, 0) AS recent_losses,
@@ -62,17 +99,8 @@ export async function onRequestGet({ request, env }) {
       COALESCE(r.recent_wins, 0) AS stored_wins,
       (SELECT COUNT(*) FROM predictions pr JOIN matches m ON m.id = pr.match_id WHERE m.player_a_id = p.id OR m.player_b_id = p.id) AS prediction_mentions
     FROM players p
-    LEFT JOIN (
-      SELECT
-        player_id,
-        COUNT(*) AS recent_matches,
-        SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) AS recent_wins,
-        SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) AS recent_losses
-      FROM player_recent_matches
-      WHERE match_date >= date('now', '-100 days') AND source = 'api-tennis-fixtures'
-      GROUP BY player_id
-    ) r ON r.player_id = p.id
-    LEFT JOIN player_season_stats s ON s.player_id = p.id AND s.type = 'singles' AND s.season = ?
+    LEFT JOIN recent r ON r.player_id = p.id
+    LEFT JOIN season s ON s.canonical_player_id = p.id AND s.row_number = 1
     ${where}
     ORDER BY p.tour ASC, COALESCE(p.current_rank, 999999) ASC, p.name ASC
     LIMIT ?

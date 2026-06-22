@@ -743,8 +743,8 @@ export default function TennisTipzApp() {
 
   async function loadPlayerPages() {
     const [atpPlayersResponse, wtaPlayersResponse] = await Promise.allSettled([
-      fetch("/api/db/player-pages?tour=ATP&limit=500"),
-      fetch("/api/db/player-pages?tour=WTA&limit=500"),
+      fetch("/api/db/player-pages?tour=ATP&limit=500&view=joined-v2"),
+      fetch("/api/db/player-pages?tour=WTA&limit=500&view=joined-v2"),
     ]);
     const players = [];
     if (atpPlayersResponse.status === "fulfilled" && atpPlayersResponse.value.ok) players.push(...((await atpPlayersResponse.value.json()).players || []));
