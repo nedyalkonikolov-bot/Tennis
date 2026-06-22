@@ -83,6 +83,39 @@ export async function onRequestGet({ env }) {
     ),
   ]);
 
+  const strategyBacktest = await db.prepare(`
+    SELECT
+      m.tour,
+      LOWER(COALESCE(m.surface, 'unknown')) AS surface,
+      CASE
+        WHEN CAST(p.predicted_odds AS REAL) < 1.20 THEN '1.01-1.19'
+        WHEN CAST(p.predicted_odds AS REAL) < 1.40 THEN '1.20-1.39'
+        WHEN CAST(p.predicted_odds AS REAL) < 1.60 THEN '1.40-1.59'
+        WHEN CAST(p.predicted_odds AS REAL) < 1.80 THEN '1.60-1.79'
+        WHEN CAST(p.predicted_odds AS REAL) <= 2.00 THEN '1.80-2.00'
+        ELSE 'outside'
+      END AS odds_band,
+      CASE
+        WHEN p.confidence < 70 THEN 'under-70'
+        WHEN p.confidence < 75 THEN '70-74'
+        WHEN p.confidence < 80 THEN '75-79'
+        ELSE '80-plus'
+      END AS confidence_band,
+      COUNT(*) AS bets,
+      SUM(CASE WHEN po.correct = 1 THEN 1 ELSE 0 END) AS wins,
+      ROUND(SUM(CASE WHEN po.correct = 1 THEN CAST(p.predicted_odds AS REAL) ELSE 0 END), 2) AS total_return
+    FROM prediction_outcomes po
+    JOIN predictions p ON p.id = po.prediction_id
+    JOIN matches m ON m.id = po.match_id
+    WHERE po.result_status = 'settled'
+      AND CAST(COALESCE(p.predicted_odds, '0') AS REAL) BETWEEN 1.01 AND 2.00
+      AND LOWER(COALESCE(m.tournament, '')) NOT LIKE '%doubles%'
+      AND COALESCE(m.player_a_name, '') NOT LIKE '%/%'
+      AND COALESCE(m.player_b_name, '') NOT LIKE '%/%'
+    GROUP BY m.tour, LOWER(COALESCE(m.surface, 'unknown')), odds_band, confidence_band
+    ORDER BY bets DESC
+  `).all();
+
   const recent = await db.prepare(`
     SELECT
       p.id,
@@ -119,6 +152,20 @@ export async function onRequestGet({ env }) {
         allSettledPredictions: bettingAll,
         publicPickFilter: bettingPublicPicks,
       },
+      strategyBacktest: (strategyBacktest.results || []).map((row) => {
+        const bets = Number(row.bets || 0);
+        const wins = Number(row.wins || 0);
+        const totalReturn = Number(row.total_return || 0);
+        return {
+          ...row,
+          bets,
+          wins,
+          losses: bets - wins,
+          hitRate: bets ? Math.round((wins / bets) * 1000) / 10 : null,
+          netProfit: Math.round((totalReturn - bets) * 100) / 100,
+          roiPercent: bets ? Math.round(((totalReturn - bets) / bets) * 10000) / 100 : null,
+        };
+      }),
     },
     recent: (recent.results || []).map((row) => ({
       ...row,
