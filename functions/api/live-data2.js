@@ -10,7 +10,7 @@ const DEFAULT_OPENAI_PREDICTION_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_NEWS_MODEL = "gpt-5.4-mini";
 const DEFAULT_OPENAI_PREMIUM_MODEL = "gpt-5.4";
 const DEFAULT_BET_URL = "https://www.cloudbet.com/en/sports/tennis";
-const PLAYER_CACHE_KEY = "players:standings:v1";
+const PLAYER_CACHE_KEY = "players:standings:v2";
 const PLAYER_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PLAYER_LIMIT = 500;
 const AI_CACHE_TTL_SECONDS = 30 * 60;
@@ -63,28 +63,74 @@ async function fetchApiTennis(env, method, params = {}) {
   const response = await fetch(url, { headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`${method} returned ${response.status}`);
   const payload = await response.json();
+  if (payload?.success === 0 || payload?.success === false || payload?.error) {
+    throw new Error(`${method}: ${payload.error || payload.message || "API-Tennis rejected the request"}`);
+  }
   return Array.isArray(payload.result) ? payload.result : [];
 }
 function normalizePlayer(player, tour) {
   const rank = asInt(player.place || player.player_place || player.rank || player.standing_place, 999);
-  const name = player.player || player.player_name || player.name || "Unknown player";
+  const name = safeText(player.player || player.player_name || player.name);
+  if (!name || normalizeName(name) === "unknown player" || rank < 1 || rank > 5000) return null;
   const seed = rank === 999 ? name.length : rank;
   return { id: String(player.player_key || player.player_id || `${tour}-${name}`), playerKey: String(player.player_key || player.player_id || ""), name, sex: tour, tour, rank, points: asInt(player.points, 0), country: player.country || player.player_country || "World", movement: player.movement || "same", form: Math.max(52, 96 - Math.min(seed, 44)), hold: 65 + (seed % 28), breakRate: 18 + (seed % 24), clay: 62 + ((seed + 9) % 32), hard: 62 + ((seed + 17) % 32), grass: 58 + ((seed + 23) % 30), trend: player.movement === "up" ? "+" : player.movement === "down" ? "-" : "0" };
 }
 function slicePlayers(players, limit = PLAYER_LIMIT) { return [...players.filter((p) => p.tour === "ATP").slice(0, limit), ...players.filter((p) => p.tour === "WTA").slice(0, limit)]; }
+async function getPlayersFromDb(env) {
+  if (!env.TENNIS_DB) return [];
+  const result = await env.TENNIS_DB.prepare(`
+    SELECT p.id, p.player_key, p.name, p.tour, p.country, p.current_rank, p.points, p.movement,
+      COUNT(prm.id) AS recent_matches,
+      SUM(CASE WHEN prm.result = 'win' THEN 1 ELSE 0 END) AS recent_wins
+    FROM players p
+    LEFT JOIN player_recent_matches prm
+      ON prm.player_id = p.id AND prm.match_date >= date('now', '-100 days')
+      AND prm.source = 'api-tennis-fixtures'
+    WHERE p.tour IN ('ATP', 'WTA') AND p.current_rank BETWEEN 1 AND 500
+    GROUP BY p.id
+    ORDER BY p.tour ASC, p.current_rank ASC
+  `).all();
+  return (result.results || []).map((row) => {
+    const matches = asInt(row.recent_matches, 0);
+    const form = matches ? Math.round((asInt(row.recent_wins, 0) / matches) * 100) : 50;
+    return {
+      id: String(row.id), playerKey: String(row.player_key || ""), name: row.name,
+      sex: row.tour, tour: row.tour, rank: asInt(row.current_rank, 999), points: asInt(row.points, 0),
+      country: row.country || "World", movement: row.movement || "same", form,
+      hold: 50, breakRate: 50, clay: form, hard: form, grass: form, trend: "0",
+    };
+  });
+}
 async function getPlayers(env) {
   const cache = getPlayerCache(env);
   if (cache) {
     const cached = await cache.get(PLAYER_CACHE_KEY, "json").catch(() => null);
     const cachedAt = cached?.updatedAt ? Date.parse(cached.updatedAt) : 0;
-    if (cached?.players?.length && Date.now() - cachedAt < PLAYER_CACHE_MAX_AGE_MS) return slicePlayers(cached.players);
+    if (cached?.players?.length >= 100 && Date.now() - cachedAt < PLAYER_CACHE_MAX_AGE_MS) {
+      const players = slicePlayers(cached.players);
+      players.dataSource = cached.source || "API-Tennis cache";
+      return players;
+    }
   }
-  const [atp, wta] = await Promise.all([
-    fetchApiTennis(env, "get_standings", { event_type: "ATP" }).catch(() => []),
-    fetchApiTennis(env, "get_standings", { event_type: "WTA" }).catch(() => []),
-  ]);
-  const players = [...atp.slice(0, PLAYER_LIMIT).map((p) => normalizePlayer(p, "ATP")), ...wta.slice(0, PLAYER_LIMIT).map((p) => normalizePlayer(p, "WTA"))];
-  if (cache && players.length) await cache.put(PLAYER_CACHE_KEY, JSON.stringify({ updatedAt: new Date().toISOString(), players }), { expirationTtl: 3 * 24 * 60 * 60 }).catch(() => null);
+  let atp = [];
+  let wta = [];
+  try {
+    [atp, wta] = await Promise.all([
+      fetchApiTennis(env, "get_standings", { event_type: "ATP" }),
+      fetchApiTennis(env, "get_standings", { event_type: "WTA" }),
+    ]);
+  } catch {
+    atp = [];
+    wta = [];
+  }
+  let players = [...atp.slice(0, PLAYER_LIMIT).map((p) => normalizePlayer(p, "ATP")), ...wta.slice(0, PLAYER_LIMIT).map((p) => normalizePlayer(p, "WTA"))].filter(Boolean);
+  let source = "API-Tennis";
+  if (players.filter((player) => player.tour === "ATP").length < 50 || players.filter((player) => player.tour === "WTA").length < 50) {
+    players = await getPlayersFromDb(env);
+    source = "TennisTipz D1 player database";
+  }
+  players.dataSource = source;
+  if (cache && players.length >= 100) await cache.put(PLAYER_CACHE_KEY, JSON.stringify({ updatedAt: new Date().toISOString(), source, players }), { expirationTtl: 3 * 24 * 60 * 60 }).catch(() => null);
   return players;
 }
 
@@ -764,6 +810,7 @@ async function buildLiveDataPayload(env) {
   let matches = [];
   let news = [];
   try { players = await getPlayers(env); } catch (error) { errors.push(`player stats: ${error.message}`); }
+  diagnostics.playerSource = players.dataSource || (players.length ? "unknown" : "fallback");
   try { matches = await getCloudbetMatches(env, players, betUrl, diagnostics); } catch (error) { errors.push(`cloudbet predictions: ${error.message}`); }
   try { matches = await enhancePredictionsWithOpenAi(env, matches, diagnostics); } catch (error) { errors.push(`openai predictions: ${error.message}`); diagnostics.openAiPredictions = "error"; }
   try { news = await getNews(); } catch (error) { errors.push(`news: ${error.message}`); }
@@ -775,7 +822,7 @@ async function buildLiveDataPayload(env) {
   diagnostics.upcomingMatchCount = matches.filter((match) => !match.live).length;
   diagnostics.newsCount = news.length;
   diagnostics.newsWithImagesCount = news.filter((article) => article.imageUrl).length;
-  return { generatedAt: new Date().toISOString(), source: { tennis: players.length ? "API-Tennis" : "fallback", odds: env.CLOUDBET_API_KEY && !errors.some((error) => error.startsWith("cloudbet")) ? "Cloudbet" : "fallback", news: news.length ? (diagnostics.openAiNews === "success" || diagnostics.openAiNews === "cached" ? "OpenAI + ESPN/TennisHead" : "ESPN/TennisHead") : "fallback" }, betUrl, matches, players: players.length ? players : fallbackPlayers, news: news.length ? news : fallbackNews, errors, diagnostics };
+  return { generatedAt: new Date().toISOString(), source: { tennis: diagnostics.playerSource, odds: env.CLOUDBET_API_KEY && !errors.some((error) => error.startsWith("cloudbet")) ? "Cloudbet" : "fallback", news: news.length ? (diagnostics.openAiNews === "success" || diagnostics.openAiNews === "cached" ? "OpenAI + ESPN/TennisHead" : "ESPN/TennisHead") : "fallback" }, betUrl, matches, players: players.length ? players : fallbackPlayers, news: news.length ? news : fallbackNews, errors, diagnostics };
 }
 
 async function refreshLiveDataCache(env) {

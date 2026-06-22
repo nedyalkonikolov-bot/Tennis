@@ -51,8 +51,9 @@ async function fetchApiTennis(env, method, params = {}) {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
   });
   const response = await fetch(url, { headers: { accept: "application/json" } });
-  if (!response.ok) return [];
+  if (!response.ok) throw new Error(`${method} returned ${response.status}`);
   const payload = await response.json();
+  if (payload?.success === 0 || payload?.success === false || payload?.error) throw new Error(payload.error || payload.message || `${method} failed`);
   return Array.isArray(payload.result) ? payload.result : [];
 }
 
@@ -100,7 +101,20 @@ function eventIsRecentFinished(event) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
   if (date < todayIsoDate(-RECENT_MATCH_WINDOW_DAYS) || date > todayIsoDate()) return false;
   if (!eventIsTourSingles(event)) return false;
-  return Boolean(getApiTennisWinnerName(event)) || Boolean(event.event_final_result);
+  const status = String(event.event_status || event.status || "").toLowerCase();
+  if (/cancel|postpon|abandon|not started|scheduled|interrupted/.test(status)) return false;
+  return Boolean(normalizeName(getApiTennisWinnerName(event)));
+}
+
+function getSurface(event) {
+  const value = safeText(event.surface || event.event_surface || event.tournament_surface || event.event_surface_type);
+  if (!value) return null;
+  const normalized = value.toLowerCase();
+  if (normalized.includes("clay")) return "Clay";
+  if (normalized.includes("grass")) return "Grass";
+  if (normalized.includes("hard")) return "Hard";
+  if (normalized.includes("carpet")) return "Carpet";
+  return null;
 }
 
 function playerMatchesEventSide(event, playerKey, playerName, side) {
@@ -152,7 +166,7 @@ function recentMatchStatement(db, player, event) {
     getEventDate(event),
     sourceEventId,
     safeText(event.tournament_name || event.league_name || event.event_name),
-    safeText(event.event_type_type || event.surface),
+    getSurface(event),
     opponent.name,
     safeText(opponent.key),
     safeText(getApiTennisScore(event)),
@@ -200,9 +214,11 @@ async function syncRecentMatches(request, env) {
       date_stop: todayIsoDate(),
     });
     fetchedEvents += fixtures.length;
-    await db.prepare("DELETE FROM player_recent_matches WHERE player_id = ? AND match_date >= date('now', '-100 days')").bind(player.id).run();
     const statements = fixtures.map((event) => recentMatchStatement(db, player, event)).filter(Boolean);
-    await runBatches(db, statements);
+    if (statements.length) {
+      await db.prepare("DELETE FROM player_recent_matches WHERE player_id = ? AND match_date >= date('now', '-100 days')").bind(player.id).run();
+      await runBatches(db, statements);
+    }
     matchesUpserted += statements.length;
     if (!fixtures.length) missed.push({ id: player.id, name: player.name, player_key: player.player_key });
   }

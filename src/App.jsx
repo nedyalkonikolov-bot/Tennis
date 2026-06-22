@@ -130,6 +130,8 @@ function normalizePlayer(player) {
   const recentWins = Number(player.recent_wins ?? player.stored_wins ?? 0);
   const recentLosses = Number(player.recent_losses ?? Math.max(recentMatches - recentWins, 0));
   const recentWinRate = player.recent_win_rate === null || player.recent_win_rate === undefined ? null : Number(player.recent_win_rate);
+  const hasRecentData = recentMatches > 0;
+  const hasSeasonData = player.matches_won !== null && player.matches_won !== undefined && player.matches_lost !== null && player.matches_lost !== undefined;
   return {
     id: player.id || player.player_key || player.name,
     name: player.name,
@@ -141,18 +143,20 @@ function normalizePlayer(player) {
     birthday: player.player_bday || "",
     photo: player.player_logo || "",
     recentMatches,
-    recentWins,
-    recentLosses,
+    recentWins: hasRecentData ? recentWins : "",
+    recentLosses: hasRecentData ? recentLosses : "",
     recentWinRate,
+    hasRecentData,
     form: recentWinRate ?? Number(player.form ?? player.form_rating ?? 0),
     season: player.season || "2026",
-    seasonWins: Number(player.matches_won || 0),
-    seasonLosses: Number(player.matches_lost || 0),
+    seasonWins: hasSeasonData ? Number(player.matches_won || 0) : "",
+    seasonLosses: hasSeasonData ? Number(player.matches_lost || 0) : "",
+    hasSeasonData,
     titles: Number(player.titles || 0),
     surfaces: {
-      hard: { wins: Number(player.hard_won || 0), losses: Number(player.hard_lost || 0) },
-      clay: { wins: Number(player.clay_won || 0), losses: Number(player.clay_lost || 0) },
-      grass: { wins: Number(player.grass_won || 0), losses: Number(player.grass_lost || 0) },
+      hard: { wins: player.hard_won == null ? "" : Number(player.hard_won), losses: player.hard_lost == null ? "" : Number(player.hard_lost) },
+      clay: { wins: player.clay_won == null ? "" : Number(player.clay_won), losses: player.clay_lost == null ? "" : Number(player.clay_lost) },
+      grass: { wins: player.grass_won == null ? "" : Number(player.grass_won), losses: player.grass_lost == null ? "" : Number(player.grass_lost) },
     },
     predictionMentions: Number(player.prediction_mentions || 0),
     updatedAt: player.updated_at || "",

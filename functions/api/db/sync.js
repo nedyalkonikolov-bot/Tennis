@@ -386,7 +386,20 @@ function eventIsRecentFinished(event) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
   if (date < todayIsoDate(-RECENT_MATCH_WINDOW_DAYS) || date > todayIsoDate()) return false;
   if (!eventIsTourSingles(event)) return false;
-  return Boolean(getApiTennisWinnerName(event)) || Boolean(event.event_final_result);
+  const status = String(event.event_status || event.status || "").toLowerCase();
+  if (/cancel|postpon|abandon|not started|scheduled|interrupted/.test(status)) return false;
+  return Boolean(normalizeName(getApiTennisWinnerName(event)));
+}
+
+function getEventSurface(event) {
+  const value = safeText(event.surface || event.event_surface || event.tournament_surface || event.event_surface_type);
+  if (!value) return null;
+  const normalized = value.toLowerCase();
+  if (normalized.includes("clay")) return "Clay";
+  if (normalized.includes("grass")) return "Grass";
+  if (normalized.includes("hard")) return "Hard";
+  if (normalized.includes("carpet")) return "Carpet";
+  return null;
 }
 
 function playerMatchesEventSide(event, playerKey, playerName, side) {
@@ -438,7 +451,7 @@ function recentMatchStatement(db, player, event) {
     getEventDate(event),
     sourceEventId,
     safeText(event.tournament_name || event.league_name || event.event_name),
-    safeText(event.event_type_type || event.surface),
+    getEventSurface(event),
     opponent.name,
     safeText(opponent.key),
     safeText(getApiTennisScore(event)),
@@ -588,9 +601,11 @@ async function syncRecentPlayerMatches(db, env, syncedMatches) {
       date_start: todayIsoDate(-RECENT_MATCH_WINDOW_DAYS),
       date_stop: todayIsoDate(),
     });
-    await db.prepare("DELETE FROM player_recent_matches WHERE player_id = ? AND match_date >= date('now', '-100 days')").bind(player.id).run();
     const statements = fixtures.map((event) => recentMatchStatement(db, player, event)).filter(Boolean);
-    await runBatches(db, statements);
+    if (statements.length) {
+      await db.prepare("DELETE FROM player_recent_matches WHERE player_id = ? AND match_date >= date('now', '-100 days')").bind(player.id).run();
+      await runBatches(db, statements);
+    }
     inserted += statements.length;
   }
 
