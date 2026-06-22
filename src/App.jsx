@@ -160,6 +160,8 @@ function normalizePlayer(player) {
     },
     predictionMentions: Number(player.prediction_mentions || 0),
     updatedAt: player.updated_at || "",
+    latestRecentMatchDate: player.latest_recent_match_date || "",
+    recentDataSource: player.recent_data_source || "",
     url: player.url || `/players/${String(player.tour || player.sex || "ATP").toLowerCase()}/${slugify(player.name)}/`,
     slug: player.slug || slugify(player.name),
   };

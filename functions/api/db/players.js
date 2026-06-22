@@ -27,7 +27,7 @@ export async function onRequestGet({ request, env }) {
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const statement = env.TENNIS_DB.prepare(`
-    WITH recent AS (
+    WITH fixture_recent AS (
       SELECT
         canonical.id AS player_id,
         COUNT(DISTINCT rm.id) AS recent_matches,
@@ -45,6 +45,37 @@ export async function onRequestGet({ request, env }) {
       WHERE rm.match_date >= date('now', '-100 days')
         AND rm.source LIKE 'api-tennis%'
       GROUP BY canonical.id
+    ), outcome_recent AS (
+      SELECT
+        canonical.id AS player_id,
+        COUNT(DISTINCT m.id) AS recent_matches,
+        COUNT(DISTINCT CASE WHEN
+          COALESCE(po.actual_winner_id = canonical.id, 0) OR LOWER(TRIM(po.actual_winner_name)) = LOWER(TRIM(canonical.name))
+          THEN m.id END) AS recent_wins,
+        COUNT(DISTINCT CASE WHEN NOT (
+          COALESCE(po.actual_winner_id = canonical.id, 0) OR LOWER(TRIM(po.actual_winner_name)) = LOWER(TRIM(canonical.name))
+        ) THEN m.id END) AS recent_losses,
+        MAX(SUBSTR(m.start_time, 1, 10)) AS latest_recent_match_date
+      FROM players canonical
+      JOIN matches m ON
+        m.player_a_id = canonical.id OR m.player_b_id = canonical.id
+        OR (m.tour = canonical.tour AND (m.normalized_player_a = canonical.normalized_name OR m.normalized_player_b = canonical.normalized_name))
+      JOIN prediction_outcomes po ON po.match_id = m.id
+      WHERE po.result_status = 'settled'
+        AND po.actual_winner_name IS NOT NULL AND po.actual_winner_name != ''
+        AND SUBSTR(m.start_time, 1, 10) >= date('now', '-100 days')
+      GROUP BY canonical.id
+    ), recent AS (
+      SELECT
+        canonical.id AS player_id,
+        CASE WHEN COALESCE(fr.recent_matches, 0) > 0 THEN fr.recent_matches ELSE COALESCE(orr.recent_matches, 0) END AS recent_matches,
+        CASE WHEN COALESCE(fr.recent_matches, 0) > 0 THEN fr.recent_wins ELSE COALESCE(orr.recent_wins, 0) END AS recent_wins,
+        CASE WHEN COALESCE(fr.recent_matches, 0) > 0 THEN fr.recent_losses ELSE COALESCE(orr.recent_losses, 0) END AS recent_losses,
+        CASE WHEN COALESCE(fr.recent_matches, 0) > 0 THEN fr.latest_recent_match_date ELSE orr.latest_recent_match_date END AS latest_recent_match_date,
+        CASE WHEN COALESCE(fr.recent_matches, 0) > 0 THEN 'api-tennis-fixtures' WHEN COALESCE(orr.recent_matches, 0) > 0 THEN 'settled-match-outcomes' ELSE NULL END AS recent_data_source
+      FROM players canonical
+      LEFT JOIN fixture_recent fr ON fr.player_id = canonical.id
+      LEFT JOIN outcome_recent orr ON orr.player_id = canonical.id
     ), season AS (
       SELECT
         canonical.id AS canonical_player_id,
@@ -77,6 +108,7 @@ export async function onRequestGet({ request, env }) {
       p.source,
       p.updated_at,
       r.latest_recent_match_date,
+      r.recent_data_source,
       COALESCE(r.recent_matches, 0) AS recent_matches,
       COALESCE(r.recent_wins, 0) AS recent_wins,
       COALESCE(r.recent_losses, 0) AS recent_losses,
@@ -105,5 +137,5 @@ export async function onRequestGet({ request, env }) {
   `);
 
   const result = await statement.bind(SEASON_STATS_YEAR, ...bindings, limit).all();
-  return jsonResponse({ ok: true, generatedAt: new Date().toISOString(), statSource: "API-Tennis standings, 2026 get_players season stats, and 100-day fixture results", seasonStatsYear: SEASON_STATS_YEAR, players: result.results || [] });
+  return jsonResponse({ ok: true, generatedAt: new Date().toISOString(), statSource: "API-Tennis standings, 2026 get_players season stats, and verified 100-day fixture/settled match results", seasonStatsYear: SEASON_STATS_YEAR, players: result.results || [] });
 }
