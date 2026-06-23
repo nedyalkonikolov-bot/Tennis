@@ -42,8 +42,8 @@ const pageMeta = {
     canonical: "/",
   },
   predictions: {
-    title: "Tennis Predictions Today | Cloudbet Odds & Crypto Tennis Betting Tips",
-    description: "Daily ATP and WTA tennis predictions with Cloudbet odds, player form, ranking signals, surface ratings, and crypto betting context.",
+    title: "AI Tennis Predictions Today | ATP & WTA Odds, Stats & Picks",
+    description: "Daily AI tennis predictions for ATP and WTA matches with odds, player form, ranking signals, surface ratings, match pages, and responsible betting research.",
     canonical: "/tennis-predictions/",
   },
   stats: {
@@ -62,8 +62,8 @@ const pageMeta = {
     canonical: "/betting-sites/",
   },
   tips: {
-    title: "Tennis Betting Tips Today | ATP & WTA Prediction Research",
-    description: "Tennis betting tips for ATP and WTA matches with odds, AI confidence, player form, rankings, surface context, and responsible betting research.",
+    title: "Tennis Betting Tips Today | ATP & WTA Odds Checklist",
+    description: "Practical tennis betting tips for ATP and WTA matches with odds discipline, AI confidence, player form, rankings, surface context, and responsible research.",
     canonical: "/tennis-betting-tips/",
   },
 };
@@ -224,15 +224,15 @@ function buildDynamicMeta(route, dbData) {
   }
   if (route.id === "predictions" && route.tour) {
     return {
-      title: `${route.tour} Tennis Predictions Today | Betting Tips & Cloudbet Odds`,
-      description: `${route.tour} tennis predictions with Cloudbet odds, form data, rankings, player stats, and crypto tennis betting tips.`,
+      title: `${route.tour} Tennis Predictions Today | Odds, Stats & AI Picks`,
+      description: `${route.tour} tennis predictions with odds, AI confidence, form data, rankings, player stats, match pages, and responsible betting research.`,
       canonical: `/${route.tour.toLowerCase()}-predictions/`,
     };
   }
   if (route.id === "predictions" && route.mode === "today") {
     return {
-      title: "Tennis Predictions Today | ATP & WTA Betting Tips",
-      description: "Today's tennis predictions for ATP and WTA matches with Cloudbet odds, confidence, player form, and surface signals.",
+      title: "Tennis Predictions Today | ATP & WTA Odds, Stats & AI Picks",
+      description: "Today's ATP and WTA tennis predictions with odds, AI confidence, player form, surface signals, match pages, and responsible betting research.",
       canonical: "/tennis-predictions-today/",
     };
   }
