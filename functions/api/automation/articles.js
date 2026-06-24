@@ -3,6 +3,17 @@ const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const ESPN_TENNIS_RSS = "https://www.espn.com/espn/rss/tennis/news";
 const VALID_CONTENT_TYPES = new Set(["match_prediction", "player_analysis", "tournament_preview", "news_reaction", "evergreen_article"]);
 const DEFAULT_MODEL = "gpt-5.4-mini";
+const SEO_MIN_WORDS = {
+  match_prediction: 650,
+  player_analysis: 750,
+  tournament_preview: 750,
+  news_reaction: 750,
+  evergreen_article: 900,
+};
+const SEO_MAX_META_TITLE = 60;
+const SEO_MIN_META_TITLE = 30;
+const SEO_MIN_META_DESCRIPTION = 120;
+const SEO_MAX_META_DESCRIPTION = 160;
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload, null, 2), {
@@ -55,6 +66,25 @@ function rssTag(item, tag) {
 
 function toJson(value) {
   return JSON.stringify(value ?? []);
+}
+
+function plainText(value = "") {
+  return String(value || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&[^;]+;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function wordCount(value = "") {
+  const text = plainText(value);
+  return text ? text.split(/\s+/).filter(Boolean).length : 0;
+}
+
+function includesText(haystack = "", needle = "") {
+  return String(haystack || "").toLowerCase().includes(String(needle || "").toLowerCase());
 }
 
 function parseCount(value, fallback = 0, max = 5) {
@@ -387,26 +417,47 @@ function normalizeOutput(raw, candidate) {
     quality_score: Number(raw.quality_score),
   };
   output.seo = {
-    meta_title: String(output.seo.meta_title || output.title).slice(0, 90),
-    meta_description: String(output.seo.meta_description || output.summary).slice(0, 180),
+    meta_title: String(output.seo.meta_title || output.title).trim(),
+    meta_description: String(output.seo.meta_description || output.summary).trim(),
     canonical_url: `${SITE_URL}/articles/${output.slug}/`,
-    og_title: String(output.seo.og_title || output.title).slice(0, 90),
-    og_description: String(output.seo.og_description || output.summary).slice(0, 180),
+    og_title: String(output.seo.og_title || output.title).trim(),
+    og_description: String(output.seo.og_description || output.summary).trim(),
   };
   return output;
 }
 
 function validateOutput(output, candidate) {
   const errors = [];
+  const bodyWords = wordCount(output.body);
+  const minWords = SEO_MIN_WORDS[output.content_type] || 700;
+  const allText = `${output.title} ${output.summary} ${plainText(output.body)}`;
   if (!VALID_CONTENT_TYPES.has(output.content_type)) errors.push("invalid content_type");
   if (output.content_type !== candidate.contentType) errors.push(`content_type mismatch: expected ${candidate.contentType}`);
   if (!output.title || output.title.length < 18) errors.push("title missing or too short");
   if (!output.slug) errors.push("slug missing");
   if (!output.summary || output.summary.length < 60) errors.push("summary missing or too short");
-  if (!output.body || output.body.length < 900) errors.push("body missing or too short");
-  if (!output.seo.meta_description || output.seo.meta_description.length < 60) errors.push("meta_description missing or too short");
-  if (!Number.isFinite(output.quality_score) || output.quality_score < 70) errors.push("quality_score below 70");
-  if (/guaranteed|sure win|risk[- ]?free|lock\b/i.test(`${output.title} ${output.summary} ${output.body}`)) errors.push("prohibited betting guarantee language");
+  if (!output.body || bodyWords < minWords) errors.push(`body below SEO word gate: ${bodyWords}/${minWords}`);
+  if (!/<h2\b/i.test(output.body)) errors.push("body missing h2 sections");
+  if ((output.body.match(/<h2\b/gi) || []).length < 2) errors.push("body needs at least two h2 sections");
+  if (!output.seo.meta_title || output.seo.meta_title.length < SEO_MIN_META_TITLE || output.seo.meta_title.length > SEO_MAX_META_TITLE) {
+    errors.push(`meta_title must be ${SEO_MIN_META_TITLE}-${SEO_MAX_META_TITLE} characters`);
+  }
+  if (!output.seo.meta_description || output.seo.meta_description.length < SEO_MIN_META_DESCRIPTION || output.seo.meta_description.length > SEO_MAX_META_DESCRIPTION) {
+    errors.push(`meta_description must be ${SEO_MIN_META_DESCRIPTION}-${SEO_MAX_META_DESCRIPTION} characters`);
+  }
+  if (output.seo.canonical_url !== `${SITE_URL}/articles/${output.slug}/`) errors.push("canonical_url mismatch");
+  if (!output.seo.og_title || output.seo.og_title.length > 70) errors.push("og_title missing or too long");
+  if (!output.seo.og_description || output.seo.og_description.length < 80 || output.seo.og_description.length > 180) errors.push("og_description missing or invalid length");
+  if (!Number.isFinite(output.quality_score) || output.quality_score < 78) errors.push("quality_score below 78");
+  if (/guaranteed|sure win|risk[- ]?free|lock\b/i.test(allText)) errors.push("prohibited betting guarantee language");
+  if (!includesText(allText, "TennisTipz")) errors.push("missing TennisTipz brand mention");
+  for (const player of candidate.relatedPlayers || []) {
+    if (player && !includesText(allText, player)) errors.push(`missing related player mention: ${player}`);
+  }
+  if (candidate.relatedTournament && !includesText(allText, candidate.relatedTournament)) errors.push(`missing related tournament mention: ${candidate.relatedTournament}`);
+  if (!/\/tennis-predictions\/|prediction board|player stats|tennis news|tournament/i.test(allText)) {
+    errors.push("missing internal-link context terms");
+  }
   if (output.content_type === "match_prediction" && !output.body.includes("This content is for informational and entertainment purposes only. It is not financial or betting advice.")) {
     errors.push("missing prediction disclaimer");
   }
@@ -449,6 +500,7 @@ function responseJsonSchema() {
 }
 
 function buildPrompt(candidate) {
+  const minWords = SEO_MIN_WORDS[candidate.contentType] || 700;
   return {
     site: "TennisTipz.win",
     required_content_type: candidate.contentType,
@@ -457,14 +509,29 @@ function buildPrompt(candidate) {
     facts_available: candidate.facts,
     related_players: candidate.relatedPlayers || [],
     related_tournament: candidate.relatedTournament || null,
+    seo_quality_gates: {
+      body_min_words: minWords,
+      meta_title: `${SEO_MIN_META_TITLE}-${SEO_MAX_META_TITLE} characters, primary keyword near the beginning, TennisTipz brand only if it fits naturally`,
+      meta_description: `${SEO_MIN_META_DESCRIPTION}-${SEO_MAX_META_DESCRIPTION} characters, unique, natural, click-worthy, no guarantees`,
+      structure: "Use at least two useful h2 sections, short paragraphs, and specific context from facts_available.",
+      internal_context: "Mention relevant TennisTipz hubs naturally: tennis predictions, player stats, tennis news, tournament pages, or the prediction board.",
+      schema_readiness: "Write clean Article-friendly content with factual headline, summary, dates handled by the app, and no fake quotes.",
+    },
     rules: [
       "Return strict JSON only.",
       "Use only the facts_available list for statistics.",
       "If a fact is missing, write data unavailable.",
       "Do not create fake quotes.",
       "Do not guarantee betting outcomes.",
-      "Use natural internal-link anchor text, but do not output markdown.",
+      "Mention related player names and related tournament exactly when provided.",
+      "Use natural internal-link context terms; the renderer will add links automatically, so do not output markdown.",
       "The body must be HTML using only p, h2, h3, ul, li, strong, em tags.",
+      `The body must be at least ${minWords} words and must be useful on its own.`,
+      `seo.meta_title must be ${SEO_MIN_META_TITLE}-${SEO_MAX_META_TITLE} characters.`,
+      `seo.meta_description must be ${SEO_MIN_META_DESCRIPTION}-${SEO_MAX_META_DESCRIPTION} characters.`,
+      "seo.og_title must be concise and no longer than 70 characters.",
+      "seo.og_description must be 80-180 characters.",
+      "Use TennisTipz branding naturally in the content.",
       "For match_prediction, include this exact sentence: This content is for informational and entertainment purposes only. It is not financial or betting advice.",
     ],
   };
@@ -497,7 +564,7 @@ async function callOpenAi(env, candidate, attempt = 1) {
           schema: responseJsonSchema(),
         },
       },
-      max_output_tokens: 3200,
+      max_output_tokens: 6200,
     }),
   });
   const data = await response.json().catch(() => ({}));
