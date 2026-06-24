@@ -957,6 +957,69 @@ async function postThreads(env, text) {
   return { ok: false, phase: "publish", user, topicTag, status: last.status, payload: last.payload, creation: createPayload, attempts };
 }
 
+function threadsPublishedId(result) {
+  return result?.payload?.id || result?.payload?.thread_id || result?.payload?.post_id || result?.payload?.media_id || null;
+}
+
+function formatThreadsLinkComment(url, label = "Full context") {
+  const cleanUrl = String(url || "").trim();
+  if (!cleanUrl) return "";
+  return `${label}: ${cleanUrl}`;
+}
+
+async function postThreadsReply(env, parentResult, text) {
+  if (!env.THREADS_ACCESS_TOKEN) return { skipped: true, reason: "Missing THREADS_ACCESS_TOKEN" };
+  const cleanText = String(text || "").trim();
+  if (!cleanText) return { skipped: true, reason: "Empty Threads reply text" };
+
+  const user = parentResult?.user || await getThreadsUser(env);
+  if (!user) return { skipped: true, reason: "Missing THREADS_USER_ID or usable Threads token" };
+  if (user.error) return { ok: false, phase: "me", status: user.status, payload: user.payload };
+
+  const parentId = threadsPublishedId(parentResult);
+  if (!parentId) return { ok: false, phase: "reply-parent", reason: "Missing published Threads post id", parentResult };
+
+  const createResponse = await fetch(`${THREADS_API_URL}/${encodeURIComponent(user.id)}/threads`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      media_type: "TEXT",
+      text: cleanText,
+      reply_to_id: parentId,
+      access_token: env.THREADS_ACCESS_TOKEN,
+    }),
+  });
+  const createPayload = await createResponse.json().catch(() => ({}));
+  if (!createResponse.ok || !createPayload.id) return { ok: false, phase: "reply-create", user, parentId, status: createResponse.status, payload: createPayload };
+
+  const attempts = [];
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (attempt > 1) await new Promise((resolve) => setTimeout(resolve, 3500));
+    const publishResponse = await fetch(`${THREADS_API_URL}/${encodeURIComponent(user.id)}/threads_publish`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ creation_id: createPayload.id, access_token: env.THREADS_ACCESS_TOKEN }),
+    });
+    const publishPayload = await publishResponse.json().catch(() => ({}));
+    attempts.push({ attempt, status: publishResponse.status, payload: publishPayload });
+    if (publishResponse.ok) return { ok: true, phase: "reply-publish", user, parentId, status: publishResponse.status, payload: publishPayload, creation: createPayload, attempts };
+
+    const subcode = publishPayload?.error?.error_subcode;
+    const code = publishPayload?.error?.code;
+    const transient = publishPayload?.error?.is_transient === true;
+    if (!(transient || code === 2 || code === 24 || subcode === 4279009)) break;
+  }
+
+  const last = attempts[attempts.length - 1] || { status: 0, payload: {} };
+  return { ok: false, phase: "reply-publish", user, parentId, status: last.status, payload: last.payload, creation: createPayload, attempts };
+}
+
+async function postThreadsLinkComment(env, parentResult, url, label = "Full context") {
+  const text = formatThreadsLinkComment(url, label);
+  if (!text) return { skipped: true, reason: "Missing URL for Threads link comment" };
+  return postThreadsReply(env, parentResult, text);
+}
+
 async function getTopPlayerNames(db, limit = TOP_PLAYER_POST_RANK) {
   const result = await db.prepare(`
     SELECT name
@@ -1122,8 +1185,13 @@ async function promoteHumanThreads(request, env, dryRun) {
   const publishResult = dryRun
     ? { dryRun: true, ok: false, reason: "dry-run" }
     : rules.ok ? await postThreads(env, selected.text) : { skipped: true, ok: false, reasons: rules.reasons };
+  const linkCommentLabel = candidate.type === "news" ? "Read the article" : "Full prediction";
+  const linkCommentText = formatThreadsLinkComment(candidate.url, linkCommentLabel);
+  const linkComment = dryRun
+    ? { dryRun: true, text: linkCommentText }
+    : publishResult.ok ? await postThreadsLinkComment(env, publishResult, candidate.url, linkCommentLabel) : null;
 
-  if (!dryRun && publishResult.ok) await recordHumanAutomationPost(db, candidate, selected, publishResult, { ...generation, scored: grounded });
+  if (!dryRun && publishResult.ok) await recordHumanAutomationPost(db, candidate, selected, { ...publishResult, linkComment }, { ...generation, scored: grounded });
 
   return jsonResponse({
     ok: true,
@@ -1138,6 +1206,7 @@ async function promoteHumanThreads(request, env, dryRun) {
     scoreReasons: selected.reasons,
     rules,
     publishResult,
+    linkComment,
     generationSource: generation.source,
     generationReason: generation.reason || null,
     recentHumanPosts: recentRows.length,
@@ -1211,11 +1280,12 @@ async function promote(request, env) {
 
     if (postThreadsEnabled && !threadsPosted && threads.length < limit) {
       if (dryRun) {
-        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, text: threadsPost.text });
+        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, text: threadsPost.text, linkComment: { dryRun: true, text: formatThreadsLinkComment(threadsPost.url, "Full prediction") } });
       } else {
         const result = await postThreads(env, threadsPost.text);
-        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, result });
-        if (result.ok) await recordAutomationPost(db, threadsPlatform, canonicalTargetId, threadsPost.url, result.payload);
+        const linkComment = result.ok ? await postThreadsLinkComment(env, result, threadsPost.url, "Full prediction") : null;
+        threads.push({ predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, result, linkComment });
+        if (result.ok) await recordAutomationPost(db, threadsPlatform, canonicalTargetId, threadsPost.url, { post: result.payload, linkComment });
       }
     }
 

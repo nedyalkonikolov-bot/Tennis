@@ -9,18 +9,21 @@ async function readJsonResponse(response) {
   }
 }
 
-export async function publishThread({ userId, accessToken, text }) {
+export async function publishThread({ userId, accessToken, text, replyToId }) {
   if (!userId) throw new Error("THREADS_USER_ID is required for live posting.");
   if (!accessToken) throw new Error("THREADS_ACCESS_TOKEN is required for live posting.");
   if (!text) throw new Error("Post text is empty.");
 
+  const createBody = new URLSearchParams({
+    media_type: "TEXT",
+    text,
+    access_token: accessToken,
+  });
+  if (replyToId) createBody.set("reply_to_id", replyToId);
+
   const createResponse = await fetch(`${THREADS_API_URL}/${encodeURIComponent(userId)}/threads`, {
     method: "POST",
-    body: new URLSearchParams({
-      media_type: "TEXT",
-      text,
-      access_token: accessToken,
-    }),
+    body: createBody,
   });
   const createPayload = await readJsonResponse(createResponse);
   if (!createResponse.ok || !createPayload.id) {
@@ -44,4 +47,9 @@ export async function publishThread({ userId, accessToken, text }) {
     containerId: createPayload.id,
     publish: publishPayload,
   };
+}
+
+export async function publishThreadReply({ userId, accessToken, parentId, text }) {
+  if (!parentId) throw new Error("parentId is required for a Threads reply.");
+  return publishThread({ userId, accessToken, text, replyToId: parentId });
 }
