@@ -289,6 +289,7 @@ function updateStructuredData(route, liveData, dbData) {
       name: "TennisTipz",
       url: `${siteUrl}/`,
       logo: { "@type": "ImageObject", url: `${siteUrl}/favicon.svg` },
+      description: "AI-assisted tennis predictions, ATP and WTA player statistics, tennis news context, and responsible betting research.",
     },
     {
       "@type": "WebSite",
@@ -343,16 +344,6 @@ function updateStructuredData(route, liveData, dbData) {
         image: player.photo || undefined,
       });
     }
-  }
-
-  if (route.id === "betting") {
-    graph.push({
-      "@type": "FAQPage",
-      mainEntity: [
-        { "@type": "Question", name: "What are the best tennis betting sites on TennisTipz?", acceptedAnswer: { "@type": "Answer", text: "TennisTipz compares Cloudbet, BC.Game, and Stake.com for crypto tennis betting research and responsible betting." } },
-        { "@type": "Question", name: "Does TennisTipz provide guaranteed picks?", acceptedAnswer: { "@type": "Answer", text: "No. TennisTipz predictions are analytical opinions based on available data and are not guaranteed betting results." } },
-      ],
-    });
   }
 
   script.textContent = JSON.stringify({ "@context": "https://schema.org", "@graph": graph });
@@ -727,7 +718,7 @@ function NotFound({ title = "Page not found", text = "The page could not be load
 }
 
 function ResponsibleFooter() {
-  return <footer className="border-t border-white/10 px-5 py-8 text-sm text-slate-500 md:px-6"><div className="mx-auto max-w-7xl"><div className="mb-4 flex items-center gap-2 text-slate-300"><ShieldCheck size={18} /> Responsible Play</div><p className="max-w-4xl">18+ only. Tennis predictions are analytical opinions based on available information and are not guaranteed outcomes. Betting involves risk. Never bet more than you can afford to lose.</p></div></footer>;
+  return <footer className="border-t border-white/10 px-5 py-8 text-sm text-slate-500 md:px-6"><div className="mx-auto max-w-7xl"><div className="mb-4 flex items-center gap-2 text-slate-300"><ShieldCheck size={18} /> Responsible Play</div><p className="max-w-4xl">18+ only. Tennis predictions are analytical opinions based on available information and are not guaranteed outcomes. Betting involves risk. Never bet more than you can afford to lose.</p><nav className="mt-5 flex flex-wrap gap-4" aria-label="Trust and legal links"><a className="text-slate-300 hover:text-lime-300" href="/about/">About</a><a className="text-slate-300 hover:text-lime-300" href="/methodology/">Methodology</a><a className="text-slate-300 hover:text-lime-300" href="/responsible-gambling/">Responsible gambling</a><a className="text-slate-300 hover:text-lime-300" href="/privacy/">Privacy</a><a className="text-slate-300 hover:text-lime-300" href="/terms/">Terms</a></nav></div></footer>;
 }
 
 export default function TennisTipzApp() {

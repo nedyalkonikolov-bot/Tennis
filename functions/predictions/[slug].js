@@ -69,6 +69,12 @@ function formatDate(value) {
   return parsed.toISOString().replace("T", " ").slice(0, 16);
 }
 
+function isoDateTime(value) {
+  const normalized = String(value || "").includes("T") ? value : String(value || "").replace(" ", "T");
+  const parsed = normalized ? new Date(normalized) : new Date();
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
 function canonicalRedirect(request) {
   const url = new URL(request.url);
   if (url.hostname === CANONICAL_HOST && url.protocol === "https:") return null;
@@ -156,6 +162,7 @@ async function findMatchBySlug(db, slug) {
       COALESCE(sb.matches_won, 0) AS player_b_season_wins,
       COALESCE(sb.matches_lost, 0) AS player_b_season_losses,
       p.id AS prediction_id, p.predicted_winner_name, p.predicted_side, p.confidence, p.predicted_odds, p.model_edge,
+      p.created_at AS prediction_created_at,
       p.factors_json,
       po.result_status, po.actual_winner_name, po.correct, po.settled_at
     FROM matches m
@@ -260,6 +267,7 @@ function html(match, slug, request, h2h) {
     "@type": "Article",
     headline: `${title} Prediction`,
     description,
+    datePublished: isoDateTime(match.prediction_created_at || match.start_time),
     dateModified: new Date().toISOString(),
     author: { "@type": "Organization", name: "TennisTipz" },
     publisher: { "@type": "Organization", name: "TennisTipz" },
@@ -278,15 +286,6 @@ function html(match, slug, request, h2h) {
       { "@type": "ListItem", position: 3, name: tourHubName, item: `${SITE_URL}${tourHub}` },
       { "@type": "ListItem", position: 4, name: `${title} Prediction`, item: canonical },
     ],
-  };
-  const faqSchema = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: faqs.map((faq) => ({
-      "@type": "Question",
-      name: faq.q,
-      acceptedAnswer: { "@type": "Answer", text: faq.a },
-    })),
   };
   return `<!doctype html>
 <html lang="en"><head>
@@ -310,7 +309,6 @@ function html(match, slug, request, h2h) {
 <link rel="stylesheet" href="/ad-banners.css?v=navy-rails">
 <script type="application/ld+json">${JSON.stringify(articleSchema)}</script>
 <script type="application/ld+json">${JSON.stringify(breadcrumbSchema)}</script>
-<script type="application/ld+json">${JSON.stringify(faqSchema)}</script>
 <style>body{margin:0;background:#07111f;color:#e5edf7;font-family:Arial,sans-serif;line-height:1.6}.wrap{max-width:1040px;margin:auto;padding:32px 18px}.crumb,.muted{color:#94a3b8}a{color:#bef264}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}.card{background:#111c2d;border:1px solid rgba(255,255,255,.1);padding:18px}.pill{display:inline-block;background:#bef264;color:#08111f;font-weight:700;padding:6px 10px}.cta{display:inline-block;margin-top:16px;background:#bef264;color:#08111f;padding:12px 16px;font-weight:700;text-decoration:none}.split{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(260px,.8fr);gap:22px}.list{padding-left:20px}.note{border-left:4px solid #bef264;background:#0d1728;padding:16px 18px}.prob{height:12px;background:#1e293b;overflow:hidden}.prob span{display:block;height:12px;background:#bef264}.table{width:100%;border-collapse:collapse;background:#111c2d}.table th,.table td{border:1px solid rgba(255,255,255,.1);padding:12px;text-align:left}.table th{color:#cbd5e1}.inline-links{display:flex;flex-wrap:wrap;gap:10px}.inline-links a{background:#111c2d;border:1px solid rgba(255,255,255,.12);padding:8px 10px;text-decoration:none}@media(max-width:760px){.split{grid-template-columns:1fr}.table{font-size:14px}}h1{font-size:clamp(34px,6vw,62px);line-height:1.05}h2{margin-top:34px}</style>
 </head><body><main class="wrap">
 <p class="crumb"><a href="/">TennisTipz</a> / <a href="/tennis-predictions/">Tennis predictions</a> / <a href="${tourHub}">${escapeHtml(match.tour)}</a></p>
