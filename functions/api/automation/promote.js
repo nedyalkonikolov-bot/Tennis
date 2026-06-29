@@ -26,6 +26,7 @@ const HUMAN_MAX_POST_LENGTH = 450;
 const HUMAN_MAX_POSTS_PER_DAY = 6;
 const HUMAN_MAX_LINK_POSTS_PER_DAY = 1;
 const HUMAN_MIN_POST_INTERVAL_MINUTES = 90;
+const DEFAULT_THREADS_LINK_COMMENT_RATE = 0.35;
 const HUMAN_EMOTION_WORDS = ["feels", "looks", "underrated", "dangerous", "momentum", "pressure", "nervy", "scrappy", "tight", "swing"];
 const HUMAN_SPAM_WORDS = ["odds", "bet", "bets", "betting", "stake", "cloudbet", "bc.game", "affiliate", "offer", "lock", "guaranteed", "sure win", "free pick"];
 const THREADS_LOCALES = {
@@ -967,6 +968,45 @@ function formatThreadsLinkComment(url, label = "Full context") {
   return `${label}: ${cleanUrl}`;
 }
 
+function stableHash(value = "") {
+  let hash = 2166136261;
+  const text = String(value || "");
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function isInternalTennisTipzUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    return parsed.hostname === "tennistipz.win" || parsed.hostname === "www.tennistipz.win";
+  } catch {
+    return false;
+  }
+}
+
+function threadsLinkCommentRate(env) {
+  const raw = Number.parseFloat(env.THREADS_LINK_COMMENT_RATE || env.THREADS_COMMENT_LINK_RATE || "");
+  if (!Number.isFinite(raw)) return DEFAULT_THREADS_LINK_COMMENT_RATE;
+  return Math.min(Math.max(raw, 0), 1);
+}
+
+function shouldPostThreadsLinkComment(seed, env, options = {}) {
+  if (!options.url) return { ok: false, reason: "missing-url" };
+  if (options.allowExternal === false && !isInternalTennisTipzUrl(options.url)) return { ok: false, reason: "external-article-links-disabled" };
+
+  const rate = threadsLinkCommentRate(env);
+  if (rate <= 0) return { ok: false, reason: "link-comments-disabled", rate };
+  if (rate >= 1) return { ok: true, reason: "always", rate };
+
+  const score = (stableHash(seed || options.url) % 10000) / 10000;
+  return score < rate
+    ? { ok: true, reason: "sampled-in", rate, score }
+    : { ok: false, reason: "sampled-out", rate, score };
+}
+
 async function postThreadsReply(env, parentResult, text) {
   if (!env.THREADS_ACCESS_TOKEN) return { skipped: true, reason: "Missing THREADS_ACCESS_TOKEN" };
   const cleanText = String(text || "").trim();
@@ -1186,10 +1226,13 @@ async function promoteHumanThreads(request, env, dryRun) {
     ? { dryRun: true, ok: false, reason: "dry-run" }
     : rules.ok ? await postThreads(env, selected.text) : { skipped: true, ok: false, reasons: rules.reasons };
   const linkCommentLabel = candidate.type === "news" ? "Read the article" : "Full prediction";
-  const linkCommentText = formatThreadsLinkComment(candidate.url, linkCommentLabel);
+  const linkCommentDecision = candidate.type === "news"
+    ? { ok: false, reason: "external-article-links-disabled" }
+    : shouldPostThreadsLinkComment(candidate.targetId || candidate.url, env, { url: candidate.url, allowExternal: false });
+  const linkCommentText = linkCommentDecision.ok ? formatThreadsLinkComment(candidate.url, linkCommentLabel) : "";
   const linkComment = dryRun
-    ? { dryRun: true, text: linkCommentText }
-    : publishResult.ok ? await postThreadsLinkComment(env, publishResult, candidate.url, linkCommentLabel) : null;
+    ? { dryRun: true, decision: linkCommentDecision, text: linkCommentText || null }
+    : publishResult.ok && linkCommentDecision.ok ? await postThreadsLinkComment(env, publishResult, candidate.url, linkCommentLabel) : { skipped: true, decision: linkCommentDecision };
 
   if (!dryRun && publishResult.ok) await recordHumanAutomationPost(db, candidate, selected, { ...publishResult, linkComment }, { ...generation, scored: grounded });
 
@@ -1279,11 +1322,12 @@ async function promote(request, env) {
     }
 
     if (postThreadsEnabled && !threadsPosted && threads.length < limit) {
+      const linkCommentDecision = shouldPostThreadsLinkComment(canonicalTargetId, env, { url: threadsPost.url, allowExternal: false });
       if (dryRun) {
-        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, text: threadsPost.text, linkComment: { dryRun: true, text: formatThreadsLinkComment(threadsPost.url, "Full prediction") } });
+        threads.push({ dryRun: true, predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, text: threadsPost.text, linkComment: { dryRun: true, decision: linkCommentDecision, text: linkCommentDecision.ok ? formatThreadsLinkComment(threadsPost.url, "Full prediction") : null } });
       } else {
         const result = await postThreads(env, threadsPost.text);
-        const linkComment = result.ok ? await postThreadsLinkComment(env, result, threadsPost.url, "Full prediction") : null;
+        const linkComment = result.ok && linkCommentDecision.ok ? await postThreadsLinkComment(env, result, threadsPost.url, "Full prediction") : { skipped: true, decision: linkCommentDecision };
         threads.push({ predictionId: match.prediction_id, matchId: match.match_id, rankContext: { playerA: match.player_a_rank || null, playerB: match.player_b_rank || null, topRankFilter: TOP_PLAYER_POST_RANK }, postStyle: threadsPost.postStyle, url: threadsPost.url, referral: threadsPost.referral, news: threadsPost.news, language: threadsPost.language, languageLabel: threadsPost.languageLabel, ai: threadsPost.ai, result, linkComment });
         if (result.ok) await recordAutomationPost(db, threadsPlatform, canonicalTargetId, threadsPost.url, { post: result.payload, linkComment });
       }
