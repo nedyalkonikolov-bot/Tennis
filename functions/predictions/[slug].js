@@ -59,7 +59,9 @@ function canonicalTournamentSlug(name = "") {
 }
 
 function tournamentUrl(name) {
-  return name ? `/tournaments/${canonicalTournamentSlug(name)}/` : "/tennis-predictions/";
+  if (!name) return "/tennis-predictions/";
+  const slug = canonicalTournamentSlug(name);
+  return slug === "wimbledon" ? "/wimbledon/" : `/tournaments/${slug}/`;
 }
 
 function formatDate(value) {

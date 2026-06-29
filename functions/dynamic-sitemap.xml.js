@@ -125,7 +125,8 @@ export async function onRequestGet({ env, request }) {
     }
 
     for (const tournament of tournaments.results || []) {
-      addEntry(`/tournaments/${canonicalTournamentSlug(tournament.tournament)}/`, "0.73", "daily", tournament.updated_at);
+      const slug = canonicalTournamentSlug(tournament.tournament);
+      addEntry(slug === "wimbledon" ? "/wimbledon/" : `/tournaments/${slug}/`, slug === "wimbledon" ? "0.88" : "0.73", "daily", tournament.updated_at);
     }
 
     for (const article of articles.results || []) {

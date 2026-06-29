@@ -39,7 +39,8 @@ function predictionUrl(match) {
 }
 
 function tournamentUrl(name) {
-  return `/tournaments/${slugify(name)}/`;
+  const slug = slugify(name);
+  return /wimbledon/.test(slug) ? "/wimbledon/" : `/tournaments/${slug}/`;
 }
 
 function formatDate(value) {

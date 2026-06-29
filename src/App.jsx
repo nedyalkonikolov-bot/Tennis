@@ -495,7 +495,7 @@ function HomePage({ onNavigate, liveData, dbData }) {
   const latestNews = useMemo(() => mergeNewsAndArticles(liveData.news, dbData.articles).slice(0, 6), [liveData.news, dbData.articles]);
   const featuredAnalysis = useMemo(() => dbData.matchPages.slice(0, 4), [dbData.matchPages]);
   const upcomingTournaments = [
-    { name: "Wimbledon", slug: "wimbledon", surface: "Grass", note: "Grand Slam grass-court hub" },
+    { name: "Wimbledon", slug: "wimbledon", href: "/wimbledon/", surface: "Grass", note: "2026 grass-court prediction corner" },
     { name: "US Open", slug: "us-open", surface: "Hard", note: "Grand Slam hard-court hub" },
     { name: "French Open", slug: "french-open", surface: "Clay", note: "Roland Garros clay-court hub" },
     { name: "Australian Open", slug: "australian-open", surface: "Hard", note: "Grand Slam hard-court hub" },
@@ -549,7 +549,7 @@ function HomePage({ onNavigate, liveData, dbData }) {
       </HomeSection>
       <HomeSection eyebrow="Upcoming tournaments" title="Tournament hubs for the biggest events" text="Grand Slam hubs are built for schedule, surface, key players, news and predictions." href="/tennis-predictions/" onNavigate={onNavigate}>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {upcomingTournaments.map((tournament) => <a key={tournament.slug} href={`/tournaments/${tournament.slug}/`} className="border border-white/10 bg-white/[0.04] p-5 no-underline hover:border-lime-400/40"><CalendarDays className="text-lime-300" size={22} /><h3 className="mt-4 text-xl font-black text-white">{tournament.name}</h3><p className="mt-2 text-sm text-slate-500">{tournament.surface}</p><p className="mt-3 text-sm leading-6 text-slate-400">{tournament.note}</p></a>)}
+          {upcomingTournaments.map((tournament) => <a key={tournament.slug} href={tournament.href || `/tournaments/${tournament.slug}/`} className="border border-white/10 bg-white/[0.04] p-5 no-underline hover:border-lime-400/40"><CalendarDays className="text-lime-300" size={22} /><h3 className="mt-4 text-xl font-black text-white">{tournament.name}</h3><p className="mt-2 text-sm text-slate-500">{tournament.surface}</p><p className="mt-3 text-sm leading-6 text-slate-400">{tournament.note}</p></a>)}
         </div>
       </HomeSection>
       <HomeSection eyebrow="Featured analysis" title="Deep match pages and betting guides" text="Indexable analysis pages connect predictions, players, tournaments and sportsbook research." href="/tennis-betting-tips/" onNavigate={onNavigate}>
@@ -581,6 +581,7 @@ function HomePage({ onNavigate, liveData, dbData }) {
 function SeoHubLinks({ onNavigate }) {
   const links = [
     ["/tennis-predictions-today/", "Tennis Predictions Today", "Daily ATP and WTA picks with odds and form signals."],
+    ["/wimbledon/", "Wimbledon 2026 Corner", "Schedule, results, predictions and grass-court betting research."],
     ["/atp-predictions/", "ATP Predictions", "Men's tennis betting tips and Cloudbet markets."],
     ["/wta-predictions/", "WTA Predictions", "Women's tennis predictions, rankings and form notes."],
     ["/tennis-betting-tips/", "Tennis Betting Tips", "Daily betting checklist for odds, form and match context."],

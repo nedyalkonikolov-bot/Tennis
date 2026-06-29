@@ -23,6 +23,7 @@ export async function onRequestGet({ request }) {
     urlEntry("/tennis-predictions-today/", "2026-06-29", "hourly", "0.96"),
     urlEntry("/atp-predictions/", "2026-06-29", "hourly", "0.92"),
     urlEntry("/wta-predictions/", "2026-06-29", "hourly", "0.92"),
+    urlEntry("/wimbledon/", "2026-06-29", "hourly", "0.95"),
     urlEntry("/player-stats/", "2026-06-29", "daily", "0.9"),
     urlEntry("/players/atp/", "2026-06-29", "daily", "0.88"),
     urlEntry("/players/wta/", "2026-06-29", "daily", "0.88"),

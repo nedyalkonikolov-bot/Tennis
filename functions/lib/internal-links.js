@@ -28,7 +28,7 @@ function normalizeTerm(value = "") {
 function isValidCandidate(candidate) {
   return candidate
     && normalizeTerm(candidate.label).length >= 4
-    && /^\/(players|tournaments|predictions|articles)\//.test(candidate.url || "")
+    && (/^\/(players|tournaments|predictions|articles)\//.test(candidate.url || "") || candidate.url === "/wimbledon/")
     && !candidate.url.includes("?")
     && !candidate.url.includes("#");
 }

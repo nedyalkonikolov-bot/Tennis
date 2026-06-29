@@ -97,7 +97,8 @@ async function buildInternalLinkContext(db, article) {
   for (const tournament of tournaments.results || []) {
     const name = tournament.tournament || "";
     if (text.includes(name.toLowerCase())) {
-      candidates.push({ label: name, url: `/tournaments/${canonicalTournamentSlug(name)}/`, type: "tournament" });
+      const slug = canonicalTournamentSlug(name);
+      candidates.push({ label: name, url: slug === "wimbledon" ? "/wimbledon/" : `/tournaments/${slug}/`, type: "tournament" });
     }
   }
   for (const match of predictions.results || []) {
