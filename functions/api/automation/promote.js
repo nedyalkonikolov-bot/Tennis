@@ -29,6 +29,12 @@ const HUMAN_MIN_POST_INTERVAL_MINUTES = 90;
 const DEFAULT_THREADS_LINK_COMMENT_RATE = 0.35;
 const HUMAN_EMOTION_WORDS = ["feels", "looks", "underrated", "dangerous", "momentum", "pressure", "nervy", "scrappy", "tight", "swing"];
 const HUMAN_SPAM_WORDS = ["odds", "bet", "bets", "betting", "stake", "cloudbet", "bc.game", "affiliate", "offer", "lock", "guaranteed", "sure win", "free pick"];
+const HUMAN_TIRED_PHRASES = [
+  "am i overthinking it",
+  "feels closer than the rankings make it look",
+  "shape of an awkward match fast",
+  "one nervous service game changes the whole read",
+];
 const THREADS_LOCALES = {
   en: {
     label: "English",
@@ -618,8 +624,30 @@ function tokenOverlap(left, right) {
   return rightTokens.filter((token) => leftTokens.has(token)).length / Math.max(leftTokens.size, rightTokens.length);
 }
 
+function openingSignature(text) {
+  return normalizeTextForDuplicate(text)
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 8)
+    .join(" ");
+}
+
+function hasRepeatedHumanPattern(text, recentRows) {
+  const lower = String(text || "").toLowerCase();
+  if (HUMAN_TIRED_PHRASES.some((phrase) => lower.includes(phrase))) return true;
+  const signature = openingSignature(text);
+  if (!signature) return false;
+  return recentRows.some((row) => {
+    const posted = parsePostedText(row);
+    if (!posted) return false;
+    if (openingSignature(posted) === signature) return true;
+    return tokenOverlap(text, posted) >= 0.62;
+  });
+}
+
 function humanPostScore(text) {
   const clean = String(text || "").trim();
+  const lower = clean.toLowerCase();
   let score = 0;
   const reasons = [];
   if (clean.includes("?")) { score += 18; reasons.push("question"); }
@@ -634,6 +662,8 @@ function humanPostScore(text) {
   if (tags > 1) { score -= tags * 8; reasons.push(`hashtags-${tags}`); }
   const spamHits = wordHitCount(clean, HUMAN_SPAM_WORDS);
   if (spamHits) { score -= spamHits * 18; reasons.push(`spam-${spamHits}`); }
+  const tiredHits = HUMAN_TIRED_PHRASES.filter((phrase) => lower.includes(phrase)).length;
+  if (tiredHits) { score -= tiredHits * 35; reasons.push(`tired-phrase-${tiredHits}`); }
   return { score, reasons };
 }
 
@@ -642,6 +672,9 @@ function cleanHumanPostText(text) {
     .replace(/https?:\/\/\S+/gi, "")
     .replace(/\b(?:cloudbet|bc\.game|stake\.com|affiliate|referral|odds|betting offer|place a bet)\b/gi, "")
     .replace(/\b(?:guaranteed|lock|sure win|free pick)\b/gi, "")
+    .replace(/\s*Am I overthinking it\??/gi, "")
+    .replace(/feels closer than the rankings make it look/gi, "has more tension than the rankings suggest")
+    .replace(/this has the shape of an awkward match fast/gi, "this could get uncomfortable quickly")
     .replace(/\s+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
@@ -676,7 +709,7 @@ function fallbackHumanVariants(candidate) {
     ? `${match.player_a_name} is ranked ${match.player_a_rank}, ${match.player_b_name} is ${match.player_b_rank}`
     : title;
   return [
-    { type: "hot_take", text: `${title} feels closer than the rankings make it look. ${rankLine}, but this has the shape of an awkward match fast. Am I overthinking it?` },
+    { type: "hot_take", text: `${title} has more tension than the rankings suggest. ${rankLine}, and one loose game could change the whole conversation. Who are people underrating?` },
     { type: "stat_angle", text: `${rankLine}. That should matter, but this still feels like the kind of matchup where one nervous service game changes the whole read.` },
     { type: "live_match_reaction", text: `${title} has that tight-match feel where every hold could start to feel heavy. Who would you trust more if it gets messy late?` },
     { type: "debate_question", text: `${title}: who is actually being underrated here? I can see the case for ${pick}, but I do not think this is automatic.` },
@@ -726,7 +759,7 @@ async function callOpenAiHumanVariants(env, candidate) {
       input: [
         {
           role: "system",
-          content: `Create authentic human tennis-fan Threads posts for TennisTipz. Use only supplied fresh ESPN/TennisHead news or current live/upcoming Top ATP/WTA 30 match context. Return strict JSON only: {"variants":[{"type":"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction","text":"..."}]}. Create exactly 5 variants, one of each type. Max 450 characters each. Do not invent stats, recent form, injuries, technique changes, momentum, surface, or season trends unless they are explicitly supplied. Do not mention clay, grass, hard court, or surface unless the supplied prediction.surface is present and certain. Never refer to news older than ${NEWS_MAX_AGE_HOURS} hours. No links, URLs, affiliate names, referral language, odds, betting offers, or calls to bet. Do not use guaranteed, lock, or sure win. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, like a real tennis fan starting a conversation. Mention tennistipz.win only rarely and naturally.`,
+          content: `Create authentic human tennis-fan Threads posts for TennisTipz. Use only supplied fresh ESPN/TennisHead news or current live/upcoming Top ATP/WTA 30 match context. Return strict JSON only: {"variants":[{"type":"hot_take|stat_angle|live_match_reaction|debate_question|soft_prediction","text":"..."}]}. Create exactly 5 variants, one of each type. Max 450 characters each. Do not invent stats, recent form, injuries, technique changes, momentum, surface, or season trends unless they are explicitly supplied. Do not mention clay, grass, hard court, or surface unless the supplied prediction.surface is present and certain. Never refer to news older than ${NEWS_MAX_AGE_HOURS} hours. No links, URLs, affiliate names, referral language, odds, betting offers, or calls to bet. Do not use guaranteed, lock, sure win, "Am I overthinking it?", or repeated template openings. No hashtags unless very natural. Sound opinionated, casual, and reply-worthy, like a real tennis fan starting a conversation. Mention tennistipz.win only rarely and naturally.`,
         },
         { role: "user", content: JSON.stringify(input) },
       ],
@@ -1162,7 +1195,24 @@ function humanPostingRules(recentRows, text) {
   }
   const duplicate = recentRows.find((row) => tokenOverlap(text, parsePostedText(row)) >= 0.72);
   if (duplicate) reasons.push("duplicate-wording");
+  if (hasRepeatedHumanPattern(text, recentRows)) reasons.push("repeated-human-pattern");
   return { ok: reasons.length === 0, reasons };
+}
+
+function chooseHumanPostVariant(variants, recentRows, candidate) {
+  const allowedTypes = new Set(["hot_take", "stat_angle", "live_match_reaction", "debate_question", "soft_prediction"]);
+  const fresh = variants
+    .filter((variant) => variant.text)
+    .filter((variant) => allowedTypes.has(variant.type) || variant.type === "variant")
+    .filter((variant) => !hasRepeatedHumanPattern(variant.text, recentRows));
+  const pool = fresh.length ? fresh : variants.filter((variant) => variant.text);
+  if (!pool.length) return null;
+  const slot = Math.floor(Date.now() / (HUMAN_MIN_POST_INTERVAL_MINUTES * 60 * 1000));
+  const seed = candidate?.targetId || candidate?.url || "human";
+  const start = (slot + [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0)) % pool.length;
+  const bestScore = Math.max(...pool.map((variant) => variant.score || 0));
+  const qualityPool = pool.filter((variant) => (variant.score || 0) >= bestScore - 12);
+  return qualityPool[start % qualityPool.length] || pool[start];
 }
 
 function selectHumanCandidate(matches, newsHooks) {
@@ -1220,7 +1270,10 @@ async function promoteHumanThreads(request, env, dryRun) {
     .filter((variant) => candidate.type !== "prediction" || candidate.match?.live || variant.type !== "live_match_reaction")
     .filter((variant) => variant.text && !hasUnsupportedHumanClaim(candidate, variant.text))
     .sort((left, right) => right.score - left.score);
-  const selected = grounded[0];
+  const selected = chooseHumanPostVariant(grounded, recentRows, candidate);
+  if (!selected) {
+    return jsonResponse({ ok: true, dryRun, mode: "human-threads", skipped: true, reason: "no-valid-human-post-variant", candidate, generatedVariants: grounded });
+  }
   const rules = humanPostingRules(recentRows, selected.text);
   const publishResult = dryRun
     ? { dryRun: true, ok: false, reason: "dry-run" }

@@ -18,7 +18,7 @@ function fallbackVariants(matchData) {
   const reason = matchData.prediction?.reason || "both players have enough tools to make it uncomfortable";
 
   return [
-    { type: "hot_take", text: `${player1} vs ${player2} feels way more dangerous than the pre-match noise suggests. One momentum swing and this gets messy fast. Am I overthinking it?` },
+    { type: "hot_take", text: `${player1} vs ${player2} feels way more dangerous than the pre-match noise suggests. One momentum swing and this gets messy fast. Who are people underrating here?` },
     { type: "stat_angle", text: `The ${surface} angle matters here. If the first-serve numbers dip even a little, this match can flip quickly. Which player handles pressure better today?` },
     { type: "live_match_reaction", text: `This has that tense tennis energy where every loose service game suddenly feels huge. Whoever protects momentum better probably controls the whole story.` },
     { type: "debate_question", text: `${player1} or ${player2}: who is actually more underrated in this matchup? I can see the case both ways, especially if the rallies get longer.` },
