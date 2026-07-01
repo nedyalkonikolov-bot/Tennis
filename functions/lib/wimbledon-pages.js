@@ -182,6 +182,7 @@ function isResult(match) {
 function featuredPicks(matches, config) {
   const picks = matches
     .filter((match) => match.prediction_id)
+    .filter((match) => isUpcoming(match) && !isResult(match))
     .filter((match) => asNumber(match.predicted_odds) >= MIN_FEATURED_ODDS && asNumber(match.predicted_odds) <= MAX_FEATURED_ODDS)
     .filter((match) => asNumber(match.confidence) >= MIN_CONFIDENCE);
   const shaped = config.focus === "underdogs"
@@ -345,4 +346,3 @@ export async function renderWimbledonSeoPage({ request, env, page }) {
     },
   });
 }
-
