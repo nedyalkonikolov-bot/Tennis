@@ -219,7 +219,7 @@ async function runScheduled(controller, env) {
   if (cron === configuredMaintenanceCron || cron === "0 */2 * * *") {
     results.push(await runDbMaintenance(env, scheduledAt));
   }
-  if (cron === "0 */4 * * *") {
+  if (cron === "0 */6 * * *") {
     results.push(await runSafely("threads-human-autopost", () => postHumanThreads(env)));
   }
   const configuredDailyCron = env.CONTENT_AUTOPUBLISH_CRON || "0 6 * * *";

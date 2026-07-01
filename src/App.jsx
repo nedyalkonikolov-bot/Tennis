@@ -531,6 +531,20 @@ function HomePage({ onNavigate, liveData, dbData }) {
           </div>
         </div>
       </section>
+      <section className="mx-auto max-w-7xl px-5 pb-8 md:px-6">
+        <div className="grid gap-6 border border-lime-300/20 bg-lime-300/[0.06] p-6 md:grid-cols-[1.1fr_0.9fr] md:items-center">
+          <div>
+            <p className="text-sm font-semibold uppercase text-lime-300">Wimbledon is live</p>
+            <h2 className="mt-2 text-3xl font-black md:text-4xl">Wimbledon predictions, schedule and grass-court research</h2>
+            <p className="mt-4 max-w-3xl leading-7 text-slate-300">Follow the daily Wimbledon corner for ATP and WTA matches, featured picks above 1.40 odds, results, player links and fresh tournament analysis while the Championships are active.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[["/wimbledon-predictions-today/", "Predictions Today"], ["/atp-wimbledon-predictions/", "ATP Wimbledon"], ["/wta-wimbledon-predictions/", "WTA Wimbledon"], ["/best-wimbledon-underdog-picks/", "Underdog Watch"]].map(([href, label]) => (
+              <a key={href} href={href} onClick={(event) => { event.preventDefault(); onNavigate(href); }} className="rounded-xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white no-underline ring-1 ring-white/10 hover:bg-lime-400 hover:text-slate-950">{label}</a>
+            ))}
+          </div>
+        </div>
+      </section>
       <HomeSection eyebrow="Today's top predictions" title="Best tennis picks on the board" text="High-confidence ATP and WTA prediction pages with odds, player form and match context." href="/tennis-predictions/" onNavigate={onNavigate}>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {publicMatches.map((match) => <a key={match.url || match.slug} href={match.url || `/predictions/${match.slug}/`} onClick={(event) => { event.preventDefault(); onNavigate(match.url || `/predictions/${match.slug}/`); }} className="border border-white/10 bg-white/[0.04] p-5 no-underline hover:border-lime-400/40"><div className="mb-4 flex items-center justify-between gap-3 text-xs text-slate-500"><span>{match.tour} {match.live ? "Live" : "Upcoming"}</span><span className="rounded-full bg-lime-400/10 px-3 py-1 font-bold text-lime-300">{match.prediction.confidence}%</span></div><h3 className="text-xl font-black text-white">{match.playerA} vs {match.playerB}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{match.tournament || "Tennis"} {match.surface ? `- ${match.surface}` : ""}</p><p className="mt-4 text-sm text-slate-300">AI pick: <span className="font-bold text-white">{match.prediction.pick}</span></p></a>)}
@@ -582,6 +596,10 @@ function SeoHubLinks({ onNavigate }) {
   const links = [
     ["/tennis-predictions-today/", "Tennis Predictions Today", "Daily ATP and WTA picks with odds and form signals."],
     ["/wimbledon/", "Wimbledon 2026 Corner", "Schedule, results, predictions and grass-court betting research."],
+    ["/wimbledon-predictions-today/", "Wimbledon Predictions Today", "Daily Wimbledon picks above 1.40 odds with schedule and results."],
+    ["/atp-wimbledon-predictions/", "ATP Wimbledon Predictions", "Men's Wimbledon schedule, picks and player links."],
+    ["/wta-wimbledon-predictions/", "WTA Wimbledon Predictions", "Women's Wimbledon schedule, picks and player links."],
+    ["/best-wimbledon-underdog-picks/", "Best Wimbledon Underdog Picks", "Higher-price Wimbledon value watch and responsible research."],
     ["/atp-predictions/", "ATP Predictions", "Men's tennis betting tips and Cloudbet markets."],
     ["/wta-predictions/", "WTA Predictions", "Women's tennis predictions, rankings and form notes."],
     ["/tennis-betting-tips/", "Tennis Betting Tips", "Daily betting checklist for odds, form and match context."],

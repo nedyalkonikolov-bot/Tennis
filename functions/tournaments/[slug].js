@@ -1,6 +1,7 @@
 const SITE_URL = "https://www.tennistipz.win";
 const CANONICAL_HOST = "www.tennistipz.win";
 const CLOUDBET_URL = "https://cldbt.cloud/go/en/landing/bitcoin-betting?af_token=ecea0a0896472c99ee3ff23d7fae8483&aftm_campaign=Tennis&aftm_source=tennistipz.win&aftm_medium=organic&aftm_content=Predictions&aftm_cid=4";
+const MIN_FEATURED_PICK_ODDS = 1.4;
 
 const TOURNAMENT_META = {
   "australian-open": { location: "Melbourne, Australia", level: "Grand Slam", surface: "Hard" },
@@ -287,9 +288,10 @@ function renderResults(matches) {
 function renderPredictions(matches) {
   const predictions = matches
     .filter((match) => match.prediction_id)
+    .filter((match) => asNumber(match.predicted_odds) >= MIN_FEATURED_PICK_ODDS)
     .sort((a, b) => asNumber(b.confidence) - asNumber(a.confidence) || Date.parse(a.start_time || 0) - Date.parse(b.start_time || 0))
     .slice(0, 12);
-  if (!predictions.length) return `<p class="muted">No public prediction pages are attached to this tournament yet. New ATP/WTA betting markets appear when the model and odds filters pass.</p>`;
+  if (!predictions.length) return `<p class="muted">No featured prediction above ${MIN_FEATURED_PICK_ODDS} odds is attached to this tournament yet. New ATP/WTA betting markets appear when the model, confidence and odds filters pass.</p>`;
   return `<div class="grid">${predictions.map((match) => `<article class="card">
     <h3><a href="${predictionUrl(match)}">${escapeHtml(match.player_a_name)} vs ${escapeHtml(match.player_b_name)}</a></h3>
     <p class="muted">${escapeHtml(match.tour)} · ${escapeHtml(formatDate(match.start_time))} UTC · ${escapeHtml(match.surface || "Surface TBC")}</p>
