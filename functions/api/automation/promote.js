@@ -1343,6 +1343,24 @@ async function promote(request, env) {
   const db = env.TENNIS_DB;
   await ensureAutomationTable(db);
 
+  if (url.searchParams.get("task") === "submit-sitemap" || url.searchParams.get("google") === "sitemap-only") {
+    const google = dryRun ? { dryRun: true, sitemap: SITEMAP_URL } : await submitSitemapToGoogle(env);
+    return jsonResponse({
+      ok: true,
+      dryRun,
+      mode: "submit-sitemap",
+      google,
+      submittedUrls: [
+        `${SITE_URL}/wimbledon/`,
+        `${SITE_URL}/wimbledon-predictions-today/`,
+        `${SITE_URL}/wimbledon-day-3-betting-preview/`,
+        `${SITE_URL}/best-wimbledon-underdog-picks/`,
+        `${SITE_URL}/atp-wimbledon-predictions/`,
+        `${SITE_URL}/wta-wimbledon-predictions/`,
+      ],
+    });
+  }
+
   if (humanMode && platform === "threads") return promoteHumanThreads(request, env, dryRun);
 
   const scanLimit = Math.min(Math.max(limit * 20, 50), 150);
