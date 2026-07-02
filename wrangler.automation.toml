@@ -7,12 +7,18 @@ crons = [
   "*/15 * * * *",
   "0 */2 * * *",
   "0 */6 * * *",
-  "0 6 * * *"
+  "0 6 * * *",
+  "30 6 * * *"
 ]
 
 [vars]
 SITE_ORIGIN = "https://tennistipz.win"
 CONTENT_AUTOPUBLISH_CRON = "0 6 * * *"
+GSC_SEO_CRON = "30 6 * * *"
+GSC_SYNC_LOOKBACK_DAYS = "10"
+GSC_SYNC_DELAY_DAYS = "2"
+GSC_SYNC_ROW_LIMIT = "250"
+GSC_INSPECTION_LIMIT = "10"
 DB_MAINTENANCE_CRON = "0 */2 * * *"
 DB_MAINTENANCE_PROFILE_LIMIT = "3"
 DB_MAINTENANCE_RECENT_MATCH_LIMIT = "10"

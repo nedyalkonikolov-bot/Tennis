@@ -167,6 +167,82 @@ async function migrate(request, env) {
   ]);
   applied.push("content_automation_runs");
 
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS gsc_search_analytics (
+        id TEXT PRIMARY KEY,
+        sync_date TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        query TEXT,
+        page TEXT,
+        country TEXT,
+        device TEXT,
+        clicks INTEGER NOT NULL DEFAULT 0,
+        impressions INTEGER NOT NULL DEFAULT 0,
+        ctr REAL NOT NULL DEFAULT 0,
+        position REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(sync_date, start_date, end_date, query, page, country, device)
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_gsc_search_sync ON gsc_search_analytics(sync_date DESC, impressions DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_gsc_search_page ON gsc_search_analytics(page, sync_date DESC)"),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS gsc_url_inspections (
+        id TEXT PRIMARY KEY,
+        sync_date TEXT NOT NULL,
+        url TEXT NOT NULL,
+        verdict TEXT,
+        coverage_state TEXT,
+        indexing_state TEXT,
+        robots_txt_state TEXT,
+        page_fetch_state TEXT,
+        google_canonical TEXT,
+        user_canonical TEXT,
+        raw_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(sync_date, url)
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_gsc_inspections_url ON gsc_url_inspections(url, sync_date DESC)"),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS gsc_seo_opportunities (
+        id TEXT PRIMARY KEY,
+        sync_date TEXT NOT NULL,
+        type TEXT NOT NULL,
+        priority TEXT NOT NULL,
+        page TEXT,
+        query TEXT,
+        title TEXT NOT NULL,
+        recommendation TEXT NOT NULL,
+        metrics_json TEXT NOT NULL,
+        openai_json TEXT,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(sync_date, type, page, query, title)
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_gsc_opportunities_date ON gsc_seo_opportunities(sync_date DESC, priority)"),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS gsc_sync_runs (
+        id TEXT PRIMARY KEY,
+        sync_date TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        rows_imported INTEGER NOT NULL DEFAULT 0,
+        inspections_checked INTEGER NOT NULL DEFAULT 0,
+        opportunities_created INTEGER NOT NULL DEFAULT 0,
+        model TEXT,
+        status TEXT NOT NULL,
+        errors_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_gsc_sync_runs_date ON gsc_sync_runs(sync_date DESC)"),
+  ]);
+  applied.push("gsc_seo_tables");
+
   return jsonResponse({ ok: true, applied, migratedAt: new Date().toISOString() });
 }
 

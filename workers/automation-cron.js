@@ -105,6 +105,21 @@ async function generateSeoArticle(env) {
   };
 }
 
+async function syncGscSeo(env) {
+  const result = await callSite(env, "/api/seo/gsc-sync", { method: "POST", authenticated: true });
+  return {
+    task: "gsc-seo-sync",
+    ok: result.payload?.ok === true,
+    auth: result.payload?.auth || null,
+    rowsImported: result.payload?.rowsImported || 0,
+    inspectionsChecked: result.payload?.inspectionsChecked || 0,
+    opportunitiesCreated: result.payload?.opportunitiesCreated || 0,
+    openAiSource: result.payload?.openAiSource || null,
+    model: result.payload?.model || null,
+    errors: result.payload?.errors || [],
+  };
+}
+
 async function cleanupRecentMatches(env) {
   const result = await callSite(env, "/api/db/cleanup-recent", { method: "POST", authenticated: true });
   return {
@@ -192,6 +207,7 @@ async function runTask(task, env, request) {
   if (task === "human-threads") return postHumanThreads(env);
   if (task === "seo-article") return generateSeoArticle(env);
   if (task === "content-autopublish") return generateSeoArticle(env);
+  if (task === "gsc-seo-sync") return syncGscSeo(env);
   if (task === "scheduled") {
     const url = new URL(request.url);
     const scheduledTime = url.searchParams.get("at") ? Date.parse(url.searchParams.get("at")) : Date.now();
@@ -203,6 +219,7 @@ async function runTask(task, env, request) {
     results.push(await postHumanThreads(env));
     results.push(await runDbMaintenance(env, new Date()));
     results.push(await generateSeoArticle(env));
+    results.push(await syncGscSeo(env));
     return { task: "all", results };
   }
   throw new Error(`Unknown task: ${task}`);
@@ -225,6 +242,10 @@ async function runScheduled(controller, env) {
   const configuredDailyCron = env.CONTENT_AUTOPUBLISH_CRON || "0 6 * * *";
   if (cron === configuredDailyCron || cron === "0 6 * * *") {
     results.push(await runSafely("content-autopublish", () => generateSeoArticle(env)));
+  }
+  const configuredGscCron = env.GSC_SEO_CRON || "30 6 * * *";
+  if (cron === configuredGscCron || cron === "30 6 * * *") {
+    results.push(await runSafely("gsc-seo-sync", () => syncGscSeo(env)));
   }
   return { ok: true, cron, ranAt: new Date().toISOString(), results };
 }
