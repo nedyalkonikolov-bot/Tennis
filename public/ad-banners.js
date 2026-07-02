@@ -30,6 +30,9 @@
     link.target = "_blank";
     link.rel = "nofollow sponsored noopener noreferrer";
     link.setAttribute("aria-label", "Open " + banner.name + " sponsored offer");
+    link.addEventListener("click", function () {
+      trackAffiliateClick(banner.name, "side_banner_" + banner.position);
+    });
 
     var image = document.createElement("img");
     image.src = banner.image;
@@ -58,6 +61,9 @@
     link.target = "_blank";
     link.rel = "nofollow sponsored noopener noreferrer";
     link.setAttribute("aria-label", "Open " + topBanner.name + " sponsored offer");
+    link.addEventListener("click", function () {
+      trackAffiliateClick(topBanner.name, "top_banner_static");
+    });
 
     var image = document.createElement("img");
     image.src = topBanner.image;
@@ -69,6 +75,23 @@
     link.appendChild(image);
     wrap.appendChild(link);
     return wrap;
+  }
+
+  function trackAffiliateClick(name, placement) {
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+      event: "affiliate_click",
+      affiliate_brand: name,
+      affiliate_placement: placement,
+      page_path: window.location.pathname,
+    });
+    if (typeof window.gtag === "function") {
+      window.gtag("event", "affiliate_click", {
+        affiliate_brand: name,
+        affiliate_placement: placement,
+        page_path: window.location.pathname,
+      });
+    }
   }
 
   function install() {

@@ -39,6 +39,7 @@ export async function onRequestGet({ request }) {
     urlEntry("/stake-tennis-betting/", "2026-06-29", "weekly", "0.9"),
     urlEntry("/bc-game-tennis-betting/", "2026-06-29", "weekly", "0.9"),
     urlEntry("/crypto-tennis-betting/", "2026-06-29", "weekly", "0.9"),
+    urlEntry("/best-crypto-tennis-betting-sites/", "2026-07-02", "weekly", "0.92"),
     urlEntry("/betting-sites/", "2026-06-29", "weekly", "0.9"),
     urlEntry("/about/", "2026-06-29", "monthly", "0.74"),
     urlEntry("/methodology/", "2026-06-29", "monthly", "0.82"),

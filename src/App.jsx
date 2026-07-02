@@ -22,6 +22,29 @@ const defaultBetUrl = "https://www.cloudbet.com/en/sports/tennis";
 const cloudbetUrl = "https://cldbt.cloud/go/en/landing/bitcoin-betting?af_token=ecea0a0896472c99ee3ff23d7fae8483&aftm_campaign=Tennis&aftm_source=tennistipz.win&aftm_medium=organic&aftm_content=Predictions&aftm_cid=4";
 const bcGameUrl = "https://bc.game/i-9767ib363b-n/";
 const stakeUrl = "https://stake.com/?c=NOYIoKcY";
+const affiliateSites = [
+  {
+    name: "Cloudbet",
+    href: cloudbetUrl,
+    review: "/cloudbet-tennis-betting/",
+    bestFor: "Tennis odds",
+    note: "Primary TennisTipz odds partner for ATP and WTA prediction research.",
+  },
+  {
+    name: "BC.Game",
+    href: bcGameUrl,
+    review: "/bc-game-tennis-betting/",
+    bestFor: "Crypto casino crossover",
+    note: "Crypto-first brand for users comparing sportsbook and casino-led offers.",
+  },
+  {
+    name: "Stake.com",
+    href: stakeUrl,
+    review: "/stake-tennis-betting/",
+    bestFor: "Broad sports coverage",
+    note: "Major crypto betting brand with familiar sports-market coverage.",
+  },
+];
 const minPublicPickOdds = 1.01;
 const maxPublicPickOdds = 2;
 const minPublicPickConfidence = 70;
@@ -85,6 +108,11 @@ const bettingPageMeta = {
     title: "Crypto Tennis Betting Guide | Tennis Tips, Odds & Predictions",
     description: "Crypto tennis betting guide with responsible betting tips, Cloudbet odds context, tennis predictions, ATP/WTA stats, and news signals for market research.",
     canonical: "/crypto-tennis-betting/",
+  },
+  "/best-crypto-tennis-betting-sites/": {
+    title: "Best Crypto Tennis Betting Sites | Cloudbet, BC.Game & Stake",
+    description: "Compare the best crypto tennis betting sites for ATP and WTA odds, bitcoin deposits, prediction research, live tennis markets, and responsible betting.",
+    canonical: "/best-crypto-tennis-betting-sites/",
   },
 };
 
@@ -179,9 +207,27 @@ function getRoute(pathname) {
   if (cleanPath === "/players/atp/") return { id: "stats", tour: "ATP" };
   if (cleanPath === "/players/wta/") return { id: "stats", tour: "WTA" };
   if (cleanPath === "/tennis-betting-tips/") return { id: "tips", path: cleanPath };
-  if (["/tennis-betting/", "/crypto-tennis-betting/", "/cloudbet-tennis-betting/", "/best-tennis-betting-sites/", "/betting-sites/"].includes(cleanPath)) return { id: "betting", path: cleanPath };
+  if (["/tennis-betting/", "/crypto-tennis-betting/", "/cloudbet-tennis-betting/", "/best-crypto-tennis-betting-sites/", "/best-tennis-betting-sites/", "/betting-sites/"].includes(cleanPath)) return { id: "betting", path: cleanPath };
   const page = navPages.find((item) => item.path === cleanPath);
   return { id: page?.id || "home" };
+}
+
+function trackAffiliateClick(site, placement) {
+  if (typeof window === "undefined") return;
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({
+    event: "affiliate_click",
+    affiliate_brand: site,
+    affiliate_placement: placement,
+    page_path: window.location.pathname,
+  });
+  if (typeof window.gtag === "function") {
+    window.gtag("event", "affiliate_click", {
+      affiliate_brand: site,
+      affiliate_placement: placement,
+      page_path: window.location.pathname,
+    });
+  }
 }
 
 function getInitialRoute() {
@@ -606,6 +652,7 @@ function SeoHubLinks({ onNavigate }) {
     ["/cloudbet-tennis-betting/", "Cloudbet Tennis Betting", "Cloudbet odds explained with ATP and WTA prediction research."],
     ["/tennis-betting/", "Tennis Betting Guide", "A practical guide to researching tennis bets responsibly."],
     ["/crypto-tennis-betting/", "Crypto Tennis Betting", "Bitcoin-friendly tennis betting guide and site comparison."],
+    ["/best-crypto-tennis-betting-sites/", "Best Crypto Betting Sites", "Commercial comparison of Cloudbet, BC.Game and Stake for tennis bettors."],
     ["/players/atp/", "ATP Player Profiles", "Top ATP player stats and betting research pages."],
     ["/players/wta/", "WTA Player Profiles", "Top WTA player stats and betting research pages."],
   ];
@@ -614,11 +661,15 @@ function SeoHubLinks({ onNavigate }) {
 
 function OddsLink({ match, fallbackBetUrl }) {
   const href = match.betUrl || fallbackBetUrl || cloudbetUrl;
-  return <a href={href} target="_blank" rel="noreferrer sponsored" className="group block bg-slate-900 p-4 ring-1 ring-lime-400/20 transition hover:bg-lime-400 hover:text-slate-950"><span className="flex items-center justify-between gap-3 text-xs text-slate-500 group-hover:text-slate-800">Cloudbet odds <ExternalLink size={14} /></span><span className="mt-1 block font-bold">{match.predictedWinnerOdds || match.predicted_odds || match.odds || "N/A"}</span><span className="mt-1 block text-xs text-slate-500 group-hover:text-slate-800">{match.oddsSource || "Cloudbet"}</span></a>;
+  return <a href={href} target="_blank" rel="noreferrer sponsored" onClick={() => trackAffiliateClick("Cloudbet", "prediction_odds_card")} className="group block bg-slate-900 p-4 ring-1 ring-lime-400/20 transition hover:bg-lime-400 hover:text-slate-950"><span className="flex items-center justify-between gap-3 text-xs text-slate-500 group-hover:text-slate-800">Cloudbet odds <ExternalLink size={14} /></span><span className="mt-1 block font-bold">{match.predictedWinnerOdds || match.predicted_odds || match.odds || "N/A"}</span><span className="mt-1 block text-xs text-slate-500 group-hover:text-slate-800">{match.oddsSource || "Cloudbet"}</span></a>;
 }
 
 function BcGameTopBanner() {
-  return <a href={bcGameUrl} target="_blank" rel="noreferrer sponsored" aria-label="Open BC.Game sponsored offer" className="mb-8 block overflow-hidden rounded-lg border border-lime-300/20 bg-slate-900 shadow-2xl shadow-black/30 transition hover:-translate-y-0.5 hover:brightness-105"><img src="/ads/bc-game-banner-970x250.gif" alt="BC.Game crypto casino sponsored offer" width="970" height="250" loading="lazy" decoding="async" fetchPriority="low" className="mx-auto block h-auto w-full max-w-[970px]" /></a>;
+  return <a href={bcGameUrl} target="_blank" rel="noreferrer sponsored" onClick={() => trackAffiliateClick("BC.Game", "top_banner")} aria-label="Open BC.Game sponsored offer" className="mb-8 block overflow-hidden rounded-lg border border-lime-300/20 bg-slate-900 shadow-2xl shadow-black/30 transition hover:-translate-y-0.5 hover:brightness-105"><img src="/ads/bc-game-banner-970x250.gif" alt="BC.Game crypto casino sponsored offer" width="970" height="250" loading="lazy" decoding="async" fetchPriority="low" className="mx-auto block h-auto w-full max-w-[970px]" /></a>;
+}
+
+function AffiliateChoiceStrip({ placement = "prediction_strip", onNavigate }) {
+  return <aside className="mt-8 border border-lime-400/20 bg-lime-400/[0.06] p-5" aria-label="Sponsored crypto betting options"><div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between"><div><p className="text-sm font-bold uppercase text-lime-300">Sponsored crypto tennis betting</p><h2 className="mt-1 text-2xl font-black">Compare the betting site before you click</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">Use the prediction first, then compare odds, market availability, payment preference and risk limits. TennisTipz may earn commission from qualifying signups.</p></div><button type="button" onClick={() => onNavigate?.("/betting-sites/")} className="w-fit rounded-xl border border-white/15 px-4 py-2 text-sm font-bold text-white hover:bg-white/10">Compare all sites</button></div><div className="mt-5 grid gap-3 md:grid-cols-3">{affiliateSites.map((site) => <article key={site.name} className="bg-slate-950/70 p-4 ring-1 ring-white/10"><div className="flex items-start justify-between gap-3"><div><h3 className="text-lg font-black">{site.name}</h3><p className="text-xs font-bold uppercase text-lime-300">{site.bestFor}</p></div><ExternalLink size={16} className="text-slate-500" /></div><p className="mt-3 min-h-12 text-sm leading-6 text-slate-400">{site.note}</p><div className="mt-4 flex flex-wrap gap-2"><a href={site.href} target="_blank" rel="noreferrer sponsored" onClick={() => trackAffiliateClick(site.name, placement)} className="rounded-lg bg-lime-400 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-lime-300">Visit {site.name}</a><a href={site.review} onClick={(event) => { if (onNavigate) { event.preventDefault(); onNavigate(site.review); } }} className="rounded-lg border border-white/15 px-4 py-2 text-sm font-bold text-white no-underline hover:bg-white/10">Review</a></div></article>)}</div><p className="mt-4 text-xs leading-5 text-slate-500">18+ only. Betting involves risk. Check legality in your location and never bet more than you can afford to lose.</p></aside>;
 }
 
 function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
@@ -649,6 +700,7 @@ function PredictionsPage({ route, matches, dbData, betUrl, onNavigate }) {
         <div><p className="text-sm font-semibold uppercase text-lime-300">Cloudbet ATP/WTA value markets</p><h1 className="mt-2 text-4xl font-black">{heading}</h1><p className="mt-3 max-w-2xl text-slate-400">Live and upcoming tennis betting matches are separated, with a higher-risk value model showing only picks priced above 1.40 and ranking them by odds, form, status and confidence.</p></div>
         <button type="button" onClick={() => setModelRun((value) => (value === 3 ? -2 : value + 1))} className="inline-flex w-fit items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300"><Gauge size={18} /> Re-run Model</button>
       </div>
+      <AffiliateChoiceStrip placement="prediction_page_top" onNavigate={onNavigate} />
       <div className="mt-8 flex flex-wrap gap-3">{matchCategories.map((item) => <button key={item.id} type="button" onClick={() => setCategory(item.id)} className={`rounded-xl px-5 py-2 text-sm font-bold ${effectiveCategory === item.id ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{item.label} ({categoryCounts[item.id] || 0})</button>)}</div>
       <div className="mt-5 flex gap-2 overflow-x-auto">{surfaces.map((item) => <button key={item} type="button" onClick={() => setSurface(item)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${surface === item ? "bg-white text-slate-950" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{item}</button>)}</div>
       <div className="mt-8 grid gap-5 md:grid-cols-2">
@@ -707,7 +759,7 @@ function MatchDetailPage({ route, dbData, onNavigate }) {
   const match = dbData.matchPages.find((item) => item.slug === route.slug);
   if (!match) return <NotFound title="Match page loading" text="This match page will appear after the database feed loads." />;
   const reasons = Array.isArray(match.ai_reasons) ? match.ai_reasons : [];
-  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><button type="button" onClick={() => onNavigate("/tennis-predictions/")} className="mb-6 text-sm font-bold text-lime-300">Back to predictions</button><p className="text-sm font-semibold uppercase text-lime-300">{match.tour} AI prediction page</p><h1 className="mt-2 text-5xl font-black">{match.title} Prediction</h1><p className="mt-3 max-w-3xl text-slate-400">Cloudbet odds, AI prediction confidence, 100-day player form, 2026 season context, surface notes, and stored result tracking for {match.title}.</p><div className="mt-8 grid gap-4 md:grid-cols-4"><Metric label="AI pick" value={match.predicted_winner_name || "Value watch"} /><Metric label="Confidence" value={match.confidence ? `${match.confidence}%` : "Pending"} /><Metric label="Odds" value={match.predicted_odds || "N/A"} /><Metric label="Status" value={match.live ? "Live" : match.status || "Scheduled"} /></div><div className="mt-8 grid gap-5 md:grid-cols-3"><Metric label="Tournament" value={match.tournament || "Tennis"} /><Metric label="Surface" value={match.surface || "TBC"} /><Metric label="Result" value={match.result_status || "pending"} helper={match.actual_winner_name ? `Winner: ${match.actual_winner_name}` : "Outcome updates after settlement"} /></div><div className="mt-8 grid gap-5 md:grid-cols-2"><Metric label={`${match.player_a_name} 100d form`} value={`${match.player_a_recent_wins || 0}-${match.player_a_recent_losses || 0}`} helper={match.player_a_recent_win_rate === null || match.player_a_recent_win_rate === undefined ? "Not enough data" : `${match.player_a_recent_win_rate}% win rate`} /><Metric label={`${match.player_b_name} 100d form`} value={`${match.player_b_recent_wins || 0}-${match.player_b_recent_losses || 0}`} helper={match.player_b_recent_win_rate === null || match.player_b_recent_win_rate === undefined ? "Not enough data" : `${match.player_b_recent_win_rate}% win rate`} /><Metric label={`${match.player_a_name} 2026 season`} value={`${match.player_a_season_wins || 0}-${match.player_a_season_losses || 0}`} helper={match.player_a_rank ? `Rank #${match.player_a_rank}` : "Rank unavailable"} /><Metric label={`${match.player_b_name} 2026 season`} value={`${match.player_b_season_wins || 0}-${match.player_b_season_losses || 0}`} helper={match.player_b_rank ? `Rank #${match.player_b_rank}` : "Rank unavailable"} /></div><div className="mt-8 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">AI Prediction Analysis</h2><p className="mt-4 leading-8 text-slate-300">{match.ai_summary || "The TennisTipz AI model combines market-implied probability, ATP/WTA context, available form, surface ratings, ranking signals and live status."}</p>{reasons.length > 0 && <div className="mt-5 grid gap-3 md:grid-cols-2">{reasons.map((reason) => <div key={reason} className="bg-slate-900 p-4 text-sm leading-6 text-slate-300">{reason}</div>)}</div>}<p className="mt-5 leading-8 text-slate-400">{match.ai_betting_angle || "Use this prediction as research only; tennis betting has risk and no outcome is guaranteed."}</p><a href={cloudbetUrl} target="_blank" rel="noreferrer sponsored" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Open Cloudbet odds <ExternalLink size={16} /></a></div></section>;
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><button type="button" onClick={() => onNavigate("/tennis-predictions/")} className="mb-6 text-sm font-bold text-lime-300">Back to predictions</button><p className="text-sm font-semibold uppercase text-lime-300">{match.tour} AI prediction page</p><h1 className="mt-2 text-5xl font-black">{match.title} Prediction</h1><p className="mt-3 max-w-3xl text-slate-400">Cloudbet odds, AI prediction confidence, 100-day player form, 2026 season context, surface notes, and stored result tracking for {match.title}.</p><AffiliateChoiceStrip placement="match_detail_top" onNavigate={onNavigate} /><div className="mt-8 grid gap-4 md:grid-cols-4"><Metric label="AI pick" value={match.predicted_winner_name || "Value watch"} /><Metric label="Confidence" value={match.confidence ? `${match.confidence}%` : "Pending"} /><Metric label="Odds" value={match.predicted_odds || "N/A"} /><Metric label="Status" value={match.live ? "Live" : match.status || "Scheduled"} /></div><div className="mt-8 grid gap-5 md:grid-cols-3"><Metric label="Tournament" value={match.tournament || "Tennis"} /><Metric label="Surface" value={match.surface || "TBC"} /><Metric label="Result" value={match.result_status || "pending"} helper={match.actual_winner_name ? `Winner: ${match.actual_winner_name}` : "Outcome updates after settlement"} /></div><div className="mt-8 grid gap-5 md:grid-cols-2"><Metric label={`${match.player_a_name} 100d form`} value={`${match.player_a_recent_wins || 0}-${match.player_a_recent_losses || 0}`} helper={match.player_a_recent_win_rate === null || match.player_a_recent_win_rate === undefined ? "Not enough data" : `${match.player_a_recent_win_rate}% win rate`} /><Metric label={`${match.player_b_name} 100d form`} value={`${match.player_b_recent_wins || 0}-${match.player_b_recent_losses || 0}`} helper={match.player_b_recent_win_rate === null || match.player_b_recent_win_rate === undefined ? "Not enough data" : `${match.player_b_recent_win_rate}% win rate`} /><Metric label={`${match.player_a_name} 2026 season`} value={`${match.player_a_season_wins || 0}-${match.player_a_season_losses || 0}`} helper={match.player_a_rank ? `Rank #${match.player_a_rank}` : "Rank unavailable"} /><Metric label={`${match.player_b_name} 2026 season`} value={`${match.player_b_season_wins || 0}-${match.player_b_season_losses || 0}`} helper={match.player_b_rank ? `Rank #${match.player_b_rank}` : "Rank unavailable"} /></div><div className="mt-8 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">AI Prediction Analysis</h2><p className="mt-4 leading-8 text-slate-300">{match.ai_summary || "The TennisTipz AI model combines market-implied probability, ATP/WTA context, available form, surface ratings, ranking signals and live status."}</p>{reasons.length > 0 && <div className="mt-5 grid gap-3 md:grid-cols-2">{reasons.map((reason) => <div key={reason} className="bg-slate-900 p-4 text-sm leading-6 text-slate-300">{reason}</div>)}</div>}<p className="mt-5 leading-8 text-slate-400">{match.ai_betting_angle || "Use this prediction as research only; tennis betting has risk and no outcome is guaranteed."}</p><a href={cloudbetUrl} target="_blank" rel="noreferrer sponsored" onClick={() => trackAffiliateClick("Cloudbet", "match_detail_analysis")} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Open Cloudbet odds <ExternalLink size={16} /></a></div></section>;
 }
 
 function NewsPage({ news, articles }) {
@@ -728,8 +780,7 @@ function TipsPage({ onNavigate }) {
 }
 
 function BettingHubPage() {
-  const sites = [{ name: "Cloudbet", url: cloudbetUrl, review: "/cloudbet-tennis-betting/", text: "Cloudbet is the main tennis odds source used on TennisTipz, with crypto-friendly betting markets and ATP/WTA odds that fit match prediction research." }, { name: "BC.Game", url: bcGameUrl, review: "/bc-game-tennis-betting/", text: "BC.Game is a crypto betting option for users comparing alternative sportsbooks and casino-led betting platforms with tennis market coverage." }, { name: "Stake.com", url: stakeUrl, review: "/stake-tennis-betting/", text: "Stake.com is a major crypto betting brand for bettors who want broad sports coverage, familiar markets, and a simple account experience." }];
-  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><p className="text-sm font-semibold uppercase text-lime-300">Crypto tennis betting</p><h1 className="mt-2 text-4xl font-black">Best Tennis Betting Sites</h1><p className="mt-3 max-w-3xl text-slate-400">Compare crypto-friendly tennis betting sites for ATP and WTA markets, odds research, and responsible tennis betting. These links may be sponsored.</p><div className="mt-8 grid gap-5 md:grid-cols-3">{sites.map((site) => <article key={site.name} className="border border-white/10 bg-white/[0.04] p-6"><div className="mb-5 flex h-28 items-center justify-center bg-slate-900 text-2xl font-black text-lime-300">{site.name}</div><h2 className="text-2xl font-black">{site.name}</h2><p className="mt-4 leading-7 text-slate-400">{site.text}</p><div className="mt-6 flex flex-wrap gap-3"><a href={site.url} target="_blank" rel="noreferrer sponsored" className="inline-flex items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Visit {site.name} <ExternalLink size={16} /></a><a href={site.review} className="inline-flex items-center rounded-xl border border-white/15 px-5 py-3 font-bold text-white no-underline hover:bg-white/10">Read review</a></div></article>)}</div><div className="mt-10 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Crypto Tennis Betting Guide</h2><p className="mt-4 leading-8 text-slate-400">A strong tennis betting workflow starts with market availability, then compares odds against player form, ranking movement, surface ratings, recent match load and tournament context. TennisTipz uses Cloudbet odds with ATP and WTA data to help bettors research picks before placing any wager.</p><div className="mt-5 flex flex-wrap gap-3"><a href="/br/previsoes-tenis/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Brazil PT-BR</a><a href="/bd/tennis-predictions/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Bangladesh BN</a><a href="/tr/tenis-tahminleri/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Turkey TR</a></div></div></section>;
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><p className="text-sm font-semibold uppercase text-lime-300">Crypto tennis betting</p><h1 className="mt-2 text-4xl font-black">Best Tennis Betting Sites</h1><p className="mt-3 max-w-3xl text-slate-400">Compare crypto-friendly tennis betting sites for ATP and WTA markets, odds research, and responsible tennis betting. These links may be sponsored.</p><div className="mt-8 grid gap-5 md:grid-cols-3">{affiliateSites.map((site) => <article key={site.name} className="border border-white/10 bg-white/[0.04] p-6"><div className="mb-5 flex h-28 items-center justify-center bg-slate-900 text-2xl font-black text-lime-300">{site.name}</div><h2 className="text-2xl font-black">{site.name}</h2><p className="mt-2 text-sm font-bold uppercase text-lime-300">{site.bestFor}</p><p className="mt-4 leading-7 text-slate-400">{site.note}</p><div className="mt-6 flex flex-wrap gap-3"><a href={site.href} target="_blank" rel="noreferrer sponsored" onClick={() => trackAffiliateClick(site.name, "betting_hub_card")} className="inline-flex items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Visit {site.name} <ExternalLink size={16} /></a><a href={site.review} className="inline-flex items-center rounded-xl border border-white/15 px-5 py-3 font-bold text-white no-underline hover:bg-white/10">Read review</a></div></article>)}</div><div className="mt-10 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Crypto Tennis Betting Guide</h2><p className="mt-4 leading-8 text-slate-400">A strong tennis betting workflow starts with market availability, then compares odds against player form, ranking movement, surface ratings, recent match load and tournament context. TennisTipz uses Cloudbet odds with ATP and WTA data to help bettors research picks before placing any wager.</p><div className="mt-5 flex flex-wrap gap-3"><a href="/br/previsoes-tenis/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Brazil PT-BR</a><a href="/bd/tennis-predictions/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Bangladesh BN</a><a href="/tr/tenis-tahminleri/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Turkey TR</a></div></div></section>;
 }
 
 function NotFound({ title = "Page not found", text = "The page could not be loaded yet." }) {
