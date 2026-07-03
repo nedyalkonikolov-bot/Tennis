@@ -26,6 +26,25 @@ async function migrate(request, env) {
 
   await db.batch([
     db.prepare(`
+      CREATE TABLE IF NOT EXISTS members (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        name TEXT,
+        token_hash TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'active',
+        source TEXT NOT NULL DEFAULT 'self-register',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_members_status ON members(status, created_at DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_members_token_hash ON members(token_hash)"),
+  ]);
+  applied.push("members");
+
+  await db.batch([
+    db.prepare(`
       CREATE TABLE IF NOT EXISTS player_recent_matches (
         id TEXT PRIMARY KEY,
         player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,

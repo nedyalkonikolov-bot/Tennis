@@ -14,6 +14,7 @@ import {
   Target,
   TrendingUp,
   Trophy,
+  UserPlus,
   Users,
 } from "lucide-react";
 import { fallbackNews, fallbackPlayers } from "./data/fallbackData";
@@ -94,6 +95,11 @@ const pageMeta = {
     title: "Members Tennis Arbitrage Scanner | TennisTipz",
     description: "Members-only ATP and WTA tennis arbitrage scanner using API-Tennis bookmaker odds, implied probability, and stake split research.",
     canonical: "/members/arbitrage/",
+  },
+  register: {
+    title: "Register for TennisTipz Members | Arbitrage Access",
+    description: "Register for TennisTipz member access to the ATP and WTA tennis arbitrage scanner.",
+    canonical: "/register/",
   },
 };
 
@@ -213,6 +219,7 @@ function getRoute(pathname) {
   if (cleanPath === "/players/atp/") return { id: "stats", tour: "ATP" };
   if (cleanPath === "/players/wta/") return { id: "stats", tour: "WTA" };
   if (cleanPath === "/members/arbitrage/") return { id: "arbitrage" };
+  if (cleanPath === "/register/") return { id: "register" };
   if (cleanPath === "/tennis-betting-tips/") return { id: "tips", path: cleanPath };
   if (["/tennis-betting/", "/crypto-tennis-betting/", "/cloudbet-tennis-betting/", "/best-crypto-tennis-betting-sites/", "/best-tennis-betting-sites/", "/betting-sites/"].includes(cleanPath)) return { id: "betting", path: cleanPath };
   const page = navPages.find((item) => item.path === cleanPath);
@@ -305,7 +312,7 @@ function updateDocumentSeo(route, dbData) {
   const ogType = ["match-detail", "player-detail", "news", "tips", "betting"].includes(route.id) ? "article" : "website";
   document.title = meta.title;
   setMetaTag('meta[name="description"]', "name", meta.description);
-  setMetaTag('meta[name="robots"]', "name", route.id === "arbitrage" ? "noindex, nofollow, noarchive" : "index, follow, max-image-preview:large");
+  setMetaTag('meta[name="robots"]', "name", ["arbitrage", "register"].includes(route.id) ? "noindex, nofollow, noarchive" : "index, follow, max-image-preview:large");
   setMetaTag('meta[property="og:site_name"]', "property", "TennisTipz");
   setMetaTag('meta[property="og:type"]', "property", ogType);
   setMetaTag('meta[property="og:title"]', "property", meta.title);
@@ -486,10 +493,20 @@ function Header({ route, onNavigate }) {
             const active = route.id === page.id;
             return <a key={page.id} href={page.path} onClick={(event) => { event.preventDefault(); onNavigate(page.path); }} className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${active ? "bg-lime-400 text-slate-950" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}><Icon size={16} />{page.label}</a>;
           })}
+          <a href="/register/" onClick={(event) => { event.preventDefault(); onNavigate("/register/"); }} className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${route.id === "register" ? "bg-lime-400 text-slate-950" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}><UserPlus size={16} />Register</a>
         </nav>
       </div>
     </header>
   );
+}
+
+function getStoredMemberToken() {
+  try { return localStorage.getItem("tennistipz_member_token") || sessionStorage.getItem("tennistipz_member_token") || ""; } catch (error) { return ""; }
+}
+
+function storeMemberToken(token) {
+  try { localStorage.setItem("tennistipz_member_token", token); } catch (error) {}
+  try { sessionStorage.setItem("tennistipz_member_token", token); } catch (error) {}
 }
 
 function HomeSection({ eyebrow, title, text, href, onNavigate, children }) {
@@ -791,9 +808,7 @@ function BettingHubPage() {
 }
 
 function MembersArbitragePage() {
-  const [token, setToken] = useState(() => {
-    try { return sessionStorage.getItem("tennistipz_member_token") || ""; } catch (error) { return ""; }
-  });
+  const [token, setToken] = useState(getStoredMemberToken);
   const [scan, setScan] = useState(40);
   const [bankroll, setBankroll] = useState(100);
   const [payload, setPayload] = useState(null);
@@ -805,7 +820,7 @@ function MembersArbitragePage() {
     setLoading(true);
     setError("");
     try {
-      try { sessionStorage.setItem("tennistipz_member_token", token); } catch (storageError) {}
+      storeMemberToken(token);
       const response = await fetch(`/api/members/arbitrage?scan=${encodeURIComponent(scan)}&bankroll=${encodeURIComponent(bankroll)}`, {
         headers: { "x-member-token": token },
       });
@@ -833,6 +848,7 @@ function MembersArbitragePage() {
       <form onSubmit={runScan} className="border border-white/10 bg-white/[0.04] p-5">
         <label className="block text-sm font-bold text-slate-300" htmlFor="member-token">Member access code</label>
         <input id="member-token" type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Enter member token" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
+        {!token && <p className="mt-3 text-sm text-slate-400">No member token yet? <a href="/register/" className="font-bold text-lime-300">Register for access</a>.</p>}
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="block text-sm font-bold text-slate-300" htmlFor="scan-limit">Matches to scan<input id="scan-limit" type="number" min="1" max="80" value={scan} onChange={(event) => setScan(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
           <label className="block text-sm font-bold text-slate-300" htmlFor="bankroll">Stake plan bankroll<input id="bankroll" type="number" min="1" max="100000" value={bankroll} onChange={(event) => setBankroll(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
@@ -871,6 +887,63 @@ function MembersArbitragePage() {
       <summary className="cursor-pointer font-bold text-slate-300">Show scan diagnostics</summary>
       <div className="mt-4 grid gap-2 text-sm text-slate-500 md:grid-cols-2">{payload.checked.map((item) => <div key={item.eventKey} className="bg-slate-900 p-3">{item.match} - {item.hasHomeAway ? "Home/Away found" : item.error || "No Home/Away market"}</div>)}</div>
     </details>}
+  </section>;
+}
+
+function RegisterPage({ onNavigate }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [accepted, setAccepted] = useState(false);
+  const [token, setToken] = useState(getStoredMemberToken);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/members/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, email, accepted }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || `Registration failed with ${response.status}`);
+      if (data.token) {
+        storeMemberToken(data.token);
+        setToken(data.token);
+      }
+      setMessage(data.message || "Registration complete.");
+    } catch (registerError) {
+      setError(registerError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return <section className="mx-auto max-w-5xl px-5 py-12 md:px-6">
+    <div className="grid gap-8 md:grid-cols-[1fr_0.95fr] md:items-start">
+      <div>
+        <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase text-lime-300"><UserPlus size={16} /> Member registration</p>
+        <h1 className="mt-2 text-4xl font-black md:text-5xl">Register for TennisTipz arbitrage access</h1>
+        <p className="mt-4 leading-8 text-slate-400">Create a free member token for the private ATP/WTA arbitrage scanner. The scanner is not indexed by Google and should be used as research only.</p>
+        <div className="mt-6 border border-amber-300/20 bg-amber-300/[0.06] p-5 text-sm leading-7 text-amber-100">18+ only. Arbitrage and odds data can change quickly. This is informational research, not financial or betting advice.</div>
+      </div>
+      <form onSubmit={submit} className="border border-white/10 bg-white/[0.04] p-6">
+        <label className="block text-sm font-bold text-slate-300" htmlFor="register-name">Name</label>
+        <input id="register-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
+        <label className="mt-4 block text-sm font-bold text-slate-300" htmlFor="register-email">Email</label>
+        <input id="register-email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
+        <label className="mt-4 flex gap-3 text-sm leading-6 text-slate-300"><input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} className="mt-1 h-4 w-4 accent-lime-400" /> I confirm I am 18+ and understand the arbitrage scanner is research only.</label>
+        <button type="submit" disabled={loading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"><UserPlus size={17} /> {loading ? "Registering" : "Register"}</button>
+        {error && <p className="mt-4 rounded-xl border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</p>}
+        {message && <p className="mt-4 rounded-xl border border-lime-400/30 bg-lime-400/10 p-3 text-sm text-lime-100">{message}</p>}
+        {token && <div className="mt-5 rounded-xl bg-slate-950 p-4 ring-1 ring-white/10"><p className="text-xs font-bold uppercase text-slate-500">Saved member token</p><p className="mt-2 break-all font-mono text-sm text-lime-300">{token}</p><button type="button" onClick={() => onNavigate("/members/arbitrage/")} className="mt-4 rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-950 hover:bg-lime-300">Open arbitrage scanner</button></div>}
+      </form>
+    </div>
   </section>;
 }
 
@@ -949,5 +1022,5 @@ export default function TennisTipzApp() {
   useEffect(() => { updateDocumentSeo(route, dbData); updateStructuredData(route, liveData, dbData); }, [route, liveData, dbData]);
   useEffect(() => { const onPopState = () => setRoute(getRoute(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
 
-  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} articles={dbData.articles} />}{route.id === "betting" && <BettingHubPage />}{route.id === "arbitrage" && <MembersArbitragePage />}</main><ResponsibleFooter /></div>;
+  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} articles={dbData.articles} />}{route.id === "betting" && <BettingHubPage />}{route.id === "register" && <RegisterPage onNavigate={navigateTo} />}{route.id === "arbitrage" && <MembersArbitragePage />}</main><ResponsibleFooter /></div>;
 }

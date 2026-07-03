@@ -10,12 +10,35 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
-function isAuthorized(request, env) {
-  const expected = env.ARBITRAGE_MEMBER_TOKEN || env.MEMBER_ACCESS_TOKEN || env.DATABASE_SYNC_TOKEN || env.SYNC_TOKEN;
-  if (!expected) return false;
+async function hashToken(token) {
+  const data = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function findMemberByToken(env, token) {
+  if (!env.TENNIS_DB || !token) return null;
+  const tokenHash = await hashToken(token);
+  try {
+    const member = await env.TENNIS_DB.prepare("SELECT id, email, name, status FROM members WHERE token_hash = ? AND status = 'active'").bind(tokenHash).first();
+    if (member?.id) {
+      await env.TENNIS_DB.prepare("UPDATE members SET last_seen_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").bind(member.id).run();
+      return member;
+    }
+  } catch (error) {
+    return null;
+  }
+  return null;
+}
+
+async function authenticate(request, env) {
   const url = new URL(request.url);
   const token = request.headers.get("x-member-token") || request.headers.get("x-sync-token") || url.searchParams.get("token");
-  return token && token === expected;
+  const adminToken = env.ARBITRAGE_MEMBER_TOKEN || env.MEMBER_ACCESS_TOKEN || env.DATABASE_SYNC_TOKEN || env.SYNC_TOKEN;
+  if (adminToken && token === adminToken) return { type: "admin", member: null };
+  const member = await findMemberByToken(env, token);
+  if (member) return { type: "member", member };
+  return null;
 }
 
 function isoDate(offsetDays = 0) {
@@ -159,7 +182,8 @@ async function scanUpcomingFixtures(env, options) {
 }
 
 async function getArbitrage(request, env) {
-  if (!isAuthorized(request, env)) return jsonResponse({ ok: false, error: "Members only" }, 401);
+  const auth = await authenticate(request, env);
+  if (!auth) return jsonResponse({ ok: false, error: "Members only" }, 401);
   if (!env.API_TENNIS_KEY) return jsonResponse({ ok: false, error: "Missing API_TENNIS_KEY" }, 500);
 
   const url = new URL(request.url);
@@ -180,6 +204,8 @@ async function getArbitrage(request, env) {
     generatedAt: new Date().toISOString(),
     source: "API-Tennis get_fixtures + get_odds",
     memberOnly: true,
+    authType: auth.type,
+    member: auth.member ? { email: auth.member.email, name: auth.member.name || "" } : null,
     options,
     summary: {
       fixturesScanned: upcoming.fixturesScanned,
