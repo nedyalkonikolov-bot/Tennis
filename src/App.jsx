@@ -6,6 +6,7 @@ import {
   Gauge,
   Home,
   Landmark,
+  Lock,
   Newspaper,
   RefreshCw,
   Search,
@@ -88,6 +89,11 @@ const pageMeta = {
     title: "Tennis Betting Tips Today | ATP & WTA Odds Checklist",
     description: "Practical tennis betting tips for ATP and WTA matches with odds discipline, AI confidence, player form, rankings, surface context, and responsible research.",
     canonical: "/tennis-betting-tips/",
+  },
+  arbitrage: {
+    title: "Members Tennis Arbitrage Scanner | TennisTipz",
+    description: "Members-only ATP and WTA tennis arbitrage scanner using API-Tennis bookmaker odds, implied probability, and stake split research.",
+    canonical: "/members/arbitrage/",
   },
 };
 
@@ -206,6 +212,7 @@ function getRoute(pathname) {
   if (cleanPath === "/wta-predictions/") return { id: "predictions", tour: "WTA" };
   if (cleanPath === "/players/atp/") return { id: "stats", tour: "ATP" };
   if (cleanPath === "/players/wta/") return { id: "stats", tour: "WTA" };
+  if (cleanPath === "/members/arbitrage/") return { id: "arbitrage" };
   if (cleanPath === "/tennis-betting-tips/") return { id: "tips", path: cleanPath };
   if (["/tennis-betting/", "/crypto-tennis-betting/", "/cloudbet-tennis-betting/", "/best-crypto-tennis-betting-sites/", "/best-tennis-betting-sites/", "/betting-sites/"].includes(cleanPath)) return { id: "betting", path: cleanPath };
   const page = navPages.find((item) => item.path === cleanPath);
@@ -298,7 +305,7 @@ function updateDocumentSeo(route, dbData) {
   const ogType = ["match-detail", "player-detail", "news", "tips", "betting"].includes(route.id) ? "article" : "website";
   document.title = meta.title;
   setMetaTag('meta[name="description"]', "name", meta.description);
-  setMetaTag('meta[name="robots"]', "name", "index, follow, max-image-preview:large");
+  setMetaTag('meta[name="robots"]', "name", route.id === "arbitrage" ? "noindex, nofollow, noarchive" : "index, follow, max-image-preview:large");
   setMetaTag('meta[property="og:site_name"]', "property", "TennisTipz");
   setMetaTag('meta[property="og:type"]', "property", ogType);
   setMetaTag('meta[property="og:title"]', "property", meta.title);
@@ -783,6 +790,90 @@ function BettingHubPage() {
   return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><p className="text-sm font-semibold uppercase text-lime-300">Crypto tennis betting</p><h1 className="mt-2 text-4xl font-black">Best Tennis Betting Sites</h1><p className="mt-3 max-w-3xl text-slate-400">Compare crypto-friendly tennis betting sites for ATP and WTA markets, odds research, and responsible tennis betting. These links may be sponsored.</p><div className="mt-8 grid gap-5 md:grid-cols-3">{affiliateSites.map((site) => <article key={site.name} className="border border-white/10 bg-white/[0.04] p-6"><div className="mb-5 flex h-28 items-center justify-center bg-slate-900 text-2xl font-black text-lime-300">{site.name}</div><h2 className="text-2xl font-black">{site.name}</h2><p className="mt-2 text-sm font-bold uppercase text-lime-300">{site.bestFor}</p><p className="mt-4 leading-7 text-slate-400">{site.note}</p><div className="mt-6 flex flex-wrap gap-3"><a href={site.href} target="_blank" rel="noreferrer sponsored" onClick={() => trackAffiliateClick(site.name, "betting_hub_card")} className="inline-flex items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Visit {site.name} <ExternalLink size={16} /></a><a href={site.review} className="inline-flex items-center rounded-xl border border-white/15 px-5 py-3 font-bold text-white no-underline hover:bg-white/10">Read review</a></div></article>)}</div><div className="mt-10 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Crypto Tennis Betting Guide</h2><p className="mt-4 leading-8 text-slate-400">A strong tennis betting workflow starts with market availability, then compares odds against player form, ranking movement, surface ratings, recent match load and tournament context. TennisTipz uses Cloudbet odds with ATP and WTA data to help bettors research picks before placing any wager.</p><div className="mt-5 flex flex-wrap gap-3"><a href="/br/previsoes-tenis/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Brazil PT-BR</a><a href="/bd/tennis-predictions/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Bangladesh BN</a><a href="/tr/tenis-tahminleri/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Turkey TR</a></div></div></section>;
 }
 
+function MembersArbitragePage() {
+  const [token, setToken] = useState(() => {
+    try { return sessionStorage.getItem("tennistipz_member_token") || ""; } catch (error) { return ""; }
+  });
+  const [scan, setScan] = useState(40);
+  const [bankroll, setBankroll] = useState(100);
+  const [payload, setPayload] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function runScan(event) {
+    event?.preventDefault?.();
+    setLoading(true);
+    setError("");
+    try {
+      try { sessionStorage.setItem("tennistipz_member_token", token); } catch (storageError) {}
+      const response = await fetch(`/api/members/arbitrage?scan=${encodeURIComponent(scan)}&bankroll=${encodeURIComponent(bankroll)}`, {
+        headers: { "x-member-token": token },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || `Arbitrage scan failed with ${response.status}`);
+      setPayload(data);
+    } catch (scanError) {
+      setPayload(null);
+      setError(scanError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const rows = payload?.opportunities || [];
+  const summary = payload?.summary || {};
+
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
+    <div className="grid gap-8 md:grid-cols-[1.1fr_0.9fr] md:items-start">
+      <div>
+        <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase text-lime-300"><Lock size={16} /> Members only</p>
+        <h1 className="mt-2 text-4xl font-black md:text-5xl">Tennis Arbitrage Scanner</h1>
+        <p className="mt-4 max-w-3xl leading-8 text-slate-400">Scan ATP and WTA singles odds from API-Tennis, compare the best Home/Away prices across bookmakers, and flag theoretical arbitrage before affiliate links are added.</p>
+      </div>
+      <form onSubmit={runScan} className="border border-white/10 bg-white/[0.04] p-5">
+        <label className="block text-sm font-bold text-slate-300" htmlFor="member-token">Member access code</label>
+        <input id="member-token" type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Enter member token" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm font-bold text-slate-300" htmlFor="scan-limit">Matches to scan<input id="scan-limit" type="number" min="1" max="80" value={scan} onChange={(event) => setScan(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
+          <label className="block text-sm font-bold text-slate-300" htmlFor="bankroll">Stake plan bankroll<input id="bankroll" type="number" min="1" max="100000" value={bankroll} onChange={(event) => setBankroll(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
+        </div>
+        <button type="submit" disabled={loading || !token} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw size={17} className={loading ? "animate-spin" : ""} /> {loading ? "Scanning odds" : "Scan member odds"}</button>
+        {error && <p className="mt-4 rounded-xl border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</p>}
+      </form>
+    </div>
+
+    <div className="mt-8 grid gap-4 md:grid-cols-4">
+      <Metric label="Fixtures scanned" value={summary.fixturesScanned ?? "Locked"} />
+      <Metric label="Priced matches" value={summary.pricedMatches ?? "Locked"} />
+      <Metric label="Arbitrage found" value={summary.arbitrageCount ?? "Locked"} />
+      <Metric label="Best edge" value={summary.bestEdgePercent === null || summary.bestEdgePercent === undefined ? "Locked" : `${summary.bestEdgePercent}%`} />
+    </div>
+
+    <div className="mt-8 border border-amber-300/20 bg-amber-300/[0.06] p-5 text-sm leading-7 text-amber-100">
+      Arbitrage shown here is theoretical. Odds can move, limits can apply, markets can be voided, and bookmaker terms differ. Recheck every price manually before using any stake plan.
+    </div>
+
+    <div className="mt-8 overflow-hidden border border-white/10">
+      <div className="hidden grid-cols-[1.45fr_0.8fr_0.8fr_0.65fr_0.8fr] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid">
+        <span>Match</span><span>Best home</span><span>Best away</span><span>Edge</span><span>Stake split</span>
+      </div>
+      {rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.45fr_0.8fr_0.8fr_0.65fr_0.8fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
+        <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.tour}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${row.arbitrage ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300"}`}>{row.arbitrage ? "Arbitrage" : "Near miss"}</span></div><h2 className="mt-2 text-lg font-black">{row.match}</h2><p className="mt-1 text-sm text-slate-500">{row.tournament} - {row.startDate} {row.startTime}</p></div>
+        <Metric label={row.bestHome.bookmaker} value={row.bestHome.price} helper={row.playerA || "Home"} />
+        <Metric label={row.bestAway.bookmaker} value={row.bestAway.price} helper={row.playerB || "Away"} />
+        <Metric label="Edge" value={`${row.edgePercent}%`} helper={`Implied ${row.impliedTotal}`} />
+        <Metric label={`${row.stakePlan.bankroll} stake`} value={`${row.stakePlan.homeStake}/${row.stakePlan.awayStake}`} helper={`Profit ${row.stakePlan.expectedProfit}`} />
+      </article>)}
+      {!rows.length && <div className="p-8 text-slate-400">Enter a member access code and run the scanner. If no rows appear, API-Tennis did not return complete Home/Away bookmaker odds for the scanned ATP/WTA matches.</div>}
+    </div>
+
+    {payload?.checked?.length > 0 && <details className="mt-8 border border-white/10 bg-white/[0.04] p-5">
+      <summary className="cursor-pointer font-bold text-slate-300">Show scan diagnostics</summary>
+      <div className="mt-4 grid gap-2 text-sm text-slate-500 md:grid-cols-2">{payload.checked.map((item) => <div key={item.eventKey} className="bg-slate-900 p-3">{item.match} - {item.hasHomeAway ? "Home/Away found" : item.error || "No Home/Away market"}</div>)}</div>
+    </details>}
+  </section>;
+}
+
 function NotFound({ title = "Page not found", text = "The page could not be loaded yet." }) {
   return <section className="mx-auto max-w-7xl px-5 py-20 md:px-6"><h1 className="text-4xl font-black">{title}</h1><p className="mt-4 text-slate-400">{text}</p></section>;
 }
@@ -858,5 +949,5 @@ export default function TennisTipzApp() {
   useEffect(() => { updateDocumentSeo(route, dbData); updateStructuredData(route, liveData, dbData); }, [route, liveData, dbData]);
   useEffect(() => { const onPopState = () => setRoute(getRoute(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
 
-  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} articles={dbData.articles} />}{route.id === "betting" && <BettingHubPage />}</main><ResponsibleFooter /></div>;
+  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} articles={dbData.articles} />}{route.id === "betting" && <BettingHubPage />}{route.id === "arbitrage" && <MembersArbitragePage />}</main><ResponsibleFooter /></div>;
 }

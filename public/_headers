@@ -19,6 +19,14 @@
   Content-Type: text/plain; charset=utf-8
   Cache-Control: public, max-age=900, no-transform
 
+/members/arbitrage/*
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: private, no-store
+
+/members/arbitrage
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: private, no-store
+
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
   X-Content-Type-Options: nosniff
