@@ -58,6 +58,7 @@ const navPages = [
   { id: "stats", label: "Player Stats", path: "/player-stats/", icon: Users },
   { id: "news", label: "News & Articles", path: "/tennis-news/", icon: Newspaper },
   { id: "betting", label: "Betting Sites", path: "/betting-sites/", icon: Landmark },
+  { id: "arbitrage", label: "Arbitrage", path: "/members/arbitrage/", icon: Lock },
 ];
 
 const pageMeta = {
@@ -843,7 +844,7 @@ function MembersArbitragePage() {
       <div>
         <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase text-lime-300"><Lock size={16} /> Members only</p>
         <h1 className="mt-2 text-4xl font-black md:text-5xl">Tennis Arbitrage Scanner</h1>
-        <p className="mt-4 max-w-3xl leading-8 text-slate-400">Scan ATP and WTA singles odds from API-Tennis, compare the best Home/Away prices across bookmakers, and flag theoretical arbitrage before affiliate links are added.</p>
+        <p className="mt-4 max-w-3xl leading-8 text-slate-400">Scan ATP and WTA singles odds from API-Tennis, compare the best Home/Away prices across bookmakers, and include Cloudbet odds with your affiliate button when that market is available.</p>
       </div>
       <form onSubmit={runScan} className="border border-white/10 bg-white/[0.04] p-5">
         <label className="block text-sm font-bold text-slate-300" htmlFor="member-token">Member access code</label>
@@ -858,10 +859,11 @@ function MembersArbitragePage() {
       </form>
     </div>
 
-    <div className="mt-8 grid gap-4 md:grid-cols-4">
+    <div className="mt-8 grid gap-4 md:grid-cols-5">
       <Metric label="Fixtures scanned" value={summary.fixturesScanned ?? "Locked"} />
       <Metric label="Priced matches" value={summary.pricedMatches ?? "Locked"} />
       <Metric label="Arbitrage found" value={summary.arbitrageCount ?? "Locked"} />
+      <Metric label="Cloudbet matches" value={summary.cloudbetMatches ?? "Locked"} />
       <Metric label="Best edge" value={summary.bestEdgePercent === null || summary.bestEdgePercent === undefined ? "Locked" : `${summary.bestEdgePercent}%`} />
     </div>
 
@@ -870,13 +872,17 @@ function MembersArbitragePage() {
     </div>
 
     <div className="mt-8 overflow-hidden border border-white/10">
-      <div className="hidden grid-cols-[1.45fr_0.8fr_0.8fr_0.65fr_0.8fr] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid">
-        <span>Match</span><span>Best home</span><span>Best away</span><span>Edge</span><span>Stake split</span>
+      <div className="hidden grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid">
+        <span>Match</span><span>Best home</span><span>Best away</span><span>Cloudbet</span><span>Edge</span><span>Stake split</span>
       </div>
-      {rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.45fr_0.8fr_0.8fr_0.65fr_0.8fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
+      {rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
         <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.tour}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${row.arbitrage ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300"}`}>{row.arbitrage ? "Arbitrage" : "Near miss"}</span></div><h2 className="mt-2 text-lg font-black">{row.match}</h2><p className="mt-1 text-sm text-slate-500">{row.tournament} - {row.startDate} {row.startTime}</p></div>
         <Metric label={row.bestHome.bookmaker} value={row.bestHome.price} helper={row.playerA || "Home"} />
         <Metric label={row.bestAway.bookmaker} value={row.bestAway.price} helper={row.playerB || "Away"} />
+        <div className="bg-slate-900 p-4">
+          <p className="text-xs text-slate-500">Cloudbet</p>
+          {row.cloudbet?.available ? <><p className="mt-1 text-xl font-black">{row.cloudbet.home} / {row.cloudbet.away}</p><p className="mt-1 text-xs text-slate-500">{row.cloudbet.marketType || "winner"}</p><a href={row.cloudbet.affiliateUrl || cloudbetUrl} target="_blank" rel="noreferrer sponsored" onClick={() => trackAffiliateClick("Cloudbet", "arbitrage_row")} className="mt-3 inline-flex items-center gap-1 rounded-lg bg-lime-400 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-lime-300">Open Cloudbet <ExternalLink size={13} /></a></> : <><p className="mt-1 text-xl font-black">N/A</p><p className="mt-1 text-xs text-slate-500">No matched market</p></>}
+        </div>
         <Metric label="Edge" value={`${row.edgePercent}%`} helper={`Implied ${row.impliedTotal}`} />
         <Metric label={`${row.stakePlan.bankroll} stake`} value={`${row.stakePlan.homeStake}/${row.stakePlan.awayStake}`} helper={`Profit ${row.stakePlan.expectedProfit}`} />
       </article>)}
@@ -885,7 +891,7 @@ function MembersArbitragePage() {
 
     {payload?.checked?.length > 0 && <details className="mt-8 border border-white/10 bg-white/[0.04] p-5">
       <summary className="cursor-pointer font-bold text-slate-300">Show scan diagnostics</summary>
-      <div className="mt-4 grid gap-2 text-sm text-slate-500 md:grid-cols-2">{payload.checked.map((item) => <div key={item.eventKey} className="bg-slate-900 p-3">{item.match} - {item.hasHomeAway ? "Home/Away found" : item.error || "No Home/Away market"}</div>)}</div>
+      <div className="mt-4 grid gap-2 text-sm text-slate-500 md:grid-cols-2">{payload.checked.map((item) => <div key={item.eventKey} className="bg-slate-900 p-3">{item.match} - {item.hasHomeAway ? "Home/Away found" : item.error || "No Home/Away market"}{item.hasCloudbet ? " - Cloudbet matched" : ""}</div>)}</div>
     </details>}
   </section>;
 }
