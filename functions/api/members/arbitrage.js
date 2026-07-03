@@ -85,7 +85,10 @@ function namesLookSimilar(a, b) {
   if (!left.length || !right.length) return false;
   const rightSet = new Set(right);
   const shared = left.filter((part) => rightSet.has(part));
-  return left.at(-1) === right.at(-1) && (shared.length >= 2 || left.length === 1 || right.length === 1);
+  const sameLastName = left.at(-1) === right.at(-1);
+  const firstInitialMatches = left[0]?.slice(0, 1) && left[0].slice(0, 1) === right[0]?.slice(0, 1);
+  const eitherFirstNameIsInitial = (left[0]?.length || 0) === 1 || (right[0]?.length || 0) === 1;
+  return sameLastName && (shared.length >= 2 || left.length === 1 || right.length === 1 || firstInitialMatches || eitherFirstNameIsInitial);
 }
 
 function bestPrice(bookPrices = {}) {
@@ -273,7 +276,6 @@ async function getCloudbetOddsMap(env, fixtures = []) {
     .flatMap((category) => (category.competitions || []).map((competition) => ({ ...competition, category })))
     .filter((competition) => competition.eventCount > 0)
     .filter((competition) => !BLOCKED_RE.test(competitionText(competition)))
-    .filter((competition) => /\b(atp|wta)\b/i.test(competitionText(competition)))
     .sort((a, b) => (b.eventCount || 0) - (a.eventCount || 0))
     .slice(0, 500);
   result.diagnostics.scannedCompetitions = competitions.length;
@@ -289,7 +291,6 @@ async function getCloudbetOddsMap(env, fixtures = []) {
   const events = payloads.flatMap(({ competition, payload }) => (payload?.events || []).map((event) => ({ ...event, competition: event.competition || competition })));
   result.matches = events
     .filter((event) => !BLOCKED_RE.test(eventText(event)))
-    .filter((event) => /\b(atp|wta)\b/i.test(eventText(event)))
     .map((event) => ({ event, odds: extractCloudbetOdds(event) }))
     .filter((item) => item.odds)
     .map(({ event, odds }) => ({ playerA: event.home.name, playerB: event.away.name, tournament: event.competition?.name || event.name || "Cloudbet Tennis", odds }));
