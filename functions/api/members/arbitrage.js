@@ -6,6 +6,22 @@ const DEFAULT_CLOUDBET_AFFILIATE_URL = "https://cldbt.cloud/go/en/landing/bitcoi
 const BLOCKED_RE = /\b(simulated|simulation|virtual|srl|reality league|itf|utr|exhibition|junior|boys|girls|college|doubles)\b/i;
 const CROSS_SPORT_BLOCKED_RE = /\b(simulated|simulation|virtual|srl|reality league|esoccer|ebasketball|efootball|specials|politics|finance|crypto|weather)\b/i;
 const DEFAULT_CLOUDBET_SPORTS = ["tennis", "soccer", "basketball", "baseball", "american-football", "ice-hockey", "boxing", "mma", "cricket", "rugby"];
+const POLYMARKET_SPORT_SERIES = ["mlb", "wnba", "nba", "nfl", "ncaaf", "ncaab", "nhl", "tennis", "ufc", "mma", "epl", "mls", "champions-league"];
+const POLYMARKET_TO_CLOUDBET_SPORTS = {
+  mlb: ["baseball"],
+  wnba: ["basketball"],
+  nba: ["basketball"],
+  nfl: ["american-football"],
+  ncaaf: ["american-football"],
+  ncaab: ["basketball"],
+  nhl: ["ice-hockey"],
+  tennis: ["tennis"],
+  ufc: ["mma", "boxing"],
+  mma: ["mma"],
+  epl: ["soccer"],
+  mls: ["soccer"],
+  "champions-league": ["soccer"],
+};
 const BAD_BINARY_MARKET_RE = /\b(total|over|under|spread|handicap|correct score|set betting|game betting|quarter|period|half|method|round|map|race to|player props?|team total|points|goals)\b/i;
 const GOOD_BINARY_MARKET_RE = /\b(winner|moneyline|match odds|match result|head to head|h2h|to win)\b/i;
 
@@ -415,6 +431,8 @@ function normalizeCloudbetSports(payload) {
 async function getCloudbetSports(env, options = {}) {
   const configured = String(env.CLOUDBET_ARB_SPORTS || "").split(",").map((sport) => sport.trim()).filter(Boolean);
   if (configured.length) return configured.slice(0, options.sportLimit).map((key) => ({ key, name: key }));
+  const preferred = Array.isArray(options.preferredCloudbetSports) ? options.preferredCloudbetSports.filter(Boolean) : [];
+  if (preferred.length) return [...new Set(preferred)].slice(0, options.sportLimit).map((key) => ({ key, name: key }));
   const payload = await fetchCloudbet(env, "/sports").catch(() => null);
   const sports = normalizeCloudbetSports(payload);
   if (sports.length) return sports.slice(0, options.sportLimit);
@@ -525,6 +543,7 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
   if (CROSS_SPORT_BLOCKED_RE.test(text)) return null;
   return {
     id: String(rawMarket.id || rawMarket.conditionId || rawMarket.condition_id || rawMarket.slug || question),
+    seriesSlug: event.seriesSlug || event.series_slug || rawMarket.seriesSlug || rawMarket.series_slug || "",
     question,
     title,
     text,
@@ -538,35 +557,85 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
   };
 }
 
+function isOpenPolymarketSportsEvent(event = {}) {
+  if (!event || event.closed || event.ended || event.archived || event.active === false) return false;
+  const date = new Date(event.startTime || event.endDate || event.endDateIso || event.startDate || event.creationDate || 0);
+  if (Number.isNaN(date.getTime())) return true;
+  const now = Date.now();
+  return date.getTime() >= now - 1000 * 60 * 60 * 36;
+}
+
+function eventMarketsFromPayload(payload) {
+  const events = polymarketList(payload);
+  if (!events.length && payload?.markets) return payload.markets;
+  return events.flatMap((event) => (Array.isArray(event.markets) ? event.markets.map((market) => ({ market, event })) : []));
+}
+
+async function hydratePolymarketEventMarkets(env, event, diagnostics) {
+  const slugs = [event.slug, event.ticker].filter(Boolean);
+  for (const slug of slugs) {
+    try {
+      const payload = await fetchPolymarket(env, `/events?slug=${encodeURIComponent(slug)}`);
+      const pairs = eventMarketsFromPayload(payload);
+      if (pairs.length) return pairs;
+    } catch (error) {
+      diagnostics.errors.push(`event ${slug}: ${error.message}`);
+    }
+  }
+  if (Array.isArray(event.markets)) return event.markets.map((market) => ({ market, event }));
+  return [];
+}
+
 async function getPolymarketBinaryMarkets(env, options = {}) {
   const diagnostics = {
     hasPolymarketApiKey: Boolean(env.POLYMARKET_API_KEY),
     endpointsTried: [],
+    seriesScanned: 0,
+    eventsDiscovered: 0,
+    eventsHydrated: 0,
     marketsScanned: 0,
     binaryMarkets: 0,
+    sportSeries: [],
     errors: [],
   };
-  const limit = options.polymarketLimit;
-  const endpoints = [
-    `/events?limit=${limit}&active=true&closed=false&archived=false`,
-    `/markets?limit=${limit}&active=true&closed=false&archived=false`,
-  ];
+  const seriesSlugs = String(env.POLYMARKET_SPORT_SERIES || "")
+    .split(",")
+    .map((slug) => slug.trim())
+    .filter(Boolean);
+  const slugs = (seriesSlugs.length ? seriesSlugs : POLYMARKET_SPORT_SERIES).slice(0, options.polymarketSeriesLimit);
   const normalized = [];
   const seen = new Set();
+  const sports = new Set();
 
-  for (const endpoint of endpoints) {
+  for (const slug of slugs) {
+    if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
+    const endpoint = `/series?slug=${encodeURIComponent(slug)}`;
     diagnostics.endpointsTried.push(endpoint);
     try {
       const payload = await fetchPolymarket(env, endpoint);
-      const items = polymarketList(payload);
-      for (const item of items) {
-        const markets = Array.isArray(item.markets) ? item.markets : [item];
-        for (const market of markets) {
+      const series = polymarketList(payload);
+      diagnostics.seriesScanned += series.length;
+      for (const item of series) {
+        const seriesSlug = item.slug || slug;
+        const events = (Array.isArray(item.events) ? item.events : [])
+          .filter(isOpenPolymarketSportsEvent)
+          .slice(0, options.polymarketEventsPerSeries);
+        diagnostics.eventsDiscovered += events.length;
+        if (events.length) {
+          diagnostics.sportSeries.push({ slug: seriesSlug, title: item.title || seriesSlug, events: events.length });
+          sports.add(seriesSlug);
+        }
+        for (const event of events) {
+          if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
+          diagnostics.eventsHydrated += 1;
+          const pairs = await hydratePolymarketEventMarkets(env, { ...event, seriesSlug }, diagnostics);
+          for (const { market, event: marketEvent } of pairs) {
           diagnostics.marketsScanned += 1;
-          const candidate = normalizePolymarketMarket(market, item.markets ? item : {});
+          const candidate = normalizePolymarketMarket(market, { ...event, ...marketEvent, seriesSlug });
           if (!candidate || seen.has(candidate.id)) continue;
           seen.add(candidate.id);
           normalized.push(candidate);
+          }
         }
       }
     } catch (error) {
@@ -575,7 +644,8 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
   }
 
   diagnostics.binaryMarkets = normalized.length;
-  return { markets: normalized, diagnostics };
+  const cloudbetSports = [...sports].flatMap((sport) => POLYMARKET_TO_CLOUDBET_SPORTS[sport] || []);
+  return { markets: normalized, cloudbetSports: [...new Set(cloudbetSports)], diagnostics };
 }
 
 function eventDatesClose(cloudbetEvent = {}, polyMarket = {}) {
@@ -614,6 +684,44 @@ function inferPolymarketSides(polyMarket = {}, cloudbetEvent = {}) {
 
   if (homeIndex < awayIndex) return { homePrice: firstPrice, awayPrice: secondPrice, matchType: "yes/no first-mentioned home" };
   return { homePrice: secondPrice, awayPrice: firstPrice, matchType: "yes/no first-mentioned away" };
+}
+
+function polymarketCloudbetMatch(polyMarket = {}, cloudbetEvent = {}) {
+  const homeMentioned = entityMentioned(polyMarket.text, cloudbetEvent.home) || polyMarket.outcomes.some((outcome) => entityMentioned(outcome, cloudbetEvent.home));
+  const awayMentioned = entityMentioned(polyMarket.text, cloudbetEvent.away) || polyMarket.outcomes.some((outcome) => entityMentioned(outcome, cloudbetEvent.away));
+  if (!homeMentioned || !awayMentioned || !eventDatesClose(cloudbetEvent, polyMarket)) return null;
+  const sides = inferPolymarketSides(polyMarket, cloudbetEvent);
+  if (!sides) return null;
+  return sides;
+}
+
+function buildPolymarketCoverage(polymarketMarkets = [], cloudbetEvents = []) {
+  return polymarketMarkets.map((polyMarket) => {
+    const candidates = [];
+    for (const cloudbetEvent of cloudbetEvents) {
+      const sides = polymarketCloudbetMatch(polyMarket, cloudbetEvent);
+      if (!sides) continue;
+      candidates.push({
+        id: cloudbetEvent.id,
+        match: `${cloudbetEvent.home} vs ${cloudbetEvent.away}`,
+        sport: cloudbetEvent.sport,
+        competition: cloudbetEvent.competition,
+        marketMatchType: sides.matchType,
+        cloudbetHomeOdds: cloudbetEvent.odds.home,
+        cloudbetAwayOdds: cloudbetEvent.odds.away,
+      });
+    }
+    return {
+      id: polyMarket.id,
+      question: polyMarket.question,
+      seriesSlug: polyMarket.seriesSlug,
+      url: polyMarket.url,
+      outcomes: polyMarket.outcomes,
+      prices: polyMarket.prices,
+      matched: candidates.length > 0,
+      candidates: candidates.slice(0, 3),
+    };
+  });
 }
 
 function buildCrossVenueCandidate(cloudbetEvent, polyMarket, sides, cloudbetSide, bankroll, polyBuffer, cloudbetAffiliateUrl) {
@@ -660,22 +768,22 @@ function buildCrossVenueCandidate(cloudbetEvent, polyMarket, sides, cloudbetSide
 }
 
 async function scanCrossSportArbitrage(env, options = {}) {
-  const [cloudbet, polymarket] = await Promise.all([
-    getCloudbetAllSportEvents(env, options).catch((error) => ({ events: [], diagnostics: { error: error.message, hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY) } })),
-    getPolymarketBinaryMarkets(env, options).catch((error) => ({ markets: [], diagnostics: { error: error.message, hasPolymarketApiKey: Boolean(env.POLYMARKET_API_KEY) } })),
-  ]);
+  const polymarket = await getPolymarketBinaryMarkets(env, options)
+    .catch((error) => ({ markets: [], cloudbetSports: [], diagnostics: { error: error.message, hasPolymarketApiKey: Boolean(env.POLYMARKET_API_KEY) } }));
+  const cloudbet = await getCloudbetAllSportEvents(env, {
+    ...options,
+    preferredCloudbetSports: polymarket.cloudbetSports?.length ? polymarket.cloudbetSports : options.preferredCloudbetSports,
+  }).catch((error) => ({ events: [], diagnostics: { error: error.message, hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY) } }));
   const cloudbetAffiliateUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_CLOUDBET_AFFILIATE_URL).trim();
   const checked = [];
   const opportunities = [];
   let matchedMarkets = 0;
+  const polymarketCoverage = buildPolymarketCoverage(polymarket.markets, cloudbet.events);
 
   for (const cloudbetEvent of cloudbet.events) {
     const eventMatches = [];
     for (const polyMarket of polymarket.markets) {
-      const homeMentioned = entityMentioned(polyMarket.text, cloudbetEvent.home) || polyMarket.outcomes.some((outcome) => entityMentioned(outcome, cloudbetEvent.home));
-      const awayMentioned = entityMentioned(polyMarket.text, cloudbetEvent.away) || polyMarket.outcomes.some((outcome) => entityMentioned(outcome, cloudbetEvent.away));
-      if (!homeMentioned || !awayMentioned || !eventDatesClose(cloudbetEvent, polyMarket)) continue;
-      const sides = inferPolymarketSides(polyMarket, cloudbetEvent);
+      const sides = polymarketCloudbetMatch(polyMarket, cloudbetEvent);
       if (!sides) continue;
       matchedMarkets += 1;
       eventMatches.push(polyMarket.question);
@@ -699,6 +807,7 @@ async function scanCrossSportArbitrage(env, options = {}) {
     matchedMarkets,
     opportunities,
     checked,
+    polymarketCoverage,
     cloudbetDiagnostics: cloudbet.diagnostics,
     polymarketDiagnostics: polymarket.diagnostics,
   };
@@ -761,6 +870,9 @@ async function getArbitrage(request, env) {
     competitionLimitPerSport: clampInteger(url.searchParams.get("competitions") || env.CLOUDBET_ARB_COMPETITION_LIMIT || "16", 16, 1, 40),
     eventLimit: clampInteger(url.searchParams.get("events") || url.searchParams.get("scan") || "80", 80, 1, 250),
     polymarketLimit: clampInteger(url.searchParams.get("polymarket") || env.POLYMARKET_ARB_MARKET_LIMIT || "500", 500, 25, 1000),
+    polymarketSeriesLimit: clampInteger(url.searchParams.get("poly_series") || env.POLYMARKET_ARB_SERIES_LIMIT || "10", 10, 1, 20),
+    polymarketEventsPerSeries: clampInteger(url.searchParams.get("poly_events_per_series") || env.POLYMARKET_ARB_EVENTS_PER_SERIES || "6", 6, 1, 20),
+    polymarketEventLimit: clampInteger(url.searchParams.get("poly_events") || env.POLYMARKET_ARB_EVENT_LIMIT || "30", 30, 1, 80),
     polyBuffer: clampNumber(url.searchParams.get("poly_buffer") || env.POLYMARKET_PRICE_BUFFER || "0.01", 0.01, 0, 0.1),
   };
 
@@ -783,12 +895,15 @@ async function getArbitrage(request, env) {
         cloudbetEventsScanned: cross.cloudbetEventsScanned,
         polymarketMarketsScanned: cross.polymarketMarketsScanned,
         matchedMarkets: cross.matchedMarkets,
+        polymarketMatched: cross.polymarketCoverage.filter((item) => item.matched).length,
+        polymarketUnmatched: cross.polymarketCoverage.filter((item) => !item.matched).length,
         pricedMatches: rows.length,
         arbitrageCount: rows.filter((item) => item.arbitrage).length,
         bestEdgePercent: rows.length ? rows[0].edgePercent : null,
       },
       opportunities: rows,
       checked: cross.checked.slice(0, 80),
+      polymarketCoverage: cross.polymarketCoverage.slice(0, 100),
       cloudbetDiagnostics: cross.cloudbetDiagnostics,
       polymarketDiagnostics: cross.polymarketDiagnostics,
       note: "Cross-venue arbitrage is theoretical before odds latency, order-book depth, Polymarket spreads/fees, stake limits, void rules, KYC restrictions and settlement-rule differences. Recheck every price manually before acting.",
