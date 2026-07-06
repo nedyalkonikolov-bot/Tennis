@@ -22,7 +22,7 @@ const POLYMARKET_TO_CLOUDBET_SPORTS = {
   mls: ["soccer"],
   "champions-league": ["soccer"],
 };
-const BAD_BINARY_MARKET_RE = /\b(total|over|under|spread|handicap|correct score|set betting|game betting|quarter|period|half|method|round|map|race to|player props?|team total|points|goals)\b/i;
+const BAD_BINARY_MARKET_RE = /\b(total|over|under|spread|handicap|correct score|set betting|game betting|quarter|period|half|first five|first 5|5 innings?|inning|tied?|draw|method|round|map|race to|player props?|team total|points|goals)\b/i;
 const GOOD_BINARY_MARKET_RE = /\b(winner|moneyline|match odds|match result|head to head|h2h|to win)\b/i;
 
 function jsonResponse(payload, status = 200) {
@@ -541,6 +541,7 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
   const title = event.title || event.name || question;
   const text = [question, title, event.slug, rawMarket.slug, rawMarket.description, event.description].filter(Boolean).join(" ");
   if (CROSS_SPORT_BLOCKED_RE.test(text)) return null;
+  if (BAD_BINARY_MARKET_RE.test(text)) return null;
   return {
     id: String(rawMarket.id || rawMarket.conditionId || rawMarket.condition_id || rawMarket.slug || question),
     seriesSlug: event.seriesSlug || event.series_slug || rawMarket.seriesSlug || rawMarket.series_slug || "",
