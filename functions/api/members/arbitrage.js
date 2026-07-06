@@ -24,6 +24,83 @@ const POLYMARKET_TO_CLOUDBET_SPORTS = {
 };
 const BAD_BINARY_MARKET_RE = /\b(total|over|under|spread|handicap|correct score|set betting|game betting|quarter|period|half|first five|first 5|5 innings?|inning|tied?|draw|method|round|map|race to|player props?|team total|points|goals)\b/i;
 const GOOD_BINARY_MARKET_RE = /\b(winner|moneyline|match odds|match result|head to head|h2h|to win)\b/i;
+const SAME_EVENT_MAX_HOURS = 48;
+const SPORTS_ALIAS_TOKENS = {
+  atl: "atlanta",
+  ari: "arizona",
+  bkn: "brooklyn",
+  bos: "boston",
+  buf: "buffalo",
+  car: "carolina",
+  cha: "charlotte",
+  chi: "chicago",
+  cin: "cincinnati",
+  cle: "cleveland",
+  col: "colorado",
+  con: "connecticut",
+  conn: "connecticut",
+  dal: "dallas",
+  den: "denver",
+  det: "detroit",
+  gb: "green bay",
+  gs: "golden state",
+  gsw: "golden state",
+  hou: "houston",
+  ind: "indiana",
+  jac: "jacksonville",
+  jax: "jacksonville",
+  kc: "kansas city",
+  la: "los angeles",
+  lac: "los angeles chargers",
+  lad: "los angeles dodgers",
+  lal: "los angeles lakers",
+  lv: "las vegas",
+  mia: "miami",
+  mil: "milwaukee",
+  min: "minnesota",
+  ne: "new england",
+  ny: "new york",
+  nyg: "new york giants",
+  nyj: "new york jets",
+  nym: "new york mets",
+  nyy: "new york yankees",
+  okc: "oklahoma city",
+  phi: "philadelphia",
+  phx: "phoenix",
+  pit: "pittsburgh",
+  por: "portland",
+  sa: "san antonio",
+  sac: "sacramento",
+  sd: "san diego",
+  sea: "seattle",
+  sf: "san francisco",
+  stl: "st louis",
+  tb: "tampa bay",
+  ten: "tennessee",
+  tor: "toronto",
+  uta: "utah",
+  was: "washington",
+  wsh: "washington",
+};
+const GENERIC_ENTITY_TOKENS = new Set([
+  "the",
+  "team",
+  "club",
+  "fc",
+  "afc",
+  "cf",
+  "sc",
+  "city",
+  "state",
+  "united",
+  "women",
+  "woman",
+  "mens",
+  "womens",
+  "men",
+  "w",
+  "m",
+]);
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload, null, 2), {
@@ -107,14 +184,28 @@ function clampInteger(value, fallback, min, max) {
   return Math.min(Math.max(number, min), max);
 }
 
-function normalizeName(value = "") {
+function splitCamelCase(value = "") {
+  return String(value).replace(/([a-z])([A-Z])/g, "$1 $2");
+}
+
+function expandSportsAliases(value = "") {
   return String(value)
+    .split(" ")
+    .filter(Boolean)
+    .flatMap((token) => (SPORTS_ALIAS_TOKENS[token] || token).split(" "))
+    .join(" ");
+}
+
+function normalizeName(value = "") {
+  const clean = splitCamelCase(value)
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
     .replace(/[^a-z\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  return expandSportsAliases(clean).replace(/\s+/g, " ").trim();
 }
 
 function safeJsonArray(value) {
@@ -128,21 +219,49 @@ function safeJsonArray(value) {
   }
 }
 
+function normalizedTokens(value = "") {
+  return normalizeName(value).split(" ").filter(Boolean);
+}
+
 function importantTokens(value = "") {
-  return normalizeName(value)
-    .split(" ")
-    .filter((part) => part.length > 2 && !["the", "team", "club", "fc", "afc", "cf", "sc"].includes(part));
+  return normalizedTokens(value)
+    .filter((part) => part.length > 1 && !GENERIC_ENTITY_TOKENS.has(part));
+}
+
+function includesNormalizedPhrase(haystack = "", needle = "") {
+  return Boolean(haystack && needle && ` ${haystack} `.includes(` ${needle} `));
+}
+
+function entityMatchScore(text = "", entity = "") {
+  const haystack = normalizeName(text);
+  const needle = normalizeName(entity);
+  if (!haystack || !needle) return { matched: false, score: 0, reason: "missing text" };
+  if (includesNormalizedPhrase(haystack, needle)) return { matched: true, score: 1, reason: "exact phrase" };
+
+  const haystackTokens = new Set(normalizedTokens(text));
+  const tokens = importantTokens(entity);
+  if (!tokens.length) return { matched: false, score: 0, reason: "no distinctive tokens" };
+
+  const hits = tokens.filter((token) => haystackTokens.has(token));
+  const ratio = hits.length / tokens.length;
+  const distinctiveLastToken = [...tokens].reverse().find((token) => token.length >= 4 && !GENERIC_ENTITY_TOKENS.has(token));
+  const lastTokenMatch = Boolean(distinctiveLastToken && haystackTokens.has(distinctiveLastToken));
+  const matched = hits.length >= Math.min(tokens.length, tokens.length >= 3 ? 2 : 1) || (lastTokenMatch && ratio >= 0.25);
+  const score = matched ? Math.max(ratio, lastTokenMatch ? 0.72 : 0) : ratio;
+  return {
+    matched,
+    score: Math.round(score * 100) / 100,
+    reason: matched ? `token match: ${hits.join(", ") || distinctiveLastToken}` : `weak token match: ${hits.join(", ") || "none"}`,
+  };
+}
+
+function bestEntityMatchScore(polyMarket = {}, entity = "") {
+  const scores = [entityMatchScore(polyMarket.text, entity), ...(polyMarket.outcomes || []).map((outcome) => entityMatchScore(outcome, entity))];
+  return scores.sort((a, b) => b.score - a.score)[0] || { matched: false, score: 0, reason: "not checked" };
 }
 
 function entityMentioned(text = "", entity = "") {
-  const haystack = normalizeName(text);
-  const needle = normalizeName(entity);
-  if (!haystack || !needle) return false;
-  if (haystack.includes(needle)) return true;
-  const tokens = importantTokens(entity);
-  if (!tokens.length) return false;
-  const hits = tokens.filter((token) => haystack.includes(token)).length;
-  return hits >= Math.min(tokens.length, tokens.length >= 2 ? 2 : 1);
+  return entityMatchScore(text, entity).matched;
 }
 
 function namesLookSimilar(a, b) {
@@ -277,6 +396,12 @@ function eventStartIso(event = {}) {
   const raw = event.startTime || event.cutoffTime || event.startDate || event.start || event.scheduledStart || event.commenceTime || event.date;
   if (!raw) return "";
   const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function toIsoString(value = "") {
+  if (!value) return "";
+  const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
@@ -542,6 +667,24 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
   const text = [question, title, event.slug, rawMarket.slug, rawMarket.description, event.description].filter(Boolean).join(" ");
   if (CROSS_SPORT_BLOCKED_RE.test(text)) return null;
   if (BAD_BINARY_MARKET_RE.test(text)) return null;
+  const startIso = toIsoString(
+    event.startTime
+      || event.startDate
+      || event.startDateIso
+      || event.start_time
+      || event.start_date_iso
+      || rawMarket.startDate
+      || rawMarket.startDateIso
+      || rawMarket.start_time
+  );
+  const endDate = toIsoString(
+    rawMarket.endDate
+      || rawMarket.end_date_iso
+      || rawMarket.endDateIso
+      || event.endDate
+      || event.end_date_iso
+      || event.endDateIso
+  );
   return {
     id: String(rawMarket.id || rawMarket.conditionId || rawMarket.condition_id || rawMarket.slug || question),
     seriesSlug: event.seriesSlug || event.series_slug || rawMarket.seriesSlug || rawMarket.series_slug || "",
@@ -550,7 +693,8 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
     text,
     slug: rawMarket.slug || rawMarket.market_slug || "",
     eventSlug: event.slug || rawMarket.eventSlug || rawMarket.event_slug || "",
-    endDate: rawMarket.endDate || rawMarket.end_date_iso || event.endDate || event.end_date_iso || "",
+    startIso,
+    endDate,
     url: polymarketMarketUrl(rawMarket, event),
     outcomes: outcomes.map(String),
     prices: [firstPrice, secondPrice],
@@ -649,12 +793,55 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
   return { markets: normalized, cloudbetSports: [...new Set(cloudbetSports)], diagnostics };
 }
 
-function eventDatesClose(cloudbetEvent = {}, polyMarket = {}) {
-  if (!cloudbetEvent.startIso || !polyMarket.endDate) return true;
+function eventDateGapHours(cloudbetEvent = {}, polyMarket = {}) {
+  const polyDate = polyMarket.startIso || polyMarket.endDate;
+  if (!cloudbetEvent.startIso || !polyDate) return null;
   const left = new Date(cloudbetEvent.startIso).getTime();
-  const right = new Date(polyMarket.endDate).getTime();
-  if (!Number.isFinite(left) || !Number.isFinite(right)) return true;
-  return Math.abs(left - right) <= 1000 * 60 * 60 * 24 * 5;
+  const right = new Date(polyDate).getTime();
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+  return Math.round((Math.abs(left - right) / (1000 * 60 * 60)) * 10) / 10;
+}
+
+function eventDatesClose(cloudbetEvent = {}, polyMarket = {}) {
+  const gapHours = eventDateGapHours(cloudbetEvent, polyMarket);
+  return gapHours === null || gapHours <= SAME_EVENT_MAX_HOURS;
+}
+
+function entityFirstIndex(text = "", entity = "") {
+  const normalizedText = normalizeName(text);
+  const normalizedEntity = normalizeName(entity);
+  if (!normalizedText || !normalizedEntity) return -1;
+  const phraseIndex = ` ${normalizedText} `.indexOf(` ${normalizedEntity} `);
+  if (phraseIndex >= 0) return phraseIndex;
+
+  const textTokens = normalizedTokens(text);
+  const entityTokens = importantTokens(entity);
+  const priorityTokens = [...new Set([entityTokens.at(-1), ...entityTokens].filter((token) => token && token.length >= 3 && !GENERIC_ENTITY_TOKENS.has(token)))];
+  const indexes = priorityTokens
+    .map((token) => textTokens.indexOf(token))
+    .filter((index) => index >= 0);
+  return indexes.length ? Math.min(...indexes) : -1;
+}
+
+function polymarketCloudbetAnalysis(polyMarket = {}, cloudbetEvent = {}) {
+  const homeScore = bestEntityMatchScore(polyMarket, cloudbetEvent.home);
+  const awayScore = bestEntityMatchScore(polyMarket, cloudbetEvent.away);
+  const dateGapHours = eventDateGapHours(cloudbetEvent, polyMarket);
+  const dateClose = eventDatesClose(cloudbetEvent, polyMarket);
+  return {
+    homeScore,
+    awayScore,
+    teamsMatched: homeScore.matched && awayScore.matched,
+    dateClose,
+    dateGapHours,
+    combinedScore: Math.round((homeScore.score + awayScore.score) * 100) / 100,
+  };
+}
+
+function nearMatchReason(analysis = {}) {
+  if (analysis.teamsMatched && !analysis.dateClose) return `same teams, date gap ${analysis.dateGapHours ?? "unknown"}h`;
+  if (!analysis.teamsMatched && analysis.dateClose) return `same date window, weak team score ${analysis.homeScore?.score ?? 0}/${analysis.awayScore?.score ?? 0}`;
+  return `weak match score ${analysis.homeScore?.score ?? 0}/${analysis.awayScore?.score ?? 0}`;
 }
 
 function inferPolymarketSides(polyMarket = {}, cloudbetEvent = {}) {
@@ -677,10 +864,8 @@ function inferPolymarketSides(polyMarket = {}, cloudbetEvent = {}) {
   if (!homeMentioned || !awayMentioned) return null;
 
   const normalizedText = normalizeName(polyMarket.text);
-  const homeToken = importantTokens(cloudbetEvent.home).find((token) => normalizedText.includes(token));
-  const awayToken = importantTokens(cloudbetEvent.away).find((token) => normalizedText.includes(token));
-  const homeIndex = homeToken ? normalizedText.indexOf(homeToken) : -1;
-  const awayIndex = awayToken ? normalizedText.indexOf(awayToken) : -1;
+  const homeIndex = entityFirstIndex(normalizedText, cloudbetEvent.home);
+  const awayIndex = entityFirstIndex(normalizedText, cloudbetEvent.away);
   if (homeIndex < 0 || awayIndex < 0) return null;
 
   if (homeIndex < awayIndex) return { homePrice: firstPrice, awayPrice: secondPrice, matchType: "yes/no first-mentioned home" };
@@ -688,39 +873,53 @@ function inferPolymarketSides(polyMarket = {}, cloudbetEvent = {}) {
 }
 
 function polymarketCloudbetMatch(polyMarket = {}, cloudbetEvent = {}) {
-  const homeMentioned = entityMentioned(polyMarket.text, cloudbetEvent.home) || polyMarket.outcomes.some((outcome) => entityMentioned(outcome, cloudbetEvent.home));
-  const awayMentioned = entityMentioned(polyMarket.text, cloudbetEvent.away) || polyMarket.outcomes.some((outcome) => entityMentioned(outcome, cloudbetEvent.away));
-  if (!homeMentioned || !awayMentioned || !eventDatesClose(cloudbetEvent, polyMarket)) return null;
+  const analysis = polymarketCloudbetAnalysis(polyMarket, cloudbetEvent);
+  if (!analysis.teamsMatched || !analysis.dateClose) return null;
   const sides = inferPolymarketSides(polyMarket, cloudbetEvent);
   if (!sides) return null;
-  return sides;
+  return { ...sides, dateGapHours: analysis.dateGapHours, homeScore: analysis.homeScore.score, awayScore: analysis.awayScore.score };
 }
 
 function buildPolymarketCoverage(polymarketMarkets = [], cloudbetEvents = []) {
   return polymarketMarkets.map((polyMarket) => {
     const candidates = [];
+    const nearCandidates = [];
     for (const cloudbetEvent of cloudbetEvents) {
+      const analysis = polymarketCloudbetAnalysis(polyMarket, cloudbetEvent);
       const sides = polymarketCloudbetMatch(polyMarket, cloudbetEvent);
-      if (!sides) continue;
-      candidates.push({
+      const entry = {
         id: cloudbetEvent.id,
         match: `${cloudbetEvent.home} vs ${cloudbetEvent.away}`,
         sport: cloudbetEvent.sport,
         competition: cloudbetEvent.competition,
-        marketMatchType: sides.matchType,
-        cloudbetHomeOdds: cloudbetEvent.odds.home,
-        cloudbetAwayOdds: cloudbetEvent.odds.away,
-      });
+        startIso: cloudbetEvent.startIso,
+        dateGapHours: analysis.dateGapHours,
+        homeScore: analysis.homeScore.score,
+        awayScore: analysis.awayScore.score,
+      };
+      if (sides) {
+        candidates.push({
+          ...entry,
+          marketMatchType: sides.matchType,
+          cloudbetHomeOdds: cloudbetEvent.odds.home,
+          cloudbetAwayOdds: cloudbetEvent.odds.away,
+        });
+      } else if (analysis.teamsMatched || (analysis.dateClose && analysis.combinedScore >= 1.2)) {
+        nearCandidates.push({ ...entry, reason: nearMatchReason(analysis) });
+      }
     }
     return {
       id: polyMarket.id,
       question: polyMarket.question,
       seriesSlug: polyMarket.seriesSlug,
+      startIso: polyMarket.startIso,
+      endDate: polyMarket.endDate,
       url: polyMarket.url,
       outcomes: polyMarket.outcomes,
       prices: polyMarket.prices,
       matched: candidates.length > 0,
       candidates: candidates.slice(0, 3),
+      nearCandidates: nearCandidates.sort((a, b) => (a.dateGapHours ?? 9999) - (b.dateGapHours ?? 9999) || (b.homeScore + b.awayScore) - (a.homeScore + a.awayScore)).slice(0, 3),
     };
   });
 }
