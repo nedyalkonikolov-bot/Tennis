@@ -509,11 +509,25 @@ function cloudbetEventSeriesSlugs(event = {}) {
 }
 
 function rawPolymarketEventMatchesCloudbet(event = {}, cloudbetEvent = {}, teams = []) {
-  const text = [event.title, event.name, event.slug, event.ticker, event.description].filter(Boolean).join(" ");
+  const text = [event.title, event.name, event.slug, event.ticker].filter(Boolean).join(" ");
   const pseudoMarket = { text, outcomes: [], teams };
   const homeScore = bestEntityMatchScore(pseudoMarket, cloudbetEvent.home);
   const awayScore = bestEntityMatchScore(pseudoMarket, cloudbetEvent.away);
   return homeScore.matched && awayScore.matched;
+}
+
+function rawPolymarketEventDateGapHours(event = {}, cloudbetEvent = {}) {
+  const raw = event.startTime || event.eventDate || event.startDate || event.startDateIso || event.endDate || event.endDateIso;
+  if (!raw || !cloudbetEvent.startIso) return null;
+  const left = new Date(raw).getTime();
+  const right = new Date(cloudbetEvent.startIso).getTime();
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+  return Math.round((Math.abs(left - right) / (1000 * 60 * 60)) * 10) / 10;
+}
+
+function rawPolymarketEventDateClose(event = {}, cloudbetEvent = {}) {
+  const gapHours = rawPolymarketEventDateGapHours(event, cloudbetEvent);
+  return gapHours === null || gapHours <= SAME_EVENT_MAX_HOURS;
 }
 
 function eventStartIso(event = {}) {
@@ -852,7 +866,7 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
   if (!firstPrice || !secondPrice) return null;
   const question = rawMarket.question || rawMarket.title || event.title || event.name || "";
   const title = event.title || event.name || question;
-  const text = [question, title, event.slug, rawMarket.slug, rawMarket.description, event.description].filter(Boolean).join(" ");
+  const text = [question, title, event.slug, rawMarket.slug].filter(Boolean).join(" ");
   if (CROSS_SPORT_BLOCKED_RE.test(text)) return null;
   if (BAD_BINARY_MARKET_RE.test(text)) return null;
   const startIso = toIsoString(
@@ -1042,9 +1056,11 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
       for (const item of series) {
         const seriesSlug = item.slug || slug;
         const teams = teamsByLeague.get(seriesSlug) || teamsByLeague.get(slug) || [];
-        const events = (Array.isArray(item.events) ? item.events : []).filter(isOpenPolymarketSportsEvent);
+        const events = (Array.isArray(item.events) ? item.events : [])
+          .filter(isOpenPolymarketSportsEvent)
+          .slice(0, options.polymarketRawEventsPerSeries || 60);
         const relevantEvents = events
-          .filter((event) => cloudbetForSeries.some((cloudbetEvent) => rawPolymarketEventMatchesCloudbet(event, cloudbetEvent, teams)))
+          .filter((event) => cloudbetForSeries.some((cloudbetEvent) => rawPolymarketEventDateClose(event, cloudbetEvent) && rawPolymarketEventMatchesCloudbet(event, cloudbetEvent, teams)))
           .slice(0, options.polymarketEventsPerSeries);
         diagnostics.eventsDiscovered += events.length;
         diagnostics.eventsRelevant += relevantEvents.length;
@@ -1368,6 +1384,7 @@ async function getArbitrage(request, env) {
     eventLimit: clampInteger(url.searchParams.get("events") || url.searchParams.get("scan") || "80", 80, 1, 250),
     polymarketLimit: clampInteger(url.searchParams.get("polymarket") || env.POLYMARKET_ARB_MARKET_LIMIT || "500", 500, 25, 1000),
     polymarketSeriesLimit: clampInteger(url.searchParams.get("poly_series") || env.POLYMARKET_ARB_SERIES_LIMIT || "10", 10, 1, 20),
+    polymarketRawEventsPerSeries: clampInteger(url.searchParams.get("poly_raw_events_per_series") || env.POLYMARKET_ARB_RAW_EVENTS_PER_SERIES || "60", 60, 5, 200),
     polymarketEventsPerSeries: clampInteger(url.searchParams.get("poly_events_per_series") || env.POLYMARKET_ARB_EVENTS_PER_SERIES || "6", 6, 1, 20),
     polymarketEventLimit: clampInteger(url.searchParams.get("poly_events") || env.POLYMARKET_ARB_EVENT_LIMIT || "30", 30, 1, 80),
     polyBuffer: clampNumber(url.searchParams.get("poly_buffer") || env.POLYMARKET_PRICE_BUFFER || "0.01", 0.01, 0, 0.1),
