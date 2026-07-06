@@ -58,7 +58,7 @@ const navPages = [
   { id: "stats", label: "Player Stats", path: "/player-stats/", icon: Users },
   { id: "news", label: "News & Articles", path: "/tennis-news/", icon: Newspaper },
   { id: "betting", label: "Betting Sites", path: "/betting-sites/", icon: Landmark },
-  { id: "arbitrage", label: "Arbitrage", path: "/members/arbitrage/", icon: Lock },
+  { id: "arbitrage", label: "Arbitrage", path: "/tennis-arbitrage/", icon: Lock },
 ];
 
 const pageMeta = {
@@ -93,8 +93,13 @@ const pageMeta = {
     canonical: "/tennis-betting-tips/",
   },
   arbitrage: {
+    title: "Tennis Arbitrage Scanner | ATP & WTA Odds Tool",
+    description: "Learn how the TennisTipz tennis arbitrage scanner compares ATP and WTA odds, implied probability, Cloudbet prices, and stake splits for member research.",
+    canonical: "/tennis-arbitrage/",
+  },
+  memberArbitrage: {
     title: "Members Tennis Arbitrage Scanner | TennisTipz",
-    description: "Members-only ATP and WTA tennis arbitrage scanner using API-Tennis bookmaker odds, implied probability, and stake split research.",
+    description: "Private ATP and WTA tennis arbitrage scanner using API-Tennis bookmaker odds, implied probability, Cloudbet markets, and stake split research.",
     canonical: "/members/arbitrage/",
   },
   register: {
@@ -219,7 +224,8 @@ function getRoute(pathname) {
   if (cleanPath === "/wta-predictions/") return { id: "predictions", tour: "WTA" };
   if (cleanPath === "/players/atp/") return { id: "stats", tour: "ATP" };
   if (cleanPath === "/players/wta/") return { id: "stats", tour: "WTA" };
-  if (cleanPath === "/members/arbitrage/") return { id: "arbitrage" };
+  if (cleanPath === "/tennis-arbitrage/") return { id: "arbitrage" };
+  if (cleanPath === "/members/arbitrage/") return { id: "memberArbitrage" };
   if (cleanPath === "/register/") return { id: "register" };
   if (cleanPath === "/tennis-betting-tips/") return { id: "tips", path: cleanPath };
   if (["/tennis-betting/", "/crypto-tennis-betting/", "/cloudbet-tennis-betting/", "/best-crypto-tennis-betting-sites/", "/best-tennis-betting-sites/", "/betting-sites/"].includes(cleanPath)) return { id: "betting", path: cleanPath };
@@ -310,10 +316,10 @@ function updateDocumentSeo(route, dbData) {
   const meta = buildDynamicMeta(route, dbData);
   const canonicalUrl = `${siteUrl}${meta.canonical}`;
   const image = `${siteUrl}/og-image.png`;
-  const ogType = ["match-detail", "player-detail", "news", "tips", "betting"].includes(route.id) ? "article" : "website";
+  const ogType = ["match-detail", "player-detail", "news", "tips", "betting", "arbitrage"].includes(route.id) ? "article" : "website";
   document.title = meta.title;
   setMetaTag('meta[name="description"]', "name", meta.description);
-  setMetaTag('meta[name="robots"]', "name", ["arbitrage", "register"].includes(route.id) ? "noindex, nofollow, noarchive" : "index, follow, max-image-preview:large");
+  setMetaTag('meta[name="robots"]', "name", ["memberArbitrage", "register"].includes(route.id) ? "noindex, nofollow, noarchive" : "index, follow, max-image-preview:large");
   setMetaTag('meta[property="og:site_name"]', "property", "TennisTipz");
   setMetaTag('meta[property="og:type"]', "property", ogType);
   setMetaTag('meta[property="og:title"]', "property", meta.title);
@@ -405,6 +411,29 @@ function updateStructuredData(route, liveData, dbData) {
         image: player.photo || undefined,
       });
     }
+  }
+
+  if (route.id === "arbitrage") {
+    graph.push({
+      "@type": ["WebPage", "Article"],
+      "@id": `${siteUrl}/tennis-arbitrage/#webpage`,
+      url: `${siteUrl}/tennis-arbitrage/`,
+      headline: "Tennis Arbitrage Scanner for ATP and WTA Odds",
+      name: "Tennis Arbitrage Scanner",
+      description: "A TennisTipz guide to tennis arbitrage research, implied probability, ATP/WTA odds comparison, Cloudbet prices, and member scanner access.",
+      image: `${siteUrl}/og-image.png`,
+      datePublished: "2026-07-06",
+      dateModified: "2026-07-06",
+      author: { "@id": `${siteUrl}/#organization` },
+      publisher: { "@id": `${siteUrl}/#organization` },
+      mainEntityOfPage: `${siteUrl}/tennis-arbitrage/`,
+      about: [
+        { "@type": "Thing", name: "Tennis arbitrage" },
+        { "@type": "Thing", name: "ATP and WTA odds comparison" },
+        { "@type": "Thing", name: "Crypto tennis betting research" },
+      ],
+      audience: { "@type": "PeopleAudience", requiredMinAge: 18 },
+    });
   }
 
   script.textContent = JSON.stringify({ "@context": "https://schema.org", "@graph": graph });
@@ -813,6 +842,70 @@ function BettingHubPage() {
   return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6"><p className="text-sm font-semibold uppercase text-lime-300">Crypto tennis betting</p><h1 className="mt-2 text-4xl font-black">Best Tennis Betting Sites</h1><p className="mt-3 max-w-3xl text-slate-400">Compare crypto-friendly tennis betting sites for ATP and WTA markets, odds research, and responsible tennis betting. These links may be sponsored.</p><div className="mt-8 grid gap-5 md:grid-cols-3">{affiliateSites.map((site) => <article key={site.name} className="border border-white/10 bg-white/[0.04] p-6"><div className="mb-5 flex h-28 items-center justify-center bg-slate-900 text-2xl font-black text-lime-300">{site.name}</div><h2 className="text-2xl font-black">{site.name}</h2><p className="mt-2 text-sm font-bold uppercase text-lime-300">{site.bestFor}</p><p className="mt-4 leading-7 text-slate-400">{site.note}</p><div className="mt-6 flex flex-wrap gap-3"><a href={site.href} target="_blank" rel="noreferrer sponsored" onClick={() => trackAffiliateClick(site.name, "betting_hub_card")} className="inline-flex items-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300">Visit {site.name} <ExternalLink size={16} /></a><a href={site.review} className="inline-flex items-center rounded-xl border border-white/15 px-5 py-3 font-bold text-white no-underline hover:bg-white/10">Read review</a></div></article>)}</div><div className="mt-10 border border-white/10 bg-white/[0.04] p-6"><h2 className="text-2xl font-black">Crypto Tennis Betting Guide</h2><p className="mt-4 leading-8 text-slate-400">A strong tennis betting workflow starts with market availability, then compares odds against player form, ranking movement, surface ratings, recent match load and tournament context. TennisTipz uses Cloudbet odds with ATP and WTA data to help bettors research picks before placing any wager.</p><div className="mt-5 flex flex-wrap gap-3"><a href="/br/previsoes-tenis/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Brazil PT-BR</a><a href="/bd/tennis-predictions/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Bangladesh BN</a><a href="/tr/tenis-tahminleri/" className="rounded-xl border border-white/15 px-4 py-2 font-bold text-white no-underline hover:bg-white/10">Turkey TR</a></div></div></section>;
 }
 
+function ArbitrageSeoPage({ onNavigate }) {
+  const researchSteps = [
+    ["Collect ATP/WTA markets", "Start with singles matches that have clear Home/Away prices across multiple bookmakers."],
+    ["Convert odds to implied probability", "Decimal odds are checked as 1 divided by price, then both sides are summed to test whether the market is below 100%."],
+    ["Compare Cloudbet availability", "When Cloudbet has a matching tennis market, the page keeps the affiliate path visible beside the comparison."],
+    ["Plan stakes cautiously", "Stake splits are research estimates only because prices, limits, void rules and account terms can change quickly."],
+  ];
+  return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
+    <div className="grid gap-8 md:grid-cols-[1.05fr_0.95fr] md:items-center">
+      <div>
+        <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase text-lime-300"><Lock size={16} /> Members tennis arbitrage</p>
+        <h1 className="mt-3 max-w-4xl text-4xl font-black leading-tight md:text-6xl">Tennis Arbitrage Scanner for ATP & WTA Odds</h1>
+        <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-300">TennisTipz helps members research tennis arbitrage opportunities by comparing ATP and WTA bookmaker prices, implied probability, Cloudbet odds, and stake-split math in one private scanner.</p>
+        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+          <button type="button" onClick={() => onNavigate("/register/")} className="rounded-xl bg-lime-400 px-6 py-4 font-bold text-slate-950 hover:bg-lime-300">Register for scanner access</button>
+          <button type="button" onClick={() => onNavigate("/members/arbitrage/")} className="rounded-xl border border-white/15 px-6 py-4 font-bold text-white hover:bg-white/10">Open member scanner</button>
+        </div>
+        <p className="mt-4 text-sm text-slate-500">18+ only. Arbitrage research is informational and can never guarantee profit.</p>
+      </div>
+      <div className="border border-white/10 bg-white/[0.04] p-5">
+        <div className="bg-slate-900 p-5">
+          <p className="text-sm font-bold uppercase text-lime-300">Scanner research model</p>
+          <div className="mt-5 grid gap-3">
+            <Metric label="Markets" value="ATP/WTA" helper="Singles odds comparison" />
+            <Metric label="Method" value="Implied probability" helper="Home/Away price sum" />
+            <Metric label="Cloudbet" value="Included" helper="Matched odds and affiliate button" />
+            <Metric label="Access" value="Members" helper="Email/password registration" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div className="mt-10 grid gap-5 md:grid-cols-4">
+      {researchSteps.map(([title, text]) => <article key={title} className="border border-white/10 bg-white/[0.04] p-5"><h2 className="text-xl font-black">{title}</h2><p className="mt-3 text-sm leading-7 text-slate-400">{text}</p></article>)}
+    </div>
+
+    <div className="mt-10 grid gap-8 md:grid-cols-[0.95fr_1.05fr]">
+      <article className="border border-white/10 bg-white/[0.04] p-6">
+        <h2 className="text-3xl font-black">How tennis arbitrage works</h2>
+        <p className="mt-4 leading-8 text-slate-300">Tennis arbitrage research looks for a match where the best price on Player A and the best price on Player B across different bookmakers creates an implied probability below 100%. In decimal odds, that means calculating 1 divided by each price, adding both sides, and checking whether the combined total leaves a theoretical margin.</p>
+        <p className="mt-4 leading-8 text-slate-400">The TennisTipz scanner is designed for ATP and WTA markets because tennis match betting normally has two main outcomes. That structure makes tennis easier to compare than sports with draws or multi-way markets, but it also means small price changes can remove the edge before a bet is placed.</p>
+        <p className="mt-4 leading-8 text-slate-400">For crypto tennis bettors, Cloudbet availability matters because a visible matching market can reduce the friction between research and execution. TennisTipz still shows the best available odds from the returned bookmaker set, then marks whether Cloudbet is present for the same event.</p>
+      </article>
+      <article className="border border-white/10 bg-white/[0.04] p-6">
+        <h2 className="text-3xl font-black">What the member scanner checks</h2>
+        <p className="mt-4 leading-8 text-slate-300">The private arbitrage page scans upcoming ATP and WTA fixtures, requests bookmaker odds from API-Tennis, normalizes Home/Away prices, ranks theoretical edges, and includes Cloudbet odds when a match can be paired with the Cloudbet feed.</p>
+        <p className="mt-4 leading-8 text-slate-400">The useful part is not only finding a green arbitrage flag. Near misses are valuable too because they show where the market is tight, which bookmakers are out of line, and which matches may become interesting after odds movement. Wimbledon, Grand Slam matches, top-30 ATP/WTA names, and high-liquidity events usually deserve the closest watch.</p>
+        <p className="mt-4 leading-8 text-slate-400">Use the scanner alongside the TennisTipz prediction board, player stats, match pages, and news feed. An arbitrage number without context can be misleading if a player withdraws, a market is suspended, or a bookmaker applies different settlement rules.</p>
+      </article>
+    </div>
+
+    <div className="mt-10 border border-amber-300/20 bg-amber-300/[0.06] p-6 text-amber-100">
+      <h2 className="text-2xl font-black">Responsible arbitrage note</h2>
+      <p className="mt-3 leading-8">Arbitrage shown by any odds scanner is theoretical before latency, stake limits, KYC restrictions, market suspension, cancelled matches, palpable errors, and bookmaker terms. TennisTipz provides research and entertainment information only. It is not financial advice or betting advice.</p>
+    </div>
+
+    <div className="mt-10 grid gap-5 md:grid-cols-3">
+      <a href="/tennis-predictions/" className="border border-white/10 bg-white/[0.04] p-5 text-white no-underline hover:bg-white/[0.08]"><h2 className="text-xl font-black">Tennis predictions</h2><p className="mt-2 text-sm leading-7 text-slate-400">Compare AI picks, confidence, player form and Cloudbet odds before checking arbitrage markets.</p></a>
+      <a href="/player-stats/" className="border border-white/10 bg-white/[0.04] p-5 text-white no-underline hover:bg-white/[0.08]"><h2 className="text-xl font-black">Player stats</h2><p className="mt-2 text-sm leading-7 text-slate-400">Research ATP and WTA rankings, 100-day form, 2026 season data and surface records.</p></a>
+      <a href="/cloudbet-tennis-betting/" className="border border-white/10 bg-white/[0.04] p-5 text-white no-underline hover:bg-white/[0.08]"><h2 className="text-xl font-black">Cloudbet tennis guide</h2><p className="mt-2 text-sm leading-7 text-slate-400">Review crypto tennis betting workflow and where Cloudbet fits into the TennisTipz odds stack.</p></a>
+    </div>
+  </section>;
+}
+
 function MembersArbitragePage() {
   const [token, setToken] = useState(getStoredMemberToken);
   const [loginEmail, setLoginEmail] = useState("");
@@ -1092,5 +1185,5 @@ export default function TennisTipzApp() {
   useEffect(() => { updateDocumentSeo(route, dbData); updateStructuredData(route, liveData, dbData); }, [route, liveData, dbData]);
   useEffect(() => { const onPopState = () => setRoute(getRoute(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
 
-  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} articles={dbData.articles} />}{route.id === "betting" && <BettingHubPage />}{route.id === "register" && <RegisterPage onNavigate={navigateTo} />}{route.id === "arbitrage" && <MembersArbitragePage />}</main><ResponsibleFooter /></div>;
+  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} articles={dbData.articles} />}{route.id === "betting" && <BettingHubPage />}{route.id === "arbitrage" && <ArbitrageSeoPage onNavigate={navigateTo} />}{route.id === "register" && <RegisterPage onNavigate={navigateTo} />}{route.id === "memberArbitrage" && <MembersArbitragePage />}</main><ResponsibleFooter /></div>;
 }

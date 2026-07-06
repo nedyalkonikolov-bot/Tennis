@@ -17,6 +17,7 @@ const PRIORITY_URLS = [
   `${SITE_URL}/wta-wimbledon-predictions/`,
   `${SITE_URL}/tennis-predictions-today/`,
   `${SITE_URL}/tennis-predictions/`,
+  `${SITE_URL}/tennis-arbitrage/`,
 ];
 
 function jsonResponse(payload, status = 200) {

@@ -34,6 +34,7 @@ export async function onRequestGet({ request }) {
     urlEntry("/players/wta/", "2026-06-29", "daily", "0.88"),
     urlEntry("/tennis-news/", "2026-06-29", "hourly", "0.85"),
     urlEntry("/tennis-betting/", "2026-06-29", "weekly", "0.9"),
+    urlEntry("/tennis-arbitrage/", "2026-07-06", "daily", "0.9"),
     urlEntry("/tennis-betting-tips/", "2026-06-29", "daily", "0.92"),
     urlEntry("/cloudbet-tennis-betting/", "2026-06-29", "weekly", "0.92"),
     urlEntry("/stake-tennis-betting/", "2026-06-29", "weekly", "0.9"),
