@@ -261,7 +261,9 @@ function entityMatchScore(text = "", entity = "") {
   const ratio = hits.length / tokens.length;
   const distinctiveLastToken = [...tokens].reverse().find((token) => token.length >= 4 && !GENERIC_ENTITY_TOKENS.has(token));
   const lastTokenMatch = Boolean(distinctiveLastToken && haystackTokens.has(distinctiveLastToken));
-  const matched = hits.length >= Math.min(tokens.length, tokens.length >= 3 ? 2 : 1) || (lastTokenMatch && ratio >= 0.25);
+  const matched = tokens.length >= 2
+    ? lastTokenMatch || hits.length === tokens.length
+    : hits.length >= 1;
   const score = matched ? Math.max(ratio, lastTokenMatch ? 0.72 : 0) : ratio;
   return {
     matched,
