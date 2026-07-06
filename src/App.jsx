@@ -510,6 +510,11 @@ function storeMemberToken(token) {
   try { sessionStorage.setItem("tennistipz_member_token", token); } catch (error) {}
 }
 
+function clearStoredMemberToken() {
+  try { localStorage.removeItem("tennistipz_member_token"); } catch (error) {}
+  try { sessionStorage.removeItem("tennistipz_member_token"); } catch (error) {}
+}
+
 function HomeSection({ eyebrow, title, text, href, onNavigate, children }) {
   return (
     <section className="mx-auto max-w-7xl px-5 py-10 md:px-6 md:py-12">
@@ -810,11 +815,46 @@ function BettingHubPage() {
 
 function MembersArbitragePage() {
   const [token, setToken] = useState(getStoredMemberToken);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [member, setMember] = useState(null);
   const [scan, setScan] = useState(40);
   const [bankroll, setBankroll] = useState(100);
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
   const [error, setError] = useState("");
+
+  async function submitLogin(event) {
+    event.preventDefault();
+    setLoginLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/members/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok || !data.token) throw new Error(data.error || `Login failed with ${response.status}`);
+      storeMemberToken(data.token);
+      setToken(data.token);
+      setMember(data.member || null);
+      setLoginPassword("");
+    } catch (loginError) {
+      setError(loginError.message);
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
+  function logout() {
+    clearStoredMemberToken();
+    setToken("");
+    setMember(null);
+    setPayload(null);
+    setError("");
+  }
 
   async function runScan(event) {
     event?.preventDefault?.();
@@ -846,17 +886,31 @@ function MembersArbitragePage() {
         <h1 className="mt-2 text-4xl font-black md:text-5xl">Tennis Arbitrage Scanner</h1>
         <p className="mt-4 max-w-3xl leading-8 text-slate-400">Scan ATP and WTA singles odds from API-Tennis, compare the best Home/Away prices across bookmakers, and include Cloudbet odds with your affiliate button when that market is available.</p>
       </div>
-      <form onSubmit={runScan} className="border border-white/10 bg-white/[0.04] p-5">
-        <label className="block text-sm font-bold text-slate-300" htmlFor="member-token">Member access code</label>
-        <input id="member-token" type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Enter member token" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
-        {!token && <p className="mt-3 text-sm text-slate-400">No member token yet? <a href="/register/" className="font-bold text-lime-300">Register for access</a>.</p>}
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      {!token ? <form onSubmit={submitLogin} className="border border-white/10 bg-white/[0.04] p-5">
+        <h2 className="text-2xl font-black">Member login</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-400">Sign in with your TennisTipz email and password to unlock the private arbitrage scanner.</p>
+        <label className="mt-4 block text-sm font-bold text-slate-300" htmlFor="member-email">Email</label>
+        <input id="member-email" type="email" required value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="you@example.com" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
+        <label className="mt-4 block text-sm font-bold text-slate-300" htmlFor="member-password">Password</label>
+        <input id="member-password" type="password" required value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} placeholder="Your password" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
+        <button type="submit" disabled={loginLoading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"><Lock size={17} /> {loginLoading ? "Signing in" : "Log in"}</button>
+        <p className="mt-4 text-sm text-slate-400">No account yet? <a href="/register/" className="font-bold text-lime-300">Create one here</a>.</p>
+        {error && <p className="mt-4 rounded-xl border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</p>}
+      </form> : <form onSubmit={runScan} className="border border-white/10 bg-white/[0.04] p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold uppercase text-lime-300">Signed in</p>
+            <p className="mt-1 text-sm text-slate-400">{member?.email || "Member session active"}</p>
+          </div>
+          <button type="button" onClick={logout} className="rounded-lg border border-white/15 px-3 py-2 text-sm font-bold text-slate-300 hover:bg-white/10">Log out</button>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <label className="block text-sm font-bold text-slate-300" htmlFor="scan-limit">Matches to scan<input id="scan-limit" type="number" min="1" max="80" value={scan} onChange={(event) => setScan(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
           <label className="block text-sm font-bold text-slate-300" htmlFor="bankroll">Stake plan bankroll<input id="bankroll" type="number" min="1" max="100000" value={bankroll} onChange={(event) => setBankroll(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
         </div>
-        <button type="submit" disabled={loading || !token} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw size={17} className={loading ? "animate-spin" : ""} /> {loading ? "Scanning odds" : "Scan member odds"}</button>
+        <button type="submit" disabled={loading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw size={17} className={loading ? "animate-spin" : ""} /> {loading ? "Scanning odds" : "Scan member odds"}</button>
         {error && <p className="mt-4 rounded-xl border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</p>}
-      </form>
+      </form>}
     </div>
 
     <div className="mt-8 grid gap-4 md:grid-cols-5">
@@ -886,7 +940,7 @@ function MembersArbitragePage() {
         <Metric label="Edge" value={`${row.edgePercent}%`} helper={`Implied ${row.impliedTotal}`} />
         <Metric label={`${row.stakePlan.bankroll} stake`} value={`${row.stakePlan.homeStake}/${row.stakePlan.awayStake}`} helper={`Profit ${row.stakePlan.expectedProfit}`} />
       </article>)}
-      {!rows.length && <div className="p-8 text-slate-400">Enter a member access code and run the scanner. If no rows appear, API-Tennis did not return complete Home/Away bookmaker odds for the scanned ATP/WTA matches.</div>}
+      {!rows.length && <div className="p-8 text-slate-400">{token ? "Run the scanner to load current ATP/WTA bookmaker odds. If no rows appear, API-Tennis did not return complete Home/Away bookmaker odds for the scanned matches." : "Log in as a member to scan ATP/WTA arbitrage opportunities."}</div>}
     </div>
 
     {payload?.checked?.length > 0 && <details className="mt-8 border border-white/10 bg-white/[0.04] p-5">
@@ -899,6 +953,8 @@ function MembersArbitragePage() {
 function RegisterPage({ onNavigate }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [token, setToken] = useState(getStoredMemberToken);
   const [loading, setLoading] = useState(false);
@@ -911,10 +967,12 @@ function RegisterPage({ onNavigate }) {
     setError("");
     setMessage("");
     try {
+      if (password.length < 8) throw new Error("Password must be at least 8 characters.");
+      if (password !== confirmPassword) throw new Error("Passwords do not match.");
       const response = await fetch("/api/members/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, email, accepted }),
+        body: JSON.stringify({ name, email, password, accepted }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) throw new Error(data.error || `Registration failed with ${response.status}`);
@@ -922,6 +980,8 @@ function RegisterPage({ onNavigate }) {
         storeMemberToken(data.token);
         setToken(data.token);
       }
+      setPassword("");
+      setConfirmPassword("");
       setMessage(data.message || "Registration complete.");
     } catch (registerError) {
       setError(registerError.message);
@@ -935,7 +995,7 @@ function RegisterPage({ onNavigate }) {
       <div>
         <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase text-lime-300"><UserPlus size={16} /> Member registration</p>
         <h1 className="mt-2 text-4xl font-black md:text-5xl">Register for TennisTipz arbitrage access</h1>
-        <p className="mt-4 leading-8 text-slate-400">Create a free member token for the private ATP/WTA arbitrage scanner. The scanner is not indexed by Google and should be used as research only.</p>
+        <p className="mt-4 leading-8 text-slate-400">Create a free email and password account for the private ATP/WTA arbitrage scanner. The scanner is not indexed by Google and should be used as research only.</p>
         <div className="mt-6 border border-amber-300/20 bg-amber-300/[0.06] p-5 text-sm leading-7 text-amber-100">18+ only. Arbitrage and odds data can change quickly. This is informational research, not financial or betting advice.</div>
       </div>
       <form onSubmit={submit} className="border border-white/10 bg-white/[0.04] p-6">
@@ -943,11 +1003,15 @@ function RegisterPage({ onNavigate }) {
         <input id="register-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
         <label className="mt-4 block text-sm font-bold text-slate-300" htmlFor="register-email">Email</label>
         <input id="register-email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
+        <label className="mt-4 block text-sm font-bold text-slate-300" htmlFor="register-password">Password</label>
+        <input id="register-password" type="password" required minLength="8" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
+        <label className="mt-4 block text-sm font-bold text-slate-300" htmlFor="register-password-confirm">Confirm password</label>
+        <input id="register-password-confirm" type="password" required minLength="8" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Repeat password" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
         <label className="mt-4 flex gap-3 text-sm leading-6 text-slate-300"><input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} className="mt-1 h-4 w-4 accent-lime-400" /> I confirm I am 18+ and understand the arbitrage scanner is research only.</label>
         <button type="submit" disabled={loading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"><UserPlus size={17} /> {loading ? "Registering" : "Register"}</button>
         {error && <p className="mt-4 rounded-xl border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</p>}
         {message && <p className="mt-4 rounded-xl border border-lime-400/30 bg-lime-400/10 p-3 text-sm text-lime-100">{message}</p>}
-        {token && <div className="mt-5 rounded-xl bg-slate-950 p-4 ring-1 ring-white/10"><p className="text-xs font-bold uppercase text-slate-500">Saved member token</p><p className="mt-2 break-all font-mono text-sm text-lime-300">{token}</p><button type="button" onClick={() => onNavigate("/members/arbitrage/")} className="mt-4 rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-950 hover:bg-lime-300">Open arbitrage scanner</button></div>}
+        {token && <div className="mt-5 rounded-xl bg-slate-950 p-4 ring-1 ring-white/10"><p className="text-sm font-bold text-lime-300">Your member session is active on this browser.</p><p className="mt-2 text-sm text-slate-400">You can now open the arbitrage scanner without copying any access code.</p><button type="button" onClick={() => onNavigate("/members/arbitrage/")} className="mt-4 rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-950 hover:bg-lime-300">Open arbitrage scanner</button></div>}
       </form>
     </div>
   </section>;

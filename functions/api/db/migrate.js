@@ -42,6 +42,14 @@ async function migrate(request, env) {
     db.prepare("CREATE INDEX IF NOT EXISTS idx_members_token_hash ON members(token_hash)"),
   ]);
   applied.push("members");
+  if (!(await columnExists(db, "members", "password_hash"))) {
+    await db.prepare("ALTER TABLE members ADD COLUMN password_hash TEXT").run();
+    applied.push("members.password_hash");
+  }
+  if (!(await columnExists(db, "members", "password_updated_at"))) {
+    await db.prepare("ALTER TABLE members ADD COLUMN password_updated_at TEXT").run();
+    applied.push("members.password_updated_at");
+  }
 
   await db.batch([
     db.prepare(`

@@ -13,6 +13,23 @@ function isValidEmail(value = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function base64Url(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function fromBase64Url(value) {
+  const normalized = String(value).replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+}
+
+async function hashPassword(password, salt = null, iterations = 120000) {
+  const saltBytes = salt ? fromBase64Url(salt) : crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: saltBytes, iterations }, key, 256);
+  return `pbkdf2_sha256$${iterations}$${base64Url(saltBytes)}$${base64Url(new Uint8Array(bits))}`;
+}
+
 async function hashToken(token) {
   const data = new TextEncoder().encode(token);
   const digest = await crypto.subtle.digest("SHA-256", data);
@@ -22,7 +39,7 @@ async function hashToken(token) {
 function createMemberToken() {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
-  const value = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  const value = base64Url(bytes);
   return `ttz_${value}`;
 }
 
@@ -38,12 +55,16 @@ async function ensureMembersTable(db) {
         source TEXT NOT NULL DEFAULT 'self-register',
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-        last_seen_at TEXT
+        last_seen_at TEXT,
+        password_hash TEXT,
+        password_updated_at TEXT
       )
     `),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_members_status ON members(status, created_at DESC)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_members_token_hash ON members(token_hash)"),
   ]);
+  await db.prepare("ALTER TABLE members ADD COLUMN password_hash TEXT").run().catch(() => null);
+  await db.prepare("ALTER TABLE members ADD COLUMN password_updated_at TEXT").run().catch(() => null);
 }
 
 async function register(request, env) {
@@ -51,26 +72,29 @@ async function register(request, env) {
   const body = await request.json().catch(() => ({}));
   const email = normalizeEmail(body.email);
   const name = String(body.name || "").trim().slice(0, 120);
+  const password = String(body.password || "");
   const accepted = Boolean(body.accepted);
 
   if (!isValidEmail(email)) return jsonResponse({ ok: false, error: "Enter a valid email address." }, 400);
+  if (password.length < 8) return jsonResponse({ ok: false, error: "Password must be at least 8 characters." }, 400);
   if (!accepted) return jsonResponse({ ok: false, error: "You must confirm you are 18+ and accept responsible-use terms." }, 400);
 
   const db = env.TENNIS_DB;
   await ensureMembersTable(db);
 
-  const existing = await db.prepare("SELECT id, email, status, created_at FROM members WHERE email = ?").bind(email).first();
+  const existing = await db.prepare("SELECT id, email, status, created_at, password_hash FROM members WHERE email = ?").bind(email).first();
   if (existing) {
     return jsonResponse({
-      ok: true,
+      ok: false,
       alreadyRegistered: true,
-      member: existing,
-      message: "This email is already registered. Use the member token saved in this browser, or ask the admin to reset access.",
-    });
+      member: { id: existing.id, email: existing.email, status: existing.status, created_at: existing.created_at },
+      error: existing.password_hash ? "This email is already registered. Please log in." : "This email exists without a password. Ask the admin to reset access.",
+    }, 409);
   }
 
   const token = createMemberToken();
   const tokenHash = await hashToken(token);
+  const passwordHash = await hashPassword(password);
   const member = {
     id: crypto.randomUUID(),
     email,
@@ -79,15 +103,15 @@ async function register(request, env) {
   };
 
   await db.prepare(`
-    INSERT INTO members (id, email, name, token_hash, status, source, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 'active', 'self-register', datetime('now'), datetime('now'))
-  `).bind(member.id, email, name || null, tokenHash).run();
+    INSERT INTO members (id, email, name, token_hash, password_hash, password_updated_at, status, source, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'), 'active', 'self-register', datetime('now'), datetime('now'))
+  `).bind(member.id, email, name || null, tokenHash, passwordHash).run();
 
   return jsonResponse({
     ok: true,
     member,
     token,
-    message: "Registration complete. Your member token is shown once and has also been saved in this browser.",
+    message: "Registration complete. You are signed in on this browser.",
   });
 }
 
