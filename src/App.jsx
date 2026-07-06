@@ -911,6 +911,7 @@ function MembersArbitragePage() {
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [member, setMember] = useState(null);
+  const [scannerMode, setScannerMode] = useState("cross-sport");
   const [scan, setScan] = useState(40);
   const [bankroll, setBankroll] = useState(100);
   const [payload, setPayload] = useState(null);
@@ -955,7 +956,7 @@ function MembersArbitragePage() {
     setError("");
     try {
       storeMemberToken(token);
-      const response = await fetch(`/api/members/arbitrage?scan=${encodeURIComponent(scan)}&bankroll=${encodeURIComponent(bankroll)}`, {
+      const response = await fetch(`/api/members/arbitrage?mode=${encodeURIComponent(scannerMode)}&scan=${encodeURIComponent(scan)}&bankroll=${encodeURIComponent(bankroll)}`, {
         headers: { "x-member-token": token },
       });
       const data = await response.json().catch(() => ({}));
@@ -971,13 +972,14 @@ function MembersArbitragePage() {
 
   const rows = payload?.opportunities || [];
   const summary = payload?.summary || {};
+  const isCrossSport = (payload?.mode || scannerMode) === "cross-sport";
 
   return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
     <div className="grid gap-8 md:grid-cols-[1.1fr_0.9fr] md:items-start">
       <div>
         <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase text-lime-300"><Lock size={16} /> Members only</p>
-        <h1 className="mt-2 text-4xl font-black md:text-5xl">Tennis Arbitrage Scanner</h1>
-        <p className="mt-4 max-w-3xl leading-8 text-slate-400">Scan ATP and WTA singles odds from API-Tennis, compare the best Home/Away prices across bookmakers, and include Cloudbet odds with your affiliate button when that market is available.</p>
+        <h1 className="mt-2 text-4xl font-black md:text-5xl">Arbitrage Scanner</h1>
+        <p className="mt-4 max-w-3xl leading-8 text-slate-400">Scan tennis bookmaker odds or compare Cloudbet all-sport winner markets against Polymarket binary markets. Cross-venue rows only appear when the event names and sides can be matched safely.</p>
       </div>
       {!token ? <form onSubmit={submitLogin} className="border border-white/10 bg-white/[0.04] p-5">
         <h2 className="text-2xl font-black">Member login</h2>
@@ -997,20 +999,21 @@ function MembersArbitragePage() {
           </div>
           <button type="button" onClick={logout} className="rounded-lg border border-white/15 px-3 py-2 text-sm font-bold text-slate-300 hover:bg-white/10">Log out</button>
         </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <label className="block text-sm font-bold text-slate-300" htmlFor="scan-limit">Matches to scan<input id="scan-limit" type="number" min="1" max="80" value={scan} onChange={(event) => setScan(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <label className="block text-sm font-bold text-slate-300" htmlFor="scanner-mode">Scanner mode<select id="scanner-mode" value={scannerMode} onChange={(event) => { setScannerMode(event.target.value); setPayload(null); }} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300"><option value="cross-sport">Cloudbet vs Polymarket</option><option value="tennis">Tennis bookmaker odds</option></select></label>
+          <label className="block text-sm font-bold text-slate-300" htmlFor="scan-limit">{scannerMode === "cross-sport" ? "Events to scan" : "Matches to scan"}<input id="scan-limit" type="number" min="1" max={scannerMode === "cross-sport" ? "250" : "80"} value={scan} onChange={(event) => setScan(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
           <label className="block text-sm font-bold text-slate-300" htmlFor="bankroll">Stake plan bankroll<input id="bankroll" type="number" min="1" max="100000" value={bankroll} onChange={(event) => setBankroll(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
         </div>
-        <button type="submit" disabled={loading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw size={17} className={loading ? "animate-spin" : ""} /> {loading ? "Scanning odds" : "Scan member odds"}</button>
+        <button type="submit" disabled={loading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw size={17} className={loading ? "animate-spin" : ""} /> {loading ? "Scanning odds" : isCrossSport ? "Scan Cloudbet vs Polymarket" : "Scan tennis odds"}</button>
         {error && <p className="mt-4 rounded-xl border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</p>}
       </form>}
     </div>
 
     <div className="mt-8 grid gap-4 md:grid-cols-5">
-      <Metric label="Fixtures scanned" value={summary.fixturesScanned ?? "Locked"} />
-      <Metric label="Priced matches" value={summary.pricedMatches ?? "Locked"} />
+      <Metric label={isCrossSport ? "Cloudbet events" : "Fixtures scanned"} value={(isCrossSport ? summary.cloudbetEventsScanned : summary.fixturesScanned) ?? "Locked"} />
+      <Metric label={isCrossSport ? "Polymarket markets" : "Priced matches"} value={(isCrossSport ? summary.polymarketMarketsScanned : summary.pricedMatches) ?? "Locked"} />
       <Metric label="Arbitrage found" value={summary.arbitrageCount ?? "Locked"} />
-      <Metric label="Cloudbet matches" value={summary.cloudbetMatches ?? "Locked"} />
+      <Metric label={isCrossSport ? "Matched markets" : "Cloudbet matches"} value={(isCrossSport ? summary.matchedMarkets : summary.cloudbetMatches) ?? "Locked"} />
       <Metric label="Best edge" value={summary.bestEdgePercent === null || summary.bestEdgePercent === undefined ? "Locked" : `${summary.bestEdgePercent}%`} />
     </div>
 
@@ -1020,9 +1023,20 @@ function MembersArbitragePage() {
 
     <div className="mt-8 overflow-hidden border border-white/10">
       <div className="hidden grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid">
-        <span>Match</span><span>Best home</span><span>Best away</span><span>Cloudbet</span><span>Edge</span><span>Stake split</span>
+        {isCrossSport ? <><span>Event</span><span>Cloudbet</span><span>Polymarket</span><span>Links</span><span>Edge</span><span>Stake split</span></> : <><span>Match</span><span>Best home</span><span>Best away</span><span>Cloudbet</span><span>Edge</span><span>Stake split</span></>}
       </div>
-      {rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
+      {isCrossSport ? rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
+        <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.sport}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${row.arbitrage ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300"}`}>{row.arbitrage ? "Cross-venue arb" : "Watchlist"}</span></div><h2 className="mt-2 text-lg font-black">{row.match}</h2><p className="mt-1 text-sm text-slate-500">{row.competition}{row.startIso ? ` - ${formatUpdatedAt(row.startIso)}` : ""}</p><p className="mt-2 text-xs text-slate-500">{row.polymarketQuestion}</p></div>
+        <Metric label="Cloudbet pick" value={row.cloudbetPick} helper={`Odds ${row.cloudbetOdds}`} />
+        <Metric label="Polymarket hedge" value={row.polymarketPick} helper={`Buy ${row.polymarketPrice}${row.polymarketRawPrice !== row.polymarketPrice ? ` incl. buffer from ${row.polymarketRawPrice}` : ""}`} />
+        <div className="bg-slate-900 p-4">
+          <p className="text-xs text-slate-500">Open markets</p>
+          <a href={row.cloudbetUrl || cloudbetUrl} target="_blank" rel="noreferrer sponsored" onClick={() => trackAffiliateClick("Cloudbet", "cross_arbitrage_row")} className="mt-2 inline-flex items-center gap-1 rounded-lg bg-lime-400 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-lime-300">Cloudbet <ExternalLink size={13} /></a>
+          <a href={row.polymarketUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10">Polymarket <ExternalLink size={13} /></a>
+        </div>
+        <Metric label="Edge" value={`${row.edgePercent}%`} helper={`Implied ${row.impliedTotal}`} />
+        <Metric label={`${row.stakePlan.bankroll} stake`} value={`${row.stakePlan.cloudbetStake}/${row.stakePlan.polymarketCost}`} helper={`Profit ${row.stakePlan.expectedProfit}`} />
+      </article>) : rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
         <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.tour}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${row.arbitrage ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300"}`}>{row.arbitrage ? "Arbitrage" : "Near miss"}</span></div><h2 className="mt-2 text-lg font-black">{row.match}</h2><p className="mt-1 text-sm text-slate-500">{row.tournament} - {row.startDate} {row.startTime}</p></div>
         <Metric label={row.bestHome.bookmaker} value={row.bestHome.price} helper={row.playerA || "Home"} />
         <Metric label={row.bestAway.bookmaker} value={row.bestAway.price} helper={row.playerB || "Away"} />
@@ -1033,12 +1047,13 @@ function MembersArbitragePage() {
         <Metric label="Edge" value={`${row.edgePercent}%`} helper={`Implied ${row.impliedTotal}`} />
         <Metric label={`${row.stakePlan.bankroll} stake`} value={`${row.stakePlan.homeStake}/${row.stakePlan.awayStake}`} helper={`Profit ${row.stakePlan.expectedProfit}`} />
       </article>)}
-      {!rows.length && <div className="p-8 text-slate-400">{token ? "Run the scanner to load current ATP/WTA bookmaker odds. If no rows appear, API-Tennis did not return complete Home/Away bookmaker odds for the scanned matches." : "Log in as a member to scan ATP/WTA arbitrage opportunities."}</div>}
+      {!rows.length && <div className="p-8 text-slate-400">{token ? isCrossSport ? "Run the scanner to compare Cloudbet events with Polymarket binary markets. If no rows appear, no events could be matched safely across both platforms." : "Run the scanner to load current ATP/WTA bookmaker odds. If no rows appear, API-Tennis did not return complete Home/Away bookmaker odds for the scanned matches." : "Log in as a member to scan arbitrage opportunities."}</div>}
     </div>
 
     {payload?.checked?.length > 0 && <details className="mt-8 border border-white/10 bg-white/[0.04] p-5">
       <summary className="cursor-pointer font-bold text-slate-300">Show scan diagnostics</summary>
-      <div className="mt-4 grid gap-2 text-sm text-slate-500 md:grid-cols-2">{payload.checked.map((item) => <div key={item.eventKey} className="bg-slate-900 p-3">{item.match} - {item.hasHomeAway ? "Home/Away found" : item.error || "No Home/Away market"}{item.hasCloudbet ? " - Cloudbet matched" : ""}</div>)}</div>
+      <div className="mt-4 grid gap-2 text-sm text-slate-500 md:grid-cols-2">{payload.checked.map((item) => <div key={item.eventKey} className="bg-slate-900 p-3">{item.match} - {isCrossSport ? `${item.polymarketMatches?.length || 0} Polymarket matches` : item.hasHomeAway ? "Home/Away found" : item.error || "No Home/Away market"}{item.hasCloudbet ? " - Cloudbet matched" : ""}</div>)}</div>
+      {isCrossSport && <div className="mt-4 grid gap-3 text-xs text-slate-500 md:grid-cols-2"><pre className="overflow-auto bg-slate-950 p-3">{JSON.stringify(payload.cloudbetDiagnostics || {}, null, 2)}</pre><pre className="overflow-auto bg-slate-950 p-3">{JSON.stringify(payload.polymarketDiagnostics || {}, null, 2)}</pre></div>}
     </details>}
   </section>;
 }
