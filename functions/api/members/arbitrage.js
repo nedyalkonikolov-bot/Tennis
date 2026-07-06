@@ -1047,44 +1047,41 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
   for (const slug of slugs) {
     if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
     const cloudbetForSeries = seriesToCloudbetEvents.get(slug) || [];
-    const endpoint = `/series?slug=${encodeURIComponent(slug)}`;
+    const endpoint = `/events?series_slug=${encodeURIComponent(slug)}&active=true&closed=false&limit=${encodeURIComponent(options.polymarketRawEventsPerSeries || 60)}`;
     diagnostics.endpointsTried.push(endpoint);
     try {
       const payload = await fetchPolymarket(env, endpoint);
-      const series = polymarketList(payload);
-      diagnostics.seriesScanned += series.length;
-      for (const item of series) {
-        const seriesSlug = item.slug || slug;
-        const teams = teamsByLeague.get(seriesSlug) || teamsByLeague.get(slug) || [];
-        const events = (Array.isArray(item.events) ? item.events : [])
-          .filter(isOpenPolymarketSportsEvent)
-          .slice(0, options.polymarketRawEventsPerSeries || 60);
-        const relevantEvents = events
-          .filter((event) => cloudbetForSeries.some((cloudbetEvent) => rawPolymarketEventDateClose(event, cloudbetEvent) && rawPolymarketEventMatchesCloudbet(event, cloudbetEvent, teams)))
-          .slice(0, options.polymarketEventsPerSeries);
-        diagnostics.eventsDiscovered += events.length;
-        diagnostics.eventsRelevant += relevantEvents.length;
-        diagnostics.sportSeries.push({
-          slug: seriesSlug,
-          title: item.title || slug,
-          events: events.length,
-          relevantEvents: relevantEvents.length,
-          teams: teams.length,
-        });
+      diagnostics.seriesScanned += 1;
+      const seriesSlug = slug;
+      const teams = teamsByLeague.get(seriesSlug) || [];
+      const events = polymarketList(payload).filter(isOpenPolymarketSportsEvent);
+      const relevantEvents = events
+        .filter((event) => cloudbetForSeries.some((cloudbetEvent) => rawPolymarketEventDateClose(event, cloudbetEvent) && rawPolymarketEventMatchesCloudbet(event, cloudbetEvent, teams)))
+        .slice(0, options.polymarketEventsPerSeries);
+      diagnostics.eventsDiscovered += events.length;
+      diagnostics.eventsRelevant += relevantEvents.length;
+      diagnostics.sportSeries.push({
+        slug: seriesSlug,
+        title: seriesSlug,
+        events: events.length,
+        relevantEvents: relevantEvents.length,
+        teams: teams.length,
+      });
 
-        for (const event of relevantEvents) {
-          if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
-          diagnostics.eventsHydrated += 1;
-          const pairs = await hydratePolymarketEventMarkets(env, { ...event, seriesSlug, teams }, diagnostics);
-          for (const { market, event: marketEvent } of pairs) {
-            diagnostics.marketsScanned += 1;
-            const candidate = normalizePolymarketMarket(market, { ...event, ...marketEvent, seriesSlug, teams });
-            if (!candidate || seen.has(candidate.id)) continue;
-            const matchesCloudbetEvent = cloudbetForSeries.some((cloudbetEvent) => polymarketCloudbetAnalysis(candidate, cloudbetEvent).teamsMatched);
-            if (!matchesCloudbetEvent) continue;
-            seen.add(candidate.id);
-            normalized.push(candidate);
-          }
+      for (const event of relevantEvents) {
+        if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
+        diagnostics.eventsHydrated += 1;
+        const pairs = Array.isArray(event.markets) && event.markets.length
+          ? event.markets.map((market) => ({ market, event }))
+          : await hydratePolymarketEventMarkets(env, { ...event, seriesSlug, teams }, diagnostics);
+        for (const { market, event: marketEvent } of pairs) {
+          diagnostics.marketsScanned += 1;
+          const candidate = normalizePolymarketMarket(market, { ...event, ...marketEvent, seriesSlug, teams });
+          if (!candidate || seen.has(candidate.id)) continue;
+          const matchesCloudbetEvent = cloudbetForSeries.some((cloudbetEvent) => polymarketCloudbetAnalysis(candidate, cloudbetEvent).teamsMatched);
+          if (!matchesCloudbetEvent) continue;
+          seen.add(candidate.id);
+          normalized.push(candidate);
         }
       }
     } catch (error) {
