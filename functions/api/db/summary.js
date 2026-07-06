@@ -18,6 +18,15 @@ async function safeCount(db, table) {
   }
 }
 
+async function safeScalar(db, sql, fallback = 0) {
+  try {
+    const row = await db.prepare(sql).first();
+    return row?.count || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export async function onRequestGet({ env }) {
   if (!env.TENNIS_DB) return jsonResponse({ ok: false, error: "Missing TENNIS_DB D1 binding" }, 500);
   const db = env.TENNIS_DB;
@@ -49,6 +58,8 @@ export async function onRequestGet({ env }) {
       predictions: await count(db, "predictions"),
       settledOutcomes: accuracy?.settled || 0,
       syncRuns: await count(db, "sync_runs"),
+      members: await safeCount(db, "members"),
+      activeMembers: await safeScalar(db, "SELECT COUNT(*) AS count FROM members WHERE status = 'active'"),
     },
     predictionAccuracy: {
       settled: accuracy?.settled || 0,
