@@ -16,11 +16,26 @@ const POLYMARKET_TO_CLOUDBET_SPORTS = {
   ncaab: ["basketball"],
   nhl: ["ice-hockey"],
   tennis: ["tennis"],
-  ufc: ["mma", "boxing"],
+  ufc: ["mma"],
   mma: ["mma"],
   epl: ["soccer"],
   mls: ["soccer"],
   "champions-league": ["soccer"],
+};
+const POLYMARKET_COMPETITION_HINTS = {
+  mlb: ["mlb"],
+  wnba: ["wnba"],
+  nba: ["nba"],
+  nfl: ["nfl"],
+  ncaaf: ["ncaaf", "ncaa football", "college football"],
+  ncaab: ["ncaab", "ncaa", "college basketball"],
+  nhl: ["nhl"],
+  tennis: ["atp", "wta", "grand slam"],
+  ufc: ["ufc"],
+  mma: ["ufc", "mma"],
+  epl: ["epl", "premier league"],
+  mls: ["mls"],
+  "champions-league": ["champions league"],
 };
 const BAD_BINARY_MARKET_RE = /\b(total|over|under|spread|handicap|correct score|set betting|game betting|quarter|period|half|first five|first 5|5 innings?|inning|tied?|draw|method|round|map|race to|player props?|team total|points|goals)\b/i;
 const GOOD_BINARY_MARKET_RE = /\b(winner|moneyline|match odds|match result|head to head|h2h|to win)\b/i;
@@ -392,6 +407,31 @@ function eventText(event = {}) {
   return [event.name, event.key, event.home?.name, event.away?.name, competitionText(event.competition || {})].filter(Boolean).join(" ");
 }
 
+function polymarketCompetitionHints(market = {}) {
+  const hints = new Set(POLYMARKET_COMPETITION_HINTS[market.seriesSlug] || []);
+  const text = normalizeName([market.seriesSlug, market.question, market.title].filter(Boolean).join(" "));
+  for (const [seriesSlug, values] of Object.entries(POLYMARKET_COMPETITION_HINTS)) {
+    if (text.includes(normalizeName(seriesSlug))) values.forEach((hint) => hints.add(hint));
+  }
+  return [...hints].map(normalizeName).filter(Boolean);
+}
+
+function competitionHintScore(competition = {}, hints = []) {
+  if (!hints.length) return 0;
+  const text = normalizeName(competitionText(competition));
+  return hints.reduce((score, hint) => (includesNormalizedPhrase(text, hint) ? score + 3 : text.includes(hint) ? score + 1 : score), 0);
+}
+
+function selectCloudbetCompetitions(competitions = [], options = {}) {
+  const hints = (options.competitionHints || []).map(normalizeName).filter(Boolean);
+  const ranked = competitions
+    .map((competition) => ({ competition, hintScore: competitionHintScore(competition, hints) }))
+    .sort((a, b) => b.hintScore - a.hintScore || (b.competition.eventCount || 0) - (a.competition.eventCount || 0));
+  const hinted = ranked.filter((item) => item.hintScore > 0);
+  const selected = (hinted.length ? hinted : ranked).slice(0, hinted.length ? Math.min(options.competitionLimitPerSport || 8, 8) : options.competitionLimitPerSport);
+  return selected.map((item) => item.competition);
+}
+
 function eventStartIso(event = {}) {
   const raw = event.startTime || event.cutoffTime || event.startDate || event.start || event.scheduledStart || event.commenceTime || event.date;
   if (!raw) return "";
@@ -571,6 +611,8 @@ async function getCloudbetAllSportEvents(env, options = {}) {
     competitionsScanned: 0,
     eventsScanned: 0,
     pricedEvents: 0,
+    competitionHints: options.competitionHints || [],
+    selectedCompetitions: [],
     errors: [],
   };
   if (!env.CLOUDBET_API_KEY) return { events: [], diagnostics };
@@ -582,13 +624,13 @@ async function getCloudbetAllSportEvents(env, options = {}) {
   for (const sport of sports) {
     try {
       const sportPayload = await fetchCloudbet(env, `/sports/${encodeURIComponent(sport.key)}`);
-      const competitions = (sportPayload?.categories || [])
+      const rawCompetitions = (sportPayload?.categories || [])
         .flatMap((category) => (category.competitions || []).map((competition) => ({ ...competition, category })))
         .filter((competition) => competition.eventCount > 0)
-        .filter((competition) => !CROSS_SPORT_BLOCKED_RE.test(competitionText(competition)))
-        .sort((a, b) => (b.eventCount || 0) - (a.eventCount || 0))
-        .slice(0, options.competitionLimitPerSport);
+        .filter((competition) => !CROSS_SPORT_BLOCKED_RE.test(competitionText(competition)));
+      const competitions = selectCloudbetCompetitions(rawCompetitions, options);
       diagnostics.competitionsScanned += competitions.length;
+      diagnostics.selectedCompetitions.push(...competitions.slice(0, 12).map((competition) => competition.key || competition.name));
 
       const payloads = [];
       for (let i = 0; i < competitions.length; i += 8) {
@@ -751,6 +793,7 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
   const normalized = [];
   const seen = new Set();
   const sports = new Set();
+  const competitionHints = new Set();
 
   for (const slug of slugs) {
     if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
@@ -780,6 +823,7 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
           if (!candidate || seen.has(candidate.id)) continue;
           seen.add(candidate.id);
           normalized.push(candidate);
+          polymarketCompetitionHints(candidate).forEach((hint) => competitionHints.add(hint));
           }
         }
       }
@@ -789,8 +833,9 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
   }
 
   diagnostics.binaryMarkets = normalized.length;
+  diagnostics.competitionHints = [...competitionHints];
   const cloudbetSports = [...sports].flatMap((sport) => POLYMARKET_TO_CLOUDBET_SPORTS[sport] || []);
-  return { markets: normalized, cloudbetSports: [...new Set(cloudbetSports)], diagnostics };
+  return { markets: normalized, cloudbetSports: [...new Set(cloudbetSports)], competitionHints: [...competitionHints], diagnostics };
 }
 
 function eventDateGapHours(cloudbetEvent = {}, polyMarket = {}) {
@@ -973,6 +1018,7 @@ async function scanCrossSportArbitrage(env, options = {}) {
   const cloudbet = await getCloudbetAllSportEvents(env, {
     ...options,
     preferredCloudbetSports: polymarket.cloudbetSports?.length ? polymarket.cloudbetSports : options.preferredCloudbetSports,
+    competitionHints: polymarket.competitionHints || [],
   }).catch((error) => ({ events: [], diagnostics: { error: error.message, hasCloudbetApiKey: Boolean(env.CLOUDBET_API_KEY) } }));
   const cloudbetAffiliateUrl = (env.CLOUDBET_AFFILIATE_URL || DEFAULT_CLOUDBET_AFFILIATE_URL).trim();
   const checked = [];
