@@ -411,7 +411,7 @@ function polymarketCompetitionHints(market = {}) {
   const hints = new Set(POLYMARKET_COMPETITION_HINTS[market.seriesSlug] || []);
   const text = normalizeName([market.seriesSlug, market.question, market.title].filter(Boolean).join(" "));
   for (const [seriesSlug, values] of Object.entries(POLYMARKET_COMPETITION_HINTS)) {
-    if (text.includes(normalizeName(seriesSlug))) values.forEach((hint) => hints.add(hint));
+    if (includesNormalizedPhrase(text, normalizeName(seriesSlug))) values.forEach((hint) => hints.add(hint));
   }
   return [...hints].map(normalizeName).filter(Boolean);
 }
@@ -419,7 +419,13 @@ function polymarketCompetitionHints(market = {}) {
 function competitionHintScore(competition = {}, hints = []) {
   if (!hints.length) return 0;
   const text = normalizeName(competitionText(competition));
-  return hints.reduce((score, hint) => (includesNormalizedPhrase(text, hint) ? score + 3 : text.includes(hint) ? score + 1 : score), 0);
+  const textTokens = new Set(normalizedTokens(competitionText(competition)));
+  return hints.reduce((score, hint) => {
+    const hintTokens = normalizedTokens(hint);
+    const exactPhrase = includesNormalizedPhrase(text, hint);
+    const singleTokenExact = hintTokens.length === 1 && textTokens.has(hintTokens[0]);
+    return exactPhrase || singleTokenExact ? score + 3 : score;
+  }, 0);
 }
 
 function selectCloudbetCompetitions(competitions = [], options = {}) {
@@ -428,6 +434,7 @@ function selectCloudbetCompetitions(competitions = [], options = {}) {
     .map((competition) => ({ competition, hintScore: competitionHintScore(competition, hints) }))
     .sort((a, b) => b.hintScore - a.hintScore || (b.competition.eventCount || 0) - (a.competition.eventCount || 0));
   const hinted = ranked.filter((item) => item.hintScore > 0);
+  if (hints.length && !hinted.length) return [];
   const selected = (hinted.length ? hinted : ranked).slice(0, hinted.length ? Math.min(options.competitionLimitPerSport || 8, 8) : options.competitionLimitPerSport);
   return selected.map((item) => item.competition);
 }
@@ -793,6 +800,7 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
   const normalized = [];
   const seen = new Set();
   const sports = new Set();
+  const marketSports = new Set();
   const competitionHints = new Set();
 
   for (const slug of slugs) {
@@ -823,6 +831,7 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
           if (!candidate || seen.has(candidate.id)) continue;
           seen.add(candidate.id);
           normalized.push(candidate);
+          marketSports.add(candidate.seriesSlug);
           polymarketCompetitionHints(candidate).forEach((hint) => competitionHints.add(hint));
           }
         }
@@ -834,7 +843,8 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
 
   diagnostics.binaryMarkets = normalized.length;
   diagnostics.competitionHints = [...competitionHints];
-  const cloudbetSports = [...sports].flatMap((sport) => POLYMARKET_TO_CLOUDBET_SPORTS[sport] || []);
+  diagnostics.marketSeries = [...marketSports];
+  const cloudbetSports = [...marketSports].flatMap((sport) => POLYMARKET_TO_CLOUDBET_SPORTS[sport] || []);
   return { markets: normalized, cloudbetSports: [...new Set(cloudbetSports)], competitionHints: [...competitionHints], diagnostics };
 }
 
