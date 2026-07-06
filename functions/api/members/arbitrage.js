@@ -6,8 +6,10 @@ const DEFAULT_CLOUDBET_AFFILIATE_URL = "https://cldbt.cloud/go/en/landing/bitcoi
 const BLOCKED_RE = /\b(simulated|simulation|virtual|srl|reality league|itf|utr|exhibition|junior|boys|girls|college|doubles)\b/i;
 const CROSS_SPORT_BLOCKED_RE = /\b(simulated|simulation|virtual|srl|reality league|esoccer|ebasketball|efootball|specials|politics|finance|crypto|weather)\b/i;
 const DEFAULT_CLOUDBET_SPORTS = ["tennis", "soccer", "basketball", "baseball", "american-football", "ice-hockey", "boxing", "mma", "cricket", "rugby"];
-const POLYMARKET_SPORT_SERIES = ["mlb", "wnba", "nba", "nfl", "ncaaf", "ncaab", "nhl", "tennis", "ufc", "mma", "epl", "mls", "champions-league"];
+const POLYMARKET_SPORT_SERIES = ["atp", "wta", "mlb", "wnba", "nba", "nfl", "ncaaf", "ncaab", "nhl", "tennis", "ufc", "mma", "epl", "mls", "champions-league"];
 const POLYMARKET_TO_CLOUDBET_SPORTS = {
+  atp: ["tennis"],
+  wta: ["tennis"],
   mlb: ["baseball"],
   wnba: ["basketball"],
   nba: ["basketball"],
@@ -23,6 +25,8 @@ const POLYMARKET_TO_CLOUDBET_SPORTS = {
   "champions-league": ["soccer"],
 };
 const POLYMARKET_COMPETITION_HINTS = {
+  atp: ["atp", "challenger", "men singles"],
+  wta: ["wta", "women singles"],
   mlb: ["mlb"],
   wnba: ["wnba"],
   nba: ["nba"],
@@ -273,12 +277,45 @@ function entityMatchScore(text = "", entity = "") {
 }
 
 function bestEntityMatchScore(polyMarket = {}, entity = "") {
-  const scores = [entityMatchScore(polyMarket.text, entity), ...(polyMarket.outcomes || []).map((outcome) => entityMatchScore(outcome, entity))];
+  const marketText = [polyMarket.text, ...(polyMarket.outcomes || [])].filter(Boolean).join(" ");
+  const aliasScores = aliasesForEntityFromTeams(entity, polyMarket.teams || []).map((alias) => entityMatchScore(marketText, alias));
+  const scores = [entityMatchScore(polyMarket.text, entity), ...(polyMarket.outcomes || []).map((outcome) => entityMatchScore(outcome, entity)), ...aliasScores];
   return scores.sort((a, b) => b.score - a.score)[0] || { matched: false, score: 0, reason: "not checked" };
 }
 
 function entityMentioned(text = "", entity = "") {
   return entityMatchScore(text, entity).matched;
+}
+
+function teamAliases(team = {}) {
+  return [team.name, team.alias, team.abbreviation]
+    .filter(Boolean)
+    .map((value) => String(value).trim())
+    .filter(Boolean);
+}
+
+function teamMatchesEntity(team = {}, entity = "") {
+  return teamAliases(team).some((alias) => entityMatchScore(entity, alias).matched || entityMatchScore(alias, entity).matched);
+}
+
+function aliasesForEntityFromTeams(entity = "", teams = []) {
+  const aliases = [];
+  for (const team of teams || []) {
+    if (!teamMatchesEntity(team, entity)) continue;
+    aliases.push(...teamAliases(team));
+  }
+  return [...new Set(aliases)];
+}
+
+function entityMentionedForMarket(polyMarket = {}, text = "", entity = "") {
+  if (entityMentioned(text, entity)) return true;
+  return aliasesForEntityFromTeams(entity, polyMarket.teams || []).some((alias) => entityMentioned(text, alias));
+}
+
+function entityFirstIndexForMarket(polyMarket = {}, text = "", entity = "") {
+  const indexes = [entityFirstIndex(text, entity), ...aliasesForEntityFromTeams(entity, polyMarket.teams || []).map((alias) => entityFirstIndex(text, alias))]
+    .filter((index) => index >= 0);
+  return indexes.length ? Math.min(...indexes) : -1;
 }
 
 function namesLookSimilar(a, b) {
@@ -449,6 +486,8 @@ function cloudbetEventSeriesSlugs(event = {}) {
   const text = [event.sportKey, event.sport, event.competition, event.home, event.away].filter(Boolean).join(" ");
   const slugs = new Set();
 
+  if (hasNormalizedPhrase(text, "atp") || hasNormalizedPhrase(text, "challenger") || hasNormalizedPhrase(text, "men singles")) slugs.add("atp");
+  if (hasNormalizedPhrase(text, "wta") || hasNormalizedPhrase(text, "women singles")) slugs.add("wta");
   if (hasNormalizedPhrase(text, "mlb")) slugs.add("mlb");
   if (hasNormalizedPhrase(text, "wnba")) slugs.add("wnba");
   else if (hasNormalizedPhrase(text, "nba")) slugs.add("nba");
@@ -461,15 +500,19 @@ function cloudbetEventSeriesSlugs(event = {}) {
   if (hasNormalizedPhrase(text, "premier league") || hasNormalizedPhrase(text, "epl")) slugs.add("epl");
   if (hasNormalizedPhrase(text, "mls")) slugs.add("mls");
   if (hasNormalizedPhrase(text, "champions league")) slugs.add("champions-league");
-  if (hasNormalizedPhrase(text, "atp") || hasNormalizedPhrase(text, "wta") || hasNormalizedPhrase(text, "grand slam") || hasNormalizedPhrase(text, "tennis")) slugs.add("tennis");
+  if (hasNormalizedPhrase(text, "tennis") && !slugs.has("atp") && !slugs.has("wta")) {
+    slugs.add("atp");
+    slugs.add("wta");
+  }
 
   return [...slugs];
 }
 
-function rawPolymarketEventMatchesCloudbet(event = {}, cloudbetEvent = {}) {
+function rawPolymarketEventMatchesCloudbet(event = {}, cloudbetEvent = {}, teams = []) {
   const text = [event.title, event.name, event.slug, event.ticker, event.description].filter(Boolean).join(" ");
-  const homeScore = entityMatchScore(text, cloudbetEvent.home);
-  const awayScore = entityMatchScore(text, cloudbetEvent.away);
+  const pseudoMarket = { text, outcomes: [], teams };
+  const homeScore = bestEntityMatchScore(pseudoMarket, cloudbetEvent.home);
+  const awayScore = bestEntityMatchScore(pseudoMarket, cloudbetEvent.away);
   return homeScore.matched && awayScore.matched;
 }
 
@@ -745,6 +788,53 @@ function polymarketList(payload) {
   return [];
 }
 
+function normalizePolymarketTeam(team = {}) {
+  return {
+    id: String(team.id || team.providerId || team.name || ""),
+    name: String(team.name || "").trim(),
+    league: String(team.league || "").trim().toLowerCase(),
+    alias: String(team.alias || "").trim(),
+    abbreviation: String(team.abbreviation || "").trim(),
+    providerId: team.providerId || null,
+  };
+}
+
+async function getPolymarketSportsMetadata(env, diagnostics = {}) {
+  const payload = await fetchPolymarket(env, "/sports?limit=500");
+  const sports = polymarketList(payload)
+    .map((sport) => ({
+      id: String(sport.id || sport.series || sport.sport || ""),
+      sport: String(sport.sport || "").trim().toLowerCase(),
+      series: String(sport.series || "").trim(),
+      ordering: String(sport.ordering || "").trim(),
+      tags: String(sport.tags || "").trim(),
+    }))
+    .filter((sport) => sport.sport);
+  diagnostics.sportsMetadataCount = sports.length;
+  return sports;
+}
+
+async function getPolymarketTeamsForLeagues(env, leagues = [], diagnostics = {}, options = {}) {
+  const teamsByLeague = new Map();
+  const uniqueLeagues = [...new Set(leagues.map((league) => String(league || "").trim().toLowerCase()).filter(Boolean))];
+  diagnostics.teamLeaguesTried = uniqueLeagues;
+  diagnostics.teamsFetched = 0;
+
+  for (const league of uniqueLeagues.slice(0, options.polymarketSeriesLimit || 10)) {
+    try {
+      const payload = await fetchPolymarket(env, `/teams?league=${encodeURIComponent(league)}&limit=100`);
+      const teams = polymarketList(payload).map(normalizePolymarketTeam).filter((team) => team.name);
+      teamsByLeague.set(league, teams);
+      diagnostics.teamsFetched += teams.length;
+    } catch (error) {
+      diagnostics.errors.push(`teams ${league}: ${error.message}`);
+      teamsByLeague.set(league, []);
+    }
+  }
+
+  return teamsByLeague;
+}
+
 function polymarketMarketUrl(market = {}, event = {}) {
   const eventSlug = event.slug || market.eventSlug || market.event_slug;
   const marketSlug = market.slug || market.market_slug;
@@ -797,6 +887,7 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
     outcomes: outcomes.map(String),
     prices: [firstPrice, secondPrice],
     volume: Number(rawMarket.volume || rawMarket.volumeNum || event.volume || 0) || 0,
+    teams: Array.isArray(event.teams) ? event.teams : [],
   };
 }
 
@@ -920,8 +1011,22 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
     }
   }
 
-  const slugs = [...seriesToCloudbetEvents.keys()].slice(0, options.polymarketSeriesLimit);
+  const inferredSlugs = [...seriesToCloudbetEvents.keys()].slice(0, options.polymarketSeriesLimit);
+  let slugs = inferredSlugs;
+  try {
+    const sportsMetadata = await getPolymarketSportsMetadata(env, diagnostics);
+    const availableSports = new Set(sportsMetadata.map((sport) => sport.sport));
+    slugs = inferredSlugs.filter((slug) => availableSports.has(slug));
+    diagnostics.sportsMatched = sportsMetadata.filter((sport) => slugs.includes(sport.sport)).map((sport) => ({
+      sport: sport.sport,
+      series: sport.series,
+      ordering: sport.ordering,
+    }));
+  } catch (error) {
+    diagnostics.errors.push(`sports metadata: ${error.message}`);
+  }
   diagnostics.seriesInferred = slugs.map((slug) => ({ slug, cloudbetEvents: seriesToCloudbetEvents.get(slug)?.length || 0 }));
+  const teamsByLeague = await getPolymarketTeamsForLeagues(env, slugs, diagnostics, options);
 
   const normalized = [];
   const seen = new Set();
@@ -935,26 +1040,29 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
       const series = polymarketList(payload);
       diagnostics.seriesScanned += series.length;
       for (const item of series) {
+        const seriesSlug = item.slug || slug;
+        const teams = teamsByLeague.get(seriesSlug) || teamsByLeague.get(slug) || [];
         const events = (Array.isArray(item.events) ? item.events : []).filter(isOpenPolymarketSportsEvent);
         const relevantEvents = events
-          .filter((event) => cloudbetForSeries.some((cloudbetEvent) => rawPolymarketEventMatchesCloudbet(event, cloudbetEvent)))
+          .filter((event) => cloudbetForSeries.some((cloudbetEvent) => rawPolymarketEventMatchesCloudbet(event, cloudbetEvent, teams)))
           .slice(0, options.polymarketEventsPerSeries);
         diagnostics.eventsDiscovered += events.length;
         diagnostics.eventsRelevant += relevantEvents.length;
         diagnostics.sportSeries.push({
-          slug: item.slug || slug,
+          slug: seriesSlug,
           title: item.title || slug,
           events: events.length,
           relevantEvents: relevantEvents.length,
+          teams: teams.length,
         });
 
         for (const event of relevantEvents) {
           if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
           diagnostics.eventsHydrated += 1;
-          const pairs = await hydratePolymarketEventMarkets(env, { ...event, seriesSlug: item.slug || slug }, diagnostics);
+          const pairs = await hydratePolymarketEventMarkets(env, { ...event, seriesSlug, teams }, diagnostics);
           for (const { market, event: marketEvent } of pairs) {
             diagnostics.marketsScanned += 1;
-            const candidate = normalizePolymarketMarket(market, { ...event, ...marketEvent, seriesSlug: item.slug || slug });
+            const candidate = normalizePolymarketMarket(market, { ...event, ...marketEvent, seriesSlug, teams });
             if (!candidate || seen.has(candidate.id)) continue;
             const matchesCloudbetEvent = cloudbetForSeries.some((cloudbetEvent) => polymarketCloudbetAnalysis(candidate, cloudbetEvent).teamsMatched);
             if (!matchesCloudbetEvent) continue;
@@ -1030,22 +1138,22 @@ function inferPolymarketSides(polyMarket = {}, cloudbetEvent = {}) {
   const firstText = firstOutcome || "";
   const secondText = secondOutcome || "";
 
-  if (entityMentioned(firstText, cloudbetEvent.home) && entityMentioned(secondText, cloudbetEvent.away)) {
+  if (entityMentionedForMarket(polyMarket, firstText, cloudbetEvent.home) && entityMentionedForMarket(polyMarket, secondText, cloudbetEvent.away)) {
     return { homePrice: firstPrice, awayPrice: secondPrice, matchType: "outcome names" };
   }
-  if (entityMentioned(firstText, cloudbetEvent.away) && entityMentioned(secondText, cloudbetEvent.home)) {
+  if (entityMentionedForMarket(polyMarket, firstText, cloudbetEvent.away) && entityMentionedForMarket(polyMarket, secondText, cloudbetEvent.home)) {
     return { homePrice: secondPrice, awayPrice: firstPrice, matchType: "outcome names reversed" };
   }
 
   const yesNo = normalizeName(firstOutcome) === "yes" && normalizeName(secondOutcome) === "no";
   if (!yesNo) return null;
-  const homeMentioned = entityMentioned(polyMarket.text, cloudbetEvent.home);
-  const awayMentioned = entityMentioned(polyMarket.text, cloudbetEvent.away);
+  const homeMentioned = entityMentionedForMarket(polyMarket, polyMarket.text, cloudbetEvent.home);
+  const awayMentioned = entityMentionedForMarket(polyMarket, polyMarket.text, cloudbetEvent.away);
   if (!homeMentioned || !awayMentioned) return null;
 
   const normalizedText = normalizeName(polyMarket.text);
-  const homeIndex = entityFirstIndex(normalizedText, cloudbetEvent.home);
-  const awayIndex = entityFirstIndex(normalizedText, cloudbetEvent.away);
+  const homeIndex = entityFirstIndexForMarket(polyMarket, normalizedText, cloudbetEvent.home);
+  const awayIndex = entityFirstIndexForMarket(polyMarket, normalizedText, cloudbetEvent.away);
   if (homeIndex < 0 || awayIndex < 0) return null;
 
   if (homeIndex < awayIndex) return { homePrice: firstPrice, awayPrice: secondPrice, matchType: "yes/no first-mentioned home" };
