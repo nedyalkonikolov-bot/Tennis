@@ -1209,15 +1209,16 @@ function nearMatchReason(analysis = {}) {
 
 function inferPolymarketSides(polyMarket = {}, cloudbetEvent = {}) {
   const [firstOutcome, secondOutcome] = polyMarket.outcomes;
-  const [firstPrice, secondPrice] = polyMarket.prices;
+  const [firstPrice, secondPrice] = Array.isArray(polyMarket.buyPrices) && polyMarket.buyPrices.length === 2 ? polyMarket.buyPrices : polyMarket.prices;
+  const [firstReferencePrice, secondReferencePrice] = polyMarket.prices || [];
   const firstText = firstOutcome || "";
   const secondText = secondOutcome || "";
 
   if (entityMentionedForMarket(polyMarket, firstText, cloudbetEvent.home) && entityMentionedForMarket(polyMarket, secondText, cloudbetEvent.away)) {
-    return { homePrice: firstPrice, awayPrice: secondPrice, matchType: "outcome names" };
+    return { homePrice: firstPrice, awayPrice: secondPrice, homeReferencePrice: firstReferencePrice, awayReferencePrice: secondReferencePrice, priceSource: polyMarket.priceSource, feeRate: polyMarket.feeRate, matchType: "outcome names" };
   }
   if (entityMentionedForMarket(polyMarket, firstText, cloudbetEvent.away) && entityMentionedForMarket(polyMarket, secondText, cloudbetEvent.home)) {
-    return { homePrice: secondPrice, awayPrice: firstPrice, matchType: "outcome names reversed" };
+    return { homePrice: secondPrice, awayPrice: firstPrice, homeReferencePrice: secondReferencePrice, awayReferencePrice: firstReferencePrice, priceSource: polyMarket.priceSource, feeRate: polyMarket.feeRate, matchType: "outcome names reversed" };
   }
 
   const yesNo = normalizeName(firstOutcome) === "yes" && normalizeName(secondOutcome) === "no";
@@ -1231,8 +1232,8 @@ function inferPolymarketSides(polyMarket = {}, cloudbetEvent = {}) {
   const awayIndex = entityFirstIndexForMarket(polyMarket, normalizedText, cloudbetEvent.away);
   if (homeIndex < 0 || awayIndex < 0) return null;
 
-  if (homeIndex < awayIndex) return { homePrice: firstPrice, awayPrice: secondPrice, matchType: "yes/no first-mentioned home" };
-  return { homePrice: secondPrice, awayPrice: firstPrice, matchType: "yes/no first-mentioned away" };
+  if (homeIndex < awayIndex) return { homePrice: firstPrice, awayPrice: secondPrice, homeReferencePrice: firstReferencePrice, awayReferencePrice: secondReferencePrice, priceSource: polyMarket.priceSource, feeRate: polyMarket.feeRate, matchType: "yes/no first-mentioned home" };
+  return { homePrice: secondPrice, awayPrice: firstPrice, homeReferencePrice: secondReferencePrice, awayReferencePrice: firstReferencePrice, priceSource: polyMarket.priceSource, feeRate: polyMarket.feeRate, matchType: "yes/no first-mentioned away" };
 }
 
 function polymarketCloudbetMatch(polyMarket = {}, cloudbetEvent = {}) {
@@ -1456,9 +1457,10 @@ async function scanPolymarketOdds(env, options = {}) {
 function buildCrossVenueCandidate(cloudbetEvent, polyMarket, sides, cloudbetSide, bankroll, polyBuffer, cloudbetAffiliateUrl) {
   const opposite = cloudbetSide === "home" ? "away" : "home";
   const cloudbetPrice = cloudbetEvent.odds[cloudbetSide];
-  const rawPolyPrice = sides[`${opposite}Price`];
-  if (!cloudbetPrice || !rawPolyPrice) return null;
-  const polyPrice = Math.min(0.99, Math.round((rawPolyPrice + polyBuffer) * 10000) / 10000);
+  const polyBuyPrice = sides[`${opposite}Price`];
+  const polyReferencePrice = sides[`${opposite}ReferencePrice`];
+  if (!cloudbetPrice || !polyBuyPrice) return null;
+  const polyPrice = Math.min(0.99, Math.round((polyBuyPrice + polyBuffer) * 10000) / 10000);
   const impliedTotal = (1 / cloudbetPrice) + polyPrice;
   const edgePercent = (1 - impliedTotal) * 100;
   const cloudbetStake = bankroll / (1 + cloudbetPrice * polyPrice);
@@ -1477,7 +1479,11 @@ function buildCrossVenueCandidate(cloudbetEvent, polyMarket, sides, cloudbetSide
     polymarketPick: opposite === "home" ? cloudbetEvent.home : cloudbetEvent.away,
     cloudbetOdds: cloudbetPrice,
     polymarketPrice: polyPrice,
-    polymarketRawPrice: rawPolyPrice,
+    polymarketBuyPrice: polyBuyPrice,
+    polymarketReferencePrice: polyReferencePrice,
+    polymarketRawPrice: polyBuyPrice,
+    polymarketPriceSource: sides.priceSource || polyMarket.priceSource || "buy-price",
+    polymarketFeeRate: sides.feeRate ?? polyMarket.feeRate ?? null,
     polymarketQuestion: polyMarket.question,
     polymarketUrl: polyMarket.url,
     cloudbetUrl: cloudbetAffiliateUrl,
@@ -1619,7 +1625,7 @@ async function getArbitrage(request, env) {
     polymarketEventLimit: clampInteger(url.searchParams.get("poly_events") || env.POLYMARKET_ARB_EVENT_LIMIT || "12", 12, 1, 30),
     polymarketSeries: requestedSeries,
     rowLimit: clampInteger(url.searchParams.get("limit") || "160", 160, 10, 500),
-    polyBuffer: clampNumber(url.searchParams.get("poly_buffer") || env.POLYMARKET_PRICE_BUFFER || "0.01", 0.01, 0, 0.1),
+    polyBuffer: clampNumber(url.searchParams.get("poly_buffer") || env.POLYMARKET_PRICE_BUFFER || "0", 0, 0, 0.1),
   };
 
   if (mode === "polymarket-odds") {
