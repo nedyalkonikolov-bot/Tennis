@@ -866,6 +866,7 @@ function polymarketMarketUrl(market = {}, event = {}) {
 }
 
 function normalizePolymarketMarket(rawMarket = {}, event = {}) {
+  if (!rawMarket || rawMarket.closed || rawMarket.archived || rawMarket.active === false || rawMarket.acceptingOrders === false || rawMarket.enableOrderBook === false) return null;
   const outcomes = safeJsonArray(rawMarket.outcomes);
   const prices = safeJsonArray(rawMarket.outcomePrices || rawMarket.outcome_prices);
   if (outcomes.length !== 2 || prices.length !== 2) return null;
