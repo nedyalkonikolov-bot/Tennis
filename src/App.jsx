@@ -999,13 +999,13 @@ function MembersArbitragePage({ initialMode = "cross-sport" }) {
   const summary = payload?.summary || {};
   const headerTitle = initialMode === "polymarket-odds" ? "Polymarket Odds Converter" : "Arbitrage Scanner";
   const headerText = initialMode === "polymarket-odds"
-    ? "Normalize active Polymarket sports event probabilities into decimal betting-style coefficients. Use it to compare prediction-market prices with sportsbook odds before any arbitrage research."
+    ? "Normalize active Polymarket moneyline prices into classic 1/X/2 betting outcomes with decimal odds. Use it to compare prediction-market prices with sportsbook prices before arbitrage research."
     : "Scan tennis bookmaker odds or compare Cloudbet all-sport winner markets against Polymarket binary markets. Cross-venue rows only appear when the event names and sides can be matched safely.";
   const tableGridClass = isPolymarketOdds
-    ? "hidden grid-cols-[1.15fr_1.25fr_0.65fr_0.6fr_0.55fr_0.6fr] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid"
+    ? "hidden grid-cols-[1.45fr_0.72fr_0.72fr_0.72fr_0.65fr_0.55fr] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid"
     : "hidden grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid";
   const rowGridClass = isPolymarketOdds
-    ? "grid gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 md:grid-cols-[1.15fr_1.25fr_0.65fr_0.6fr_0.55fr_0.6fr] md:items-center"
+    ? "grid gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 md:grid-cols-[1.45fr_0.72fr_0.72fr_0.72fr_0.65fr_0.55fr] md:items-center"
     : "";
 
   return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
@@ -1052,19 +1052,19 @@ function MembersArbitragePage({ initialMode = "cross-sport" }) {
     </div>
 
     <div className="mt-8 border border-amber-300/20 bg-amber-300/[0.06] p-5 text-sm leading-7 text-amber-100">
-      {isPolymarketOdds ? "Polymarket coefficients are calculated from prediction-market prices. They are not sportsbook offers, and fees, spreads, liquidity and settlement rules can change the real trading value." : "Arbitrage shown here is theoretical. Odds can move, limits can apply, markets can be voided, and bookmaker terms differ. Recheck every price manually before using any stake plan."}
+      {isPolymarketOdds ? "1 is the first listed side, X is draw when Polymarket exposes a draw market, and 2 is the second listed side. These are calculated coefficients, not sportsbook offers; fees, spreads, liquidity and settlement rules can change the real trading value." : "Arbitrage shown here is theoretical. Odds can move, limits can apply, markets can be voided, and bookmaker terms differ. Recheck every price manually before using any stake plan."}
     </div>
 
     <div className="mt-8 overflow-hidden border border-white/10">
       <div className={tableGridClass}>
-        {isPolymarketOdds ? <><span>Event</span><span>Market</span><span>Outcome</span><span>Probability</span><span>Coefficient</span><span>Link</span></> : isCrossSport ? <><span>Event</span><span>Cloudbet</span><span>Polymarket</span><span>Links</span><span>Edge</span><span>Stake split</span></> : <><span>Match</span><span>Best home</span><span>Best away</span><span>Cloudbet</span><span>Edge</span><span>Stake split</span></>}
+        {isPolymarketOdds ? <><span>Event</span><span>1</span><span>X</span><span>2</span><span>Market</span><span>Link</span></> : isCrossSport ? <><span>Event</span><span>Cloudbet</span><span>Polymarket</span><span>Links</span><span>Edge</span><span>Stake split</span></> : <><span>Match</span><span>Best home</span><span>Best away</span><span>Cloudbet</span><span>Edge</span><span>Stake split</span></>}
       </div>
       {isPolymarketOdds ? rows.map((row) => <article key={row.id} className={rowGridClass}>
-        <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.seriesSlug || "sports"}</span><span className="rounded-full bg-lime-400/10 px-2 py-1 text-xs font-bold text-lime-300">Decimal odds</span></div><h2 className="mt-2 text-lg font-black">{row.event}</h2><p className="mt-1 text-sm text-slate-500">{row.startIso ? formatUpdatedAt(row.startIso) : row.endDate ? `Ends ${formatUpdatedAt(row.endDate)}` : "Date unavailable"}</p></div>
-        <div><p className="text-sm font-bold text-slate-300">{row.market}</p><p className="mt-2 text-xs text-slate-500">Volume {Math.round(Number(row.volume || 0)).toLocaleString()} · overround {row.overroundPercent}%</p></div>
-        <Metric label="Outcome" value={row.outcome} helper="Polymarket side" />
-        <Metric label="Implied probability" value={`${row.probabilityPercent}%`} helper={`Raw ${row.probability}`} />
-        <Metric label="Coefficient" value={row.decimalCoefficient} helper="1 / price" />
+        <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.seriesSlug || "sports"}</span><span className="rounded-full bg-lime-400/10 px-2 py-1 text-xs font-bold text-lime-300">Moneyline 1/X/2</span></div><h2 className="mt-2 text-lg font-black">{row.event}</h2><p className="mt-1 text-sm text-slate-500">{row.startIso ? formatUpdatedAt(row.startIso) : row.endDate ? `Ends ${formatUpdatedAt(row.endDate)}` : "Date unavailable"}</p><p className="mt-2 text-xs text-slate-500">{row.market}</p></div>
+        <Metric label={row.outcome1?.label || "First side"} value={row.outcome1?.decimalCoefficient || "N/A"} helper={row.outcome1 ? `${row.outcome1.probabilityPercent}% implied` : "No market"} />
+        <Metric label={row.outcomeX?.label || "Draw"} value={row.outcomeX?.decimalCoefficient || "N/A"} helper={row.outcomeX ? `${row.outcomeX.probabilityPercent}% implied` : "No draw"} />
+        <Metric label={row.outcome2?.label || "Second side"} value={row.outcome2?.decimalCoefficient || "N/A"} helper={row.outcome2 ? `${row.outcome2.probabilityPercent}% implied` : "No market"} />
+        <Metric label="Market total" value={row.probabilityTotal || "N/A"} helper={`Overround ${row.overroundPercent}%`} />
         <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">Market</p><a href={row.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10">Open Polymarket <ExternalLink size={13} /></a></div>
       </article>) : isCrossSport ? rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
         <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.sport}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${row.arbitrage ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300"}`}>{row.arbitrage ? "Cross-venue arb" : "Watchlist"}</span></div><h2 className="mt-2 text-lg font-black">{row.match}</h2><p className="mt-1 text-sm text-slate-500">{row.competition}{row.startIso ? ` - ${formatUpdatedAt(row.startIso)}` : ""}</p><p className="mt-2 text-xs text-slate-500">{row.polymarketQuestion}</p></div>
@@ -1088,7 +1088,7 @@ function MembersArbitragePage({ initialMode = "cross-sport" }) {
         <Metric label="Edge" value={`${row.edgePercent}%`} helper={`Implied ${row.impliedTotal}`} />
         <Metric label={`${row.stakePlan.bankroll} stake`} value={`${row.stakePlan.homeStake}/${row.stakePlan.awayStake}`} helper={`Profit ${row.stakePlan.expectedProfit}`} />
       </article>)}
-      {!rows.length && <div className="p-8 text-slate-400">{token ? isPolymarketOdds ? "Run the converter to normalize active Polymarket sports prices into decimal coefficients. If no rows appear, the scanned events did not return usable active binary prices." : isCrossSport ? "Run the scanner to compare Cloudbet events with Polymarket binary markets. If no rows appear, no events could be matched safely across both platforms." : "Run the scanner to load current ATP/WTA bookmaker odds. If no rows appear, API-Tennis did not return complete Home/Away bookmaker odds for the scanned matches." : "Log in as a member to use the private odds tools."}</div>}
+      {!rows.length && <div className="p-8 text-slate-400">{token ? isPolymarketOdds ? "Run the converter to normalize active Polymarket moneyline markets into 1/X/2 decimal odds. If no rows appear, the scanned events did not return usable moneyline prices." : isCrossSport ? "Run the scanner to compare Cloudbet events with Polymarket binary markets. If no rows appear, no events could be matched safely across both platforms." : "Run the scanner to load current ATP/WTA bookmaker odds. If no rows appear, API-Tennis did not return complete Home/Away bookmaker odds for the scanned matches." : "Log in as a member to use the private odds tools."}</div>}
     </div>
 
     {isPolymarketOdds && payload?.polymarketDiagnostics && <details className="mt-8 border border-white/10 bg-white/[0.04] p-5">

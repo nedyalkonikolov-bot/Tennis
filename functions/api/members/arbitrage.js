@@ -865,6 +865,16 @@ function polymarketMarketUrl(market = {}, event = {}) {
   return "https://polymarket.com";
 }
 
+function rawPolymarketYesNoMoneyline(rawMarket = {}, event = {}) {
+  const outcomes = safeJsonArray(rawMarket.outcomes);
+  const first = normalizeName(outcomes[0] || "");
+  const second = normalizeName(outcomes[1] || "");
+  if (first !== "yes" || second !== "no") return false;
+  const text = [rawMarket.question, rawMarket.title, rawMarket.slug, event.title, event.name].filter(Boolean).join(" ");
+  if (/\b(completed match|over|under|total|spread|handicap|props?)\b/i.test(text)) return false;
+  return /\b(winning|winner|moneyline|match result|draw|tie|tied)\b/i.test(text);
+}
+
 function normalizePolymarketMarket(rawMarket = {}, event = {}) {
   if (!rawMarket || rawMarket.closed || rawMarket.archived || rawMarket.active === false || rawMarket.acceptingOrders === false || rawMarket.enableOrderBook === false) return null;
   const outcomes = safeJsonArray(rawMarket.outcomes);
@@ -877,7 +887,7 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
   const title = event.title || event.name || question;
   const text = [question, title, event.slug, rawMarket.slug].filter(Boolean).join(" ");
   if (CROSS_SPORT_BLOCKED_RE.test(text)) return null;
-  if (BAD_BINARY_MARKET_RE.test(text)) return null;
+  if (BAD_BINARY_MARKET_RE.test(text) && !rawPolymarketYesNoMoneyline(rawMarket, event)) return null;
   const startIso = toIsoString(
     event.startTime
       || event.startDate
@@ -1255,33 +1265,132 @@ function marketOverroundPercent(prices = []) {
   return Math.round((total - 1) * 10000) / 100;
 }
 
+function bettingOutcome(probability, label) {
+  const coefficient = decimalCoefficient(probability);
+  if (!coefficient) return null;
+  return {
+    label,
+    probability,
+    probabilityPercent: probabilityPercent(probability),
+    decimalCoefficient: coefficient,
+  };
+}
+
+function splitEventSides(title = "") {
+  const cleanTitle = String(title || "").split(/\s+-\s+/)[0].trim();
+  const parts = cleanTitle.split(/\s+v(?:s\.?|ersus)\s+/i).map((part) => part.trim()).filter(Boolean);
+  return parts.length >= 2 ? [parts[0], parts.slice(1).join(" vs ")] : ["", ""];
+}
+
+function isYesNoMarket(market = {}) {
+  return normalizeName(market.outcomes?.[0] || "") === "yes" && normalizeName(market.outcomes?.[1] || "") === "no";
+}
+
+function isDirectMoneylineMarket(market = {}) {
+  if (!market || market.outcomes?.length !== 2 || market.prices?.length !== 2 || isYesNoMarket(market)) return false;
+  const first = normalizeName(market.outcomes[0]);
+  const second = normalizeName(market.outcomes[1]);
+  if (!first || !second || first === second) return false;
+  if (["over", "under"].includes(first) || ["over", "under"].includes(second)) return false;
+  const marketSlug = String(market.slug || "").toLowerCase();
+  const eventSlug = String(market.eventSlug || "").toLowerCase();
+  if (marketSlug && eventSlug && marketSlug === eventSlug) return true;
+  return normalizeName(market.question) === normalizeName(market.title);
+}
+
+function moneylineCodeForYesMarket(market = {}) {
+  const text = [market.question, market.slug].filter(Boolean).join(" ");
+  const normalizedText = normalizeName(text);
+  if (/\b(draw|tie|tied)\b/i.test(text) || includesNormalizedPhrase(normalizedText, "draw") || includesNormalizedPhrase(normalizedText, "tie") || includesNormalizedPhrase(normalizedText, "tied")) return "X";
+
+  const [firstSide, secondSide] = splitEventSides(market.title || market.question);
+  const firstScore = entityMatchScore(text, firstSide);
+  const secondScore = entityMatchScore(text, secondSide);
+  if (firstScore.matched && !secondScore.matched) return "1";
+  if (secondScore.matched && !firstScore.matched) return "2";
+
+  const slug = String(market.slug || "").toLowerCase();
+  if (slug.endsWith("-draw")) return "X";
+  if (slug.endsWith("-away")) return "1";
+  if (slug.endsWith("-home")) return "2";
+  return null;
+}
+
+function bestMoneylineMarkets(markets = []) {
+  const byEvent = new Map();
+  for (const market of markets) {
+    const eventKey = market.eventSlug || market.title || market.id;
+    if (!byEvent.has(eventKey)) byEvent.set(eventKey, []);
+    byEvent.get(eventKey).push(market);
+  }
+
+  const rows = [];
+  for (const [eventKey, eventMarkets] of byEvent) {
+    const direct = eventMarkets.find(isDirectMoneylineMarket);
+    if (direct) {
+      const outcome1 = bettingOutcome(direct.prices[0], direct.outcomes[0]);
+      const outcome2 = bettingOutcome(direct.prices[1], direct.outcomes[1]);
+      if (outcome1 && outcome2) {
+        rows.push({
+          id: `moneyline-${direct.id}`,
+          marketId: direct.id,
+          seriesSlug: direct.seriesSlug,
+          event: direct.title || direct.question,
+          market: direct.question,
+          marketType: "moneyline",
+          outcome1,
+          outcomeX: null,
+          outcome2,
+          probabilityTotal: Math.round((direct.prices[0] + direct.prices[1]) * 10000) / 10000,
+          overroundPercent: marketOverroundPercent(direct.prices),
+          startIso: direct.startIso,
+          endDate: direct.endDate,
+          volume: direct.volume,
+          url: direct.url,
+        });
+      }
+      continue;
+    }
+
+    const grouped = { "1": null, X: null, "2": null };
+    let source = null;
+    for (const market of eventMarkets) {
+      if (!isYesNoMarket(market)) continue;
+      const code = moneylineCodeForYesMarket(market);
+      if (!code || grouped[code]) continue;
+      const yesOutcome = bettingOutcome(market.prices[0], code === "X" ? "Draw" : market.question.replace(/\?$/, ""));
+      if (!yesOutcome) continue;
+      grouped[code] = yesOutcome;
+      source ||= market;
+    }
+
+    if (source && (grouped["1"] || grouped["2"] || grouped.X)) {
+      const prices = [grouped["1"]?.probability, grouped.X?.probability, grouped["2"]?.probability].filter((value) => value !== undefined && value !== null);
+      rows.push({
+        id: `moneyline-${eventKey}`,
+        marketId: source.marketId || source.id,
+        seriesSlug: source.seriesSlug,
+        event: source.title || source.question,
+        market: source.title || source.question,
+        marketType: "moneyline-1x2",
+        outcome1: grouped["1"],
+        outcomeX: grouped.X,
+        outcome2: grouped["2"],
+        probabilityTotal: Math.round(prices.reduce((sum, price) => sum + Number(price || 0), 0) * 10000) / 10000,
+        overroundPercent: marketOverroundPercent(prices),
+        startIso: source.startIso,
+        endDate: source.endDate,
+        volume: Math.max(...eventMarkets.map((market) => Number(market.volume || 0))),
+        url: source.url,
+      });
+    }
+  }
+  return rows;
+}
+
 async function scanPolymarketOdds(env, options = {}) {
   const polymarket = await getPolymarketBinaryMarkets(env, options);
-  const rows = [];
-  for (const market of polymarket.markets) {
-    const overroundPercent = marketOverroundPercent(market.prices);
-    market.outcomes.forEach((outcome, index) => {
-      const probability = market.prices[index];
-      const coefficient = decimalCoefficient(probability);
-      if (!coefficient) return;
-      rows.push({
-        id: `${market.id}-${index}`,
-        marketId: market.id,
-        seriesSlug: market.seriesSlug,
-        event: market.title || market.question,
-        market: market.question,
-        outcome,
-        probability,
-        probabilityPercent: probabilityPercent(probability),
-        decimalCoefficient: coefficient,
-        overroundPercent,
-        startIso: market.startIso,
-        endDate: market.endDate,
-        volume: market.volume,
-        url: market.url,
-      });
-    });
-  }
+  const rows = bestMoneylineMarkets(polymarket.markets);
 
   rows.sort((a, b) => {
     const aDate = new Date(a.startIso || a.endDate || "9999-12-31").getTime();
@@ -1291,7 +1400,7 @@ async function scanPolymarketOdds(env, options = {}) {
 
   return {
     rows: rows.slice(0, options.rowLimit),
-    marketsNormalized: new Set(rows.map((row) => row.marketId)).size,
+    marketsNormalized: rows.length,
     series: [...new Set(rows.map((row) => row.seriesSlug).filter(Boolean))],
     diagnostics: polymarket.diagnostics,
   };
@@ -1468,24 +1577,27 @@ async function getArbitrage(request, env) {
 
   if (mode === "polymarket-odds") {
     const normalized = await scanPolymarketOdds(env, options);
+    const coefficients = normalized.rows.flatMap((row) => [row.outcome1, row.outcomeX, row.outcome2]
+      .map((outcome) => outcome?.decimalCoefficient)
+      .filter((coefficient) => Number.isFinite(coefficient)));
     return jsonResponse({
       ok: true,
       mode,
       generatedAt: new Date().toISOString(),
-      source: "Polymarket Gamma active sports events normalized to decimal betting coefficients",
+      source: "Polymarket Gamma active moneyline markets normalized to 1/X/2 decimal odds",
       memberOnly: true,
       authType: auth.type,
       member: auth.member ? { email: auth.member.email, name: auth.member.name || "" } : null,
       options,
       summary: {
-        coefficients: normalized.rows.length,
+        coefficients: coefficients.length,
         marketsNormalized: normalized.marketsNormalized,
         series: normalized.series,
-        bestCoefficient: normalized.rows.length ? Math.max(...normalized.rows.map((row) => row.decimalCoefficient)) : null,
+        bestCoefficient: coefficients.length ? Math.max(...coefficients) : null,
       },
       rows: normalized.rows,
       polymarketDiagnostics: normalized.diagnostics,
-      note: "Polymarket prices are probabilities, not bookmaker odds. Decimal coefficients here are calculated as 1 / Polymarket price before fees, spreads, slippage and settlement-rule differences.",
+      note: "Polymarket prices are probabilities, not bookmaker odds. 1 is the first listed side, X is draw when present, and 2 is the second listed side. Decimal odds are calculated as 1 / Polymarket price before fees, spreads, slippage and settlement-rule differences.",
     });
   }
 
