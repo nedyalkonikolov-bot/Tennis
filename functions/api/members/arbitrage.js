@@ -530,6 +530,15 @@ function rawPolymarketEventDateClose(event = {}, cloudbetEvent = {}) {
   return gapHours === null || gapHours <= SAME_EVENT_MAX_HOURS;
 }
 
+function minCloudbetStartIso(events = []) {
+  const times = events
+    .map((event) => (event.startIso ? new Date(event.startIso).getTime() : NaN))
+    .filter(Number.isFinite);
+  if (!times.length) return isoDate(0) + "T00:00:00Z";
+  const min = Math.min(...times) - (1000 * 60 * 60 * 12);
+  return new Date(min).toISOString();
+}
+
 function eventStartIso(event = {}) {
   const raw = event.startTime || event.cutoffTime || event.startDate || event.start || event.scheduledStart || event.commenceTime || event.date;
   if (!raw) return "";
@@ -1044,10 +1053,12 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
 
   const normalized = [];
   const seen = new Set();
+  const startDateMin = minCloudbetStartIso(cloudbetEvents);
+  diagnostics.startDateMin = startDateMin;
   for (const slug of slugs) {
     if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
     const cloudbetForSeries = seriesToCloudbetEvents.get(slug) || [];
-    const endpoint = `/events?series_slug=${encodeURIComponent(slug)}&active=true&closed=false&limit=${encodeURIComponent(options.polymarketRawEventsPerSeries || 60)}`;
+    const endpoint = `/events?series_slug=${encodeURIComponent(slug)}&active=true&closed=false&start_date_min=${encodeURIComponent(startDateMin)}&limit=${encodeURIComponent(options.polymarketRawEventsPerSeries || 20)}`;
     diagnostics.endpointsTried.push(endpoint);
     try {
       const payload = await fetchPolymarket(env, endpoint);
@@ -1381,7 +1392,7 @@ async function getArbitrage(request, env) {
     eventLimit: clampInteger(url.searchParams.get("events") || url.searchParams.get("scan") || "80", 80, 1, 250),
     polymarketLimit: clampInteger(url.searchParams.get("polymarket") || env.POLYMARKET_ARB_MARKET_LIMIT || "500", 500, 25, 1000),
     polymarketSeriesLimit: clampInteger(url.searchParams.get("poly_series") || env.POLYMARKET_ARB_SERIES_LIMIT || "10", 10, 1, 20),
-    polymarketRawEventsPerSeries: clampInteger(url.searchParams.get("poly_raw_events_per_series") || env.POLYMARKET_ARB_RAW_EVENTS_PER_SERIES || "60", 60, 5, 200),
+    polymarketRawEventsPerSeries: clampInteger(url.searchParams.get("poly_raw_events_per_series") || env.POLYMARKET_ARB_RAW_EVENTS_PER_SERIES || "20", 20, 5, 80),
     polymarketEventsPerSeries: clampInteger(url.searchParams.get("poly_events_per_series") || env.POLYMARKET_ARB_EVENTS_PER_SERIES || "6", 6, 1, 20),
     polymarketEventLimit: clampInteger(url.searchParams.get("poly_events") || env.POLYMARKET_ARB_EVENT_LIMIT || "30", 30, 1, 80),
     polyBuffer: clampNumber(url.searchParams.get("poly_buffer") || env.POLYMARKET_PRICE_BUFFER || "0.01", 0.01, 0, 0.1),
