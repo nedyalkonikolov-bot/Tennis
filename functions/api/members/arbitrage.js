@@ -508,11 +508,10 @@ function cloudbetEventSeriesSlugs(event = {}) {
   return [...slugs];
 }
 
-function rawPolymarketEventMatchesCloudbet(event = {}, cloudbetEvent = {}, teams = []) {
+function rawPolymarketEventMatchesCloudbet(event = {}, cloudbetEvent = {}) {
   const text = [event.title, event.name, event.slug, event.ticker].filter(Boolean).join(" ");
-  const pseudoMarket = { text, outcomes: [], teams };
-  const homeScore = bestEntityMatchScore(pseudoMarket, cloudbetEvent.home);
-  const awayScore = bestEntityMatchScore(pseudoMarket, cloudbetEvent.away);
+  const homeScore = entityMatchScore(text, cloudbetEvent.home);
+  const awayScore = entityMatchScore(text, cloudbetEvent.away);
   return homeScore.matched && awayScore.matched;
 }
 
@@ -946,6 +945,7 @@ async function hydratePolymarketEventMarkets(env, event, diagnostics) {
 async function getPolymarketBinaryMarkets(env, options = {}) {
   const diagnostics = {
     hasPolymarketApiKey: Boolean(env.POLYMARKET_API_KEY),
+    strategy: "events-pagination",
     endpointsTried: [],
     seriesScanned: 0,
     eventsDiscovered: 0,
@@ -965,30 +965,32 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
   const sports = new Set();
   const marketSports = new Set();
   const competitionHints = new Set();
+  const startDateMin = `${isoDate(-1)}T00:00:00Z`;
+  diagnostics.startDateMin = startDateMin;
 
   for (const slug of slugs) {
-    if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
-    const endpoint = `/series?slug=${encodeURIComponent(slug)}`;
+    if (diagnostics.eventsHydrated >= options.polymarketEventLimit || normalized.length >= options.polymarketLimit) break;
+    const endpoint = `/events?series_slug=${encodeURIComponent(slug)}&active=true&start_date_min=${encodeURIComponent(startDateMin)}&limit=${encodeURIComponent(options.polymarketRawEventsPerSeries || 20)}`;
     diagnostics.endpointsTried.push(endpoint);
     try {
       const payload = await fetchPolymarket(env, endpoint);
-      const series = polymarketList(payload);
-      diagnostics.seriesScanned += series.length;
-      for (const item of series) {
-        const seriesSlug = item.slug || slug;
-        const events = (Array.isArray(item.events) ? item.events : [])
-          .filter(isOpenPolymarketSportsEvent)
-          .slice(0, options.polymarketEventsPerSeries);
-        diagnostics.eventsDiscovered += events.length;
-        if (events.length) {
-          diagnostics.sportSeries.push({ slug: seriesSlug, title: item.title || seriesSlug, events: events.length });
-          sports.add(seriesSlug);
-        }
-        for (const event of events) {
-          if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
-          diagnostics.eventsHydrated += 1;
-          const pairs = await hydratePolymarketEventMarkets(env, { ...event, seriesSlug }, diagnostics);
-          for (const { market, event: marketEvent } of pairs) {
+      diagnostics.seriesScanned += 1;
+      const seriesSlug = slug;
+      const events = polymarketList(payload)
+        .filter(isOpenPolymarketSportsEvent)
+        .slice(0, options.polymarketEventsPerSeries);
+      diagnostics.eventsDiscovered += events.length;
+      if (events.length) {
+        diagnostics.sportSeries.push({ slug: seriesSlug, title: seriesSlug, events: events.length });
+        sports.add(seriesSlug);
+      }
+      for (const event of events) {
+        if (diagnostics.eventsHydrated >= options.polymarketEventLimit || normalized.length >= options.polymarketLimit) break;
+        diagnostics.eventsHydrated += 1;
+        const pairs = Array.isArray(event.markets) && event.markets.length
+          ? event.markets.map((market) => ({ market, event }))
+          : await hydratePolymarketEventMarkets(env, { ...event, seriesSlug }, diagnostics);
+        for (const { market, event: marketEvent } of pairs) {
           diagnostics.marketsScanned += 1;
           const candidate = normalizePolymarketMarket(market, { ...event, ...marketEvent, seriesSlug });
           if (!candidate || seen.has(candidate.id)) continue;
@@ -996,7 +998,7 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
           normalized.push(candidate);
           marketSports.add(candidate.seriesSlug);
           polymarketCompetitionHints(candidate).forEach((hint) => competitionHints.add(hint));
-          }
+          if (normalized.length >= options.polymarketLimit) break;
         }
       }
     } catch (error) {
@@ -1058,7 +1060,7 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
   for (const slug of slugs) {
     if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
     const cloudbetForSeries = seriesToCloudbetEvents.get(slug) || [];
-    const endpoint = `/events?series_slug=${encodeURIComponent(slug)}&active=true&closed=false&start_date_min=${encodeURIComponent(startDateMin)}&limit=${encodeURIComponent(options.polymarketRawEventsPerSeries || 20)}`;
+    const endpoint = `/events?series_slug=${encodeURIComponent(slug)}&active=true&start_date_min=${encodeURIComponent(startDateMin)}&limit=${encodeURIComponent(options.polymarketRawEventsPerSeries || 20)}`;
     diagnostics.endpointsTried.push(endpoint);
     try {
       const payload = await fetchPolymarket(env, endpoint);
@@ -1067,7 +1069,7 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
       const teams = teamsByLeague.get(seriesSlug) || [];
       const events = polymarketList(payload).filter(isOpenPolymarketSportsEvent);
       const relevantEvents = events
-        .filter((event) => cloudbetForSeries.some((cloudbetEvent) => rawPolymarketEventDateClose(event, cloudbetEvent) && rawPolymarketEventMatchesCloudbet(event, cloudbetEvent, teams)))
+        .filter((event) => cloudbetForSeries.some((cloudbetEvent) => rawPolymarketEventDateClose(event, cloudbetEvent) && rawPolymarketEventMatchesCloudbet(event, cloudbetEvent)))
         .slice(0, options.polymarketEventsPerSeries);
       diagnostics.eventsDiscovered += events.length;
       diagnostics.eventsRelevant += relevantEvents.length;
