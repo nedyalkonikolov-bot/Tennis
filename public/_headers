@@ -27,6 +27,14 @@
   X-Robots-Tag: noindex, nofollow, noarchive
   Cache-Control: private, no-store
 
+/members/polymarket-odds/*
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: private, no-store
+
+/members/polymarket-odds
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: private, no-store
+
 /register/*
   X-Robots-Tag: noindex, nofollow, noarchive
   Cache-Control: private, no-store

@@ -956,10 +956,12 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
     sportSeries: [],
     errors: [],
   };
-  const seriesSlugs = String(env.POLYMARKET_SPORT_SERIES || "")
-    .split(",")
-    .map((slug) => slug.trim())
-    .filter(Boolean);
+  const seriesSlugs = Array.isArray(options.polymarketSeries) && options.polymarketSeries.length
+    ? options.polymarketSeries
+    : String(env.POLYMARKET_SPORT_SERIES || "")
+      .split(",")
+      .map((slug) => slug.trim())
+      .filter(Boolean);
   const slugs = (seriesSlugs.length ? seriesSlugs : POLYMARKET_SPORT_SERIES).slice(0, options.polymarketSeriesLimit);
   const normalized = [];
   const seen = new Set();
@@ -1239,6 +1241,62 @@ function buildPolymarketCoverage(polymarketMarkets = [], cloudbetEvents = []) {
   });
 }
 
+function decimalCoefficient(probability) {
+  if (!probability || probability <= 0 || probability >= 1) return null;
+  return Math.round((1 / probability) * 100) / 100;
+}
+
+function probabilityPercent(probability) {
+  return Math.round(probability * 10000) / 100;
+}
+
+function marketOverroundPercent(prices = []) {
+  const total = prices.reduce((sum, price) => sum + Number(price || 0), 0);
+  return Math.round((total - 1) * 10000) / 100;
+}
+
+async function scanPolymarketOdds(env, options = {}) {
+  const polymarket = await getPolymarketBinaryMarkets(env, options);
+  const rows = [];
+  for (const market of polymarket.markets) {
+    const overroundPercent = marketOverroundPercent(market.prices);
+    market.outcomes.forEach((outcome, index) => {
+      const probability = market.prices[index];
+      const coefficient = decimalCoefficient(probability);
+      if (!coefficient) return;
+      rows.push({
+        id: `${market.id}-${index}`,
+        marketId: market.id,
+        seriesSlug: market.seriesSlug,
+        event: market.title || market.question,
+        market: market.question,
+        outcome,
+        probability,
+        probabilityPercent: probabilityPercent(probability),
+        decimalCoefficient: coefficient,
+        overroundPercent,
+        startIso: market.startIso,
+        endDate: market.endDate,
+        volume: market.volume,
+        url: market.url,
+      });
+    });
+  }
+
+  rows.sort((a, b) => {
+    const aDate = new Date(a.startIso || a.endDate || "9999-12-31").getTime();
+    const bDate = new Date(b.startIso || b.endDate || "9999-12-31").getTime();
+    return aDate - bDate || (b.volume || 0) - (a.volume || 0) || a.event.localeCompare(b.event);
+  });
+
+  return {
+    rows: rows.slice(0, options.rowLimit),
+    marketsNormalized: new Set(rows.map((row) => row.marketId)).size,
+    series: [...new Set(rows.map((row) => row.seriesSlug).filter(Boolean))],
+    diagnostics: polymarket.diagnostics,
+  };
+}
+
 function buildCrossVenueCandidate(cloudbetEvent, polyMarket, sides, cloudbetSide, bankroll, polyBuffer, cloudbetAffiliateUrl) {
   const opposite = cloudbetSide === "home" ? "away" : "home";
   const cloudbetPrice = cloudbetEvent.odds[cloudbetSide];
@@ -1382,7 +1440,12 @@ async function getArbitrage(request, env) {
   if (!auth) return jsonResponse({ ok: false, error: "Members only" }, 401);
 
   const url = new URL(request.url);
-  const mode = url.searchParams.get("mode") === "cross-sport" ? "cross-sport" : "tennis";
+  const requestedMode = url.searchParams.get("mode");
+  const mode = ["cross-sport", "polymarket-odds"].includes(requestedMode) ? requestedMode : "tennis";
+  const requestedSeries = String(url.searchParams.get("series") || "")
+    .split(",")
+    .map((slug) => slug.trim().toLowerCase())
+    .filter(Boolean);
   const options = {
     dateStart: url.searchParams.get("date_start") || isoDate(0),
     dateStop: url.searchParams.get("date_stop") || isoDate(7),
@@ -1398,8 +1461,33 @@ async function getArbitrage(request, env) {
     polymarketRawEventsPerSeries: clampInteger(url.searchParams.get("poly_raw_events_per_series") || env.POLYMARKET_ARB_RAW_EVENTS_PER_SERIES || "8", 8, 5, 20),
     polymarketEventsPerSeries: clampInteger(url.searchParams.get("poly_events_per_series") || env.POLYMARKET_ARB_EVENTS_PER_SERIES || "5", 5, 1, 10),
     polymarketEventLimit: clampInteger(url.searchParams.get("poly_events") || env.POLYMARKET_ARB_EVENT_LIMIT || "12", 12, 1, 30),
+    polymarketSeries: requestedSeries,
+    rowLimit: clampInteger(url.searchParams.get("limit") || "160", 160, 10, 500),
     polyBuffer: clampNumber(url.searchParams.get("poly_buffer") || env.POLYMARKET_PRICE_BUFFER || "0.01", 0.01, 0, 0.1),
   };
+
+  if (mode === "polymarket-odds") {
+    const normalized = await scanPolymarketOdds(env, options);
+    return jsonResponse({
+      ok: true,
+      mode,
+      generatedAt: new Date().toISOString(),
+      source: "Polymarket Gamma active sports events normalized to decimal betting coefficients",
+      memberOnly: true,
+      authType: auth.type,
+      member: auth.member ? { email: auth.member.email, name: auth.member.name || "" } : null,
+      options,
+      summary: {
+        coefficients: normalized.rows.length,
+        marketsNormalized: normalized.marketsNormalized,
+        series: normalized.series,
+        bestCoefficient: normalized.rows.length ? Math.max(...normalized.rows.map((row) => row.decimalCoefficient)) : null,
+      },
+      rows: normalized.rows,
+      polymarketDiagnostics: normalized.diagnostics,
+      note: "Polymarket prices are probabilities, not bookmaker odds. Decimal coefficients here are calculated as 1 / Polymarket price before fees, spreads, slippage and settlement-rule differences.",
+    });
+  }
 
   if (mode === "cross-sport") {
     if (!env.CLOUDBET_API_KEY) return jsonResponse({ ok: false, error: "Missing CLOUDBET_API_KEY" }, 500);

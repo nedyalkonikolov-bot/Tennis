@@ -59,6 +59,7 @@ const navPages = [
   { id: "news", label: "News & Articles", path: "/tennis-news/", icon: Newspaper },
   { id: "betting", label: "Betting Sites", path: "/betting-sites/", icon: Landmark },
   { id: "arbitrage", label: "Arbitrage", path: "/tennis-arbitrage/", icon: Lock },
+  { id: "polymarketOdds", label: "Polymarket Odds", path: "/members/polymarket-odds/", icon: BarChart3 },
 ];
 
 const pageMeta = {
@@ -101,6 +102,11 @@ const pageMeta = {
     title: "Members Tennis Arbitrage Scanner | TennisTipz",
     description: "Private ATP and WTA tennis arbitrage scanner using API-Tennis bookmaker odds, implied probability, Cloudbet markets, and stake split research.",
     canonical: "/members/arbitrage/",
+  },
+  polymarketOdds: {
+    title: "Polymarket Odds Converter | Sports Event Coefficients",
+    description: "Private TennisTipz tool that normalizes active Polymarket sports event probabilities into decimal betting-style coefficients for research.",
+    canonical: "/members/polymarket-odds/",
   },
   register: {
     title: "Register for TennisTipz Members | Arbitrage Access",
@@ -226,6 +232,7 @@ function getRoute(pathname) {
   if (cleanPath === "/players/wta/") return { id: "stats", tour: "WTA" };
   if (cleanPath === "/tennis-arbitrage/") return { id: "arbitrage" };
   if (cleanPath === "/members/arbitrage/") return { id: "memberArbitrage" };
+  if (cleanPath === "/members/polymarket-odds/") return { id: "polymarketOdds" };
   if (cleanPath === "/register/") return { id: "register" };
   if (cleanPath === "/tennis-betting-tips/") return { id: "tips", path: cleanPath };
   if (["/tennis-betting/", "/crypto-tennis-betting/", "/cloudbet-tennis-betting/", "/best-crypto-tennis-betting-sites/", "/best-tennis-betting-sites/", "/betting-sites/"].includes(cleanPath)) return { id: "betting", path: cleanPath };
@@ -319,7 +326,7 @@ function updateDocumentSeo(route, dbData) {
   const ogType = ["match-detail", "player-detail", "news", "tips", "betting", "arbitrage"].includes(route.id) ? "article" : "website";
   document.title = meta.title;
   setMetaTag('meta[name="description"]', "name", meta.description);
-  setMetaTag('meta[name="robots"]', "name", ["memberArbitrage", "register"].includes(route.id) ? "noindex, nofollow, noarchive" : "index, follow, max-image-preview:large");
+  setMetaTag('meta[name="robots"]', "name", ["memberArbitrage", "polymarketOdds", "register"].includes(route.id) ? "noindex, nofollow, noarchive" : "index, follow, max-image-preview:large");
   setMetaTag('meta[property="og:site_name"]', "property", "TennisTipz");
   setMetaTag('meta[property="og:type"]', "property", ogType);
   setMetaTag('meta[property="og:title"]', "property", meta.title);
@@ -906,18 +913,25 @@ function ArbitrageSeoPage({ onNavigate }) {
   </section>;
 }
 
-function MembersArbitragePage() {
+function MembersArbitragePage({ initialMode = "cross-sport" }) {
   const [token, setToken] = useState(getStoredMemberToken);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [member, setMember] = useState(null);
-  const [scannerMode, setScannerMode] = useState("cross-sport");
-  const [scan, setScan] = useState(40);
+  const [scannerMode, setScannerMode] = useState(initialMode);
+  const [scan, setScan] = useState(initialMode === "polymarket-odds" ? 8 : 40);
   const [bankroll, setBankroll] = useState(100);
+  const [polymarketSeries, setPolymarketSeries] = useState("atp,wta,mlb,wnba,nfl,nba");
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    setScannerMode(initialMode);
+    setScan(initialMode === "polymarket-odds" ? 8 : 40);
+    setPayload(null);
+  }, [initialMode]);
 
   async function submitLogin(event) {
     event.preventDefault();
@@ -956,7 +970,15 @@ function MembersArbitragePage() {
     setError("");
     try {
       storeMemberToken(token);
-      const response = await fetch(`/api/members/arbitrage?mode=${encodeURIComponent(scannerMode)}&scan=${encodeURIComponent(scan)}&bankroll=${encodeURIComponent(bankroll)}`, {
+      const params = new URLSearchParams({ mode: scannerMode, scan: String(scan), bankroll: String(bankroll) });
+      if (scannerMode === "polymarket-odds") {
+        params.set("series", polymarketSeries);
+        params.set("poly_raw_events_per_series", String(scan));
+        params.set("poly_events_per_series", String(Math.min(Number(scan) || 8, 10)));
+        params.set("poly_events", String(Math.max((Number(scan) || 8) * 4, 12)));
+        params.set("limit", "180");
+      }
+      const response = await fetch(`/api/members/arbitrage?${params.toString()}`, {
         headers: { "x-member-token": token },
       });
       const data = await response.json().catch(() => ({}));
@@ -970,20 +992,32 @@ function MembersArbitragePage() {
     }
   }
 
-  const rows = payload?.opportunities || [];
+  const activeMode = payload?.mode || scannerMode;
+  const isCrossSport = activeMode === "cross-sport";
+  const isPolymarketOdds = activeMode === "polymarket-odds";
+  const rows = isPolymarketOdds ? (payload?.rows || []) : (payload?.opportunities || []);
   const summary = payload?.summary || {};
-  const isCrossSport = (payload?.mode || scannerMode) === "cross-sport";
+  const headerTitle = initialMode === "polymarket-odds" ? "Polymarket Odds Converter" : "Arbitrage Scanner";
+  const headerText = initialMode === "polymarket-odds"
+    ? "Normalize active Polymarket sports event probabilities into decimal betting-style coefficients. Use it to compare prediction-market prices with sportsbook odds before any arbitrage research."
+    : "Scan tennis bookmaker odds or compare Cloudbet all-sport winner markets against Polymarket binary markets. Cross-venue rows only appear when the event names and sides can be matched safely.";
+  const tableGridClass = isPolymarketOdds
+    ? "hidden grid-cols-[1.15fr_1.25fr_0.65fr_0.6fr_0.55fr_0.6fr] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid"
+    : "hidden grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid";
+  const rowGridClass = isPolymarketOdds
+    ? "grid gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 md:grid-cols-[1.15fr_1.25fr_0.65fr_0.6fr_0.55fr_0.6fr] md:items-center"
+    : "";
 
   return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
     <div className="grid gap-8 md:grid-cols-[1.1fr_0.9fr] md:items-start">
       <div>
         <p className="inline-flex items-center gap-2 text-sm font-semibold uppercase text-lime-300"><Lock size={16} /> Members only</p>
-        <h1 className="mt-2 text-4xl font-black md:text-5xl">Arbitrage Scanner</h1>
-        <p className="mt-4 max-w-3xl leading-8 text-slate-400">Scan tennis bookmaker odds or compare Cloudbet all-sport winner markets against Polymarket binary markets. Cross-venue rows only appear when the event names and sides can be matched safely.</p>
+        <h1 className="mt-2 text-4xl font-black md:text-5xl">{headerTitle}</h1>
+        <p className="mt-4 max-w-3xl leading-8 text-slate-400">{headerText}</p>
       </div>
       {!token ? <form onSubmit={submitLogin} className="border border-white/10 bg-white/[0.04] p-5">
         <h2 className="text-2xl font-black">Member login</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-400">Sign in with your TennisTipz email and password to unlock the private arbitrage scanner.</p>
+        <p className="mt-2 text-sm leading-6 text-slate-400">Sign in with your TennisTipz email and password to unlock the private odds tools.</p>
         <label className="mt-4 block text-sm font-bold text-slate-300" htmlFor="member-email">Email</label>
         <input id="member-email" type="email" required value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="you@example.com" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" />
         <label className="mt-4 block text-sm font-bold text-slate-300" htmlFor="member-password">Password</label>
@@ -1000,32 +1034,39 @@ function MembersArbitragePage() {
           <button type="button" onClick={logout} className="rounded-lg border border-white/15 px-3 py-2 text-sm font-bold text-slate-300 hover:bg-white/10">Log out</button>
         </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          <label className="block text-sm font-bold text-slate-300" htmlFor="scanner-mode">Scanner mode<select id="scanner-mode" value={scannerMode} onChange={(event) => { setScannerMode(event.target.value); setPayload(null); }} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300"><option value="cross-sport">Cloudbet vs Polymarket</option><option value="tennis">Tennis bookmaker odds</option></select></label>
-          <label className="block text-sm font-bold text-slate-300" htmlFor="scan-limit">{scannerMode === "cross-sport" ? "Events to scan" : "Matches to scan"}<input id="scan-limit" type="number" min="1" max={scannerMode === "cross-sport" ? "250" : "80"} value={scan} onChange={(event) => setScan(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
-          <label className="block text-sm font-bold text-slate-300" htmlFor="bankroll">Stake plan bankroll<input id="bankroll" type="number" min="1" max="100000" value={bankroll} onChange={(event) => setBankroll(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
+          <label className="block text-sm font-bold text-slate-300" htmlFor="scanner-mode">Scanner mode<select id="scanner-mode" value={scannerMode} onChange={(event) => { const nextMode = event.target.value; setScannerMode(nextMode); setScan(nextMode === "polymarket-odds" ? 8 : 40); setPayload(null); }} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300"><option value="cross-sport">Cloudbet vs Polymarket</option><option value="polymarket-odds">Polymarket odds converter</option><option value="tennis">Tennis bookmaker odds</option></select></label>
+          <label className="block text-sm font-bold text-slate-300" htmlFor="scan-limit">{scannerMode === "polymarket-odds" ? "Events per series" : scannerMode === "cross-sport" ? "Events to scan" : "Matches to scan"}<input id="scan-limit" type="number" min="1" max={scannerMode === "polymarket-odds" ? "10" : scannerMode === "cross-sport" ? "250" : "80"} value={scan} onChange={(event) => setScan(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>
+          {scannerMode === "polymarket-odds" ? <label className="block text-sm font-bold text-slate-300" htmlFor="polymarket-series">Series slugs<input id="polymarket-series" value={polymarketSeries} onChange={(event) => setPolymarketSeries(event.target.value)} placeholder="atp,wta,mlb,wnba" className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 placeholder:text-slate-600 focus:ring-lime-300" /></label> : <label className="block text-sm font-bold text-slate-300" htmlFor="bankroll">Stake plan bankroll<input id="bankroll" type="number" min="1" max="100000" value={bankroll} onChange={(event) => setBankroll(event.target.value)} className="mt-2 w-full rounded-xl bg-slate-950 px-4 py-3 text-white outline-none ring-1 ring-white/15 focus:ring-lime-300" /></label>}
         </div>
-        <button type="submit" disabled={loading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw size={17} className={loading ? "animate-spin" : ""} /> {loading ? "Scanning odds" : isCrossSport ? "Scan Cloudbet vs Polymarket" : "Scan tennis odds"}</button>
+        <button type="submit" disabled={loading} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-lime-400 px-5 py-3 font-bold text-slate-950 hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw size={17} className={loading ? "animate-spin" : ""} /> {loading ? "Scanning odds" : scannerMode === "polymarket-odds" ? "Normalize Polymarket odds" : isCrossSport ? "Scan Cloudbet vs Polymarket" : "Scan tennis odds"}</button>
         {error && <p className="mt-4 rounded-xl border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</p>}
       </form>}
     </div>
 
     <div className="mt-8 grid gap-4 md:grid-cols-5">
-      <Metric label={isCrossSport ? "Cloudbet events" : "Fixtures scanned"} value={(isCrossSport ? summary.cloudbetEventsScanned : summary.fixturesScanned) ?? "Locked"} />
-      <Metric label={isCrossSport ? "Polymarket markets" : "Priced matches"} value={(isCrossSport ? summary.polymarketMarketsScanned : summary.pricedMatches) ?? "Locked"} />
-      <Metric label="Arbitrage found" value={summary.arbitrageCount ?? "Locked"} />
-      <Metric label={isCrossSport ? "Matched markets" : "Cloudbet matches"} value={(isCrossSport ? summary.matchedMarkets : summary.cloudbetMatches) ?? "Locked"} />
-      <Metric label="Best edge" value={summary.bestEdgePercent === null || summary.bestEdgePercent === undefined ? "Locked" : `${summary.bestEdgePercent}%`} />
+      <Metric label={isPolymarketOdds ? "Coefficients" : isCrossSport ? "Cloudbet events" : "Fixtures scanned"} value={(isPolymarketOdds ? summary.coefficients : isCrossSport ? summary.cloudbetEventsScanned : summary.fixturesScanned) ?? "Locked"} />
+      <Metric label={isPolymarketOdds ? "Markets normalized" : isCrossSport ? "Polymarket markets" : "Priced matches"} value={(isPolymarketOdds ? summary.marketsNormalized : isCrossSport ? summary.polymarketMarketsScanned : summary.pricedMatches) ?? "Locked"} />
+      <Metric label={isPolymarketOdds ? "Series" : "Arbitrage found"} value={isPolymarketOdds ? (summary.series?.join(", ") || "Locked") : (summary.arbitrageCount ?? "Locked")} />
+      <Metric label={isPolymarketOdds ? "Events discovered" : isCrossSport ? "Matched markets" : "Cloudbet matches"} value={isPolymarketOdds ? (payload?.polymarketDiagnostics?.eventsDiscovered ?? "Locked") : ((isCrossSport ? summary.matchedMarkets : summary.cloudbetMatches) ?? "Locked")} />
+      <Metric label={isPolymarketOdds ? "Top coefficient" : "Best edge"} value={isPolymarketOdds ? (summary.bestCoefficient ?? "Locked") : (summary.bestEdgePercent === null || summary.bestEdgePercent === undefined ? "Locked" : `${summary.bestEdgePercent}%`)} />
     </div>
 
     <div className="mt-8 border border-amber-300/20 bg-amber-300/[0.06] p-5 text-sm leading-7 text-amber-100">
-      Arbitrage shown here is theoretical. Odds can move, limits can apply, markets can be voided, and bookmaker terms differ. Recheck every price manually before using any stake plan.
+      {isPolymarketOdds ? "Polymarket coefficients are calculated from prediction-market prices. They are not sportsbook offers, and fees, spreads, liquidity and settlement rules can change the real trading value." : "Arbitrage shown here is theoretical. Odds can move, limits can apply, markets can be voided, and bookmaker terms differ. Recheck every price manually before using any stake plan."}
     </div>
 
     <div className="mt-8 overflow-hidden border border-white/10">
-      <div className="hidden grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] gap-3 bg-slate-900 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid">
-        {isCrossSport ? <><span>Event</span><span>Cloudbet</span><span>Polymarket</span><span>Links</span><span>Edge</span><span>Stake split</span></> : <><span>Match</span><span>Best home</span><span>Best away</span><span>Cloudbet</span><span>Edge</span><span>Stake split</span></>}
+      <div className={tableGridClass}>
+        {isPolymarketOdds ? <><span>Event</span><span>Market</span><span>Outcome</span><span>Probability</span><span>Coefficient</span><span>Link</span></> : isCrossSport ? <><span>Event</span><span>Cloudbet</span><span>Polymarket</span><span>Links</span><span>Edge</span><span>Stake split</span></> : <><span>Match</span><span>Best home</span><span>Best away</span><span>Cloudbet</span><span>Edge</span><span>Stake split</span></>}
       </div>
-      {isCrossSport ? rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
+      {isPolymarketOdds ? rows.map((row) => <article key={row.id} className={rowGridClass}>
+        <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.seriesSlug || "sports"}</span><span className="rounded-full bg-lime-400/10 px-2 py-1 text-xs font-bold text-lime-300">Decimal odds</span></div><h2 className="mt-2 text-lg font-black">{row.event}</h2><p className="mt-1 text-sm text-slate-500">{row.startIso ? formatUpdatedAt(row.startIso) : row.endDate ? `Ends ${formatUpdatedAt(row.endDate)}` : "Date unavailable"}</p></div>
+        <div><p className="text-sm font-bold text-slate-300">{row.market}</p><p className="mt-2 text-xs text-slate-500">Volume {Math.round(Number(row.volume || 0)).toLocaleString()} · overround {row.overroundPercent}%</p></div>
+        <Metric label="Outcome" value={row.outcome} helper="Polymarket side" />
+        <Metric label="Implied probability" value={`${row.probabilityPercent}%`} helper={`Raw ${row.probability}`} />
+        <Metric label="Coefficient" value={row.decimalCoefficient} helper="1 / price" />
+        <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">Market</p><a href={row.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10">Open Polymarket <ExternalLink size={13} /></a></div>
+      </article>) : isCrossSport ? rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
         <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.sport}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${row.arbitrage ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300"}`}>{row.arbitrage ? "Cross-venue arb" : "Watchlist"}</span></div><h2 className="mt-2 text-lg font-black">{row.match}</h2><p className="mt-1 text-sm text-slate-500">{row.competition}{row.startIso ? ` - ${formatUpdatedAt(row.startIso)}` : ""}</p><p className="mt-2 text-xs text-slate-500">{row.polymarketQuestion}</p></div>
         <Metric label="Cloudbet pick" value={row.cloudbetPick} helper={`Odds ${row.cloudbetOdds}`} />
         <Metric label="Polymarket hedge" value={row.polymarketPick} helper={`Buy ${row.polymarketPrice}${row.polymarketRawPrice !== row.polymarketPrice ? ` incl. buffer from ${row.polymarketRawPrice}` : ""}`} />
@@ -1047,8 +1088,13 @@ function MembersArbitragePage() {
         <Metric label="Edge" value={`${row.edgePercent}%`} helper={`Implied ${row.impliedTotal}`} />
         <Metric label={`${row.stakePlan.bankroll} stake`} value={`${row.stakePlan.homeStake}/${row.stakePlan.awayStake}`} helper={`Profit ${row.stakePlan.expectedProfit}`} />
       </article>)}
-      {!rows.length && <div className="p-8 text-slate-400">{token ? isCrossSport ? "Run the scanner to compare Cloudbet events with Polymarket binary markets. If no rows appear, no events could be matched safely across both platforms." : "Run the scanner to load current ATP/WTA bookmaker odds. If no rows appear, API-Tennis did not return complete Home/Away bookmaker odds for the scanned matches." : "Log in as a member to scan arbitrage opportunities."}</div>}
+      {!rows.length && <div className="p-8 text-slate-400">{token ? isPolymarketOdds ? "Run the converter to normalize active Polymarket sports prices into decimal coefficients. If no rows appear, the scanned events did not return usable active binary prices." : isCrossSport ? "Run the scanner to compare Cloudbet events with Polymarket binary markets. If no rows appear, no events could be matched safely across both platforms." : "Run the scanner to load current ATP/WTA bookmaker odds. If no rows appear, API-Tennis did not return complete Home/Away bookmaker odds for the scanned matches." : "Log in as a member to use the private odds tools."}</div>}
     </div>
+
+    {isPolymarketOdds && payload?.polymarketDiagnostics && <details className="mt-8 border border-white/10 bg-white/[0.04] p-5">
+      <summary className="cursor-pointer font-bold text-slate-300">Show Polymarket diagnostics</summary>
+      <pre className="mt-4 overflow-auto bg-slate-950 p-3 text-xs text-slate-500">{JSON.stringify(payload.polymarketDiagnostics || {}, null, 2)}</pre>
+    </details>}
 
     {payload?.checked?.length > 0 && <details className="mt-8 border border-white/10 bg-white/[0.04] p-5">
       <summary className="cursor-pointer font-bold text-slate-300">Show scan diagnostics</summary>
@@ -1201,5 +1247,5 @@ export default function TennisTipzApp() {
   useEffect(() => { updateDocumentSeo(route, dbData); updateStructuredData(route, liveData, dbData); }, [route, liveData, dbData]);
   useEffect(() => { const onPopState = () => setRoute(getRoute(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
 
-  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} articles={dbData.articles} />}{route.id === "betting" && <BettingHubPage />}{route.id === "arbitrage" && <ArbitrageSeoPage onNavigate={navigateTo} />}{route.id === "register" && <RegisterPage onNavigate={navigateTo} />}{route.id === "memberArbitrage" && <MembersArbitragePage />}</main><ResponsibleFooter /></div>;
+  return <div className="min-h-screen bg-slate-950 text-white"><Header route={route} onNavigate={navigateTo} /><DataStatus liveData={liveData} loading={loading} error={error} onRefresh={loadLiveData} /><main>{route.id === "home" && <HomePage onNavigate={navigateTo} liveData={liveData} dbData={dbData} />}{route.id === "predictions" && <PredictionsPage route={route} matches={liveData.matches} dbData={dbData} betUrl={liveData.betUrl} onNavigate={navigateTo} />}{route.id === "tips" && <TipsPage onNavigate={navigateTo} />}{route.id === "stats" && <StatsPage route={route} livePlayers={liveData.players} dbData={dbData} onNavigate={navigateTo} />}{route.id === "player-detail" && <PlayerDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "match-detail" && <MatchDetailPage route={route} dbData={dbData} onNavigate={navigateTo} />}{route.id === "news" && <NewsPage news={liveData.news} articles={dbData.articles} />}{route.id === "betting" && <BettingHubPage />}{route.id === "arbitrage" && <ArbitrageSeoPage onNavigate={navigateTo} />}{route.id === "register" && <RegisterPage onNavigate={navigateTo} />}{route.id === "memberArbitrage" && <MembersArbitragePage />}{route.id === "polymarketOdds" && <MembersArbitragePage initialMode="polymarket-odds" />}</main><ResponsibleFooter /></div>;
 }
