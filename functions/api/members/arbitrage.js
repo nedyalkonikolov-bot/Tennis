@@ -41,7 +41,7 @@ const POLYMARKET_COMPETITION_HINTS = {
   mls: ["mls"],
   "champions-league": ["champions league"],
 };
-const BAD_BINARY_MARKET_RE = /\b(total|over|under|spread|handicap|correct score|set betting|game betting|quarter|period|half|first five|first 5|5 innings?|inning|tied?|draw|method|round|map|race to|player props?|team total|points|goals)\b/i;
+const BAD_BINARY_MARKET_RE = /\b(completed match|total|over|under|spread|handicap|correct score|set betting|set winner|set \d+|set\s*\d+\s*winner|first set|second set|total sets?|game betting|quarter|period|half|first five|first 5|5 innings?|inning|tied?|draw|method|round|map|race to|player props?|team total|points|goals)\b/i;
 const GOOD_BINARY_MARKET_RE = /\b(winner|moneyline|match odds|match result|head to head|h2h|to win)\b/i;
 const SAME_EVENT_MAX_HOURS = 48;
 const SPORTS_ALIAS_TOKENS = {
