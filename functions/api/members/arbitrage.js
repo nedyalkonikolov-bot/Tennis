@@ -1246,6 +1246,57 @@ function polymarketCloudbetMatch(polyMarket = {}, cloudbetEvent = {}) {
   return { ...sides, dateGapHours: analysis.dateGapHours, homeScore: analysis.homeScore.score, awayScore: analysis.awayScore.score };
 }
 
+function candidateTokensForEntity(entity = "") {
+  const important = importantTokens(entity).filter((token) => token.length >= 3);
+  const fallback = normalizedTokens(entity).filter((token) => token.length >= 2 && !GENERIC_ENTITY_TOKENS.has(token));
+  return [...new Set(important.length ? important : fallback)];
+}
+
+function polymarketSearchText(polyMarket = {}) {
+  const teamText = (polyMarket.teams || []).flatMap(teamAliases).join(" ");
+  return [polyMarket.text, polyMarket.question, polyMarket.title, ...(polyMarket.outcomes || []), teamText].filter(Boolean).join(" ");
+}
+
+function buildPolymarketCandidateIndex(markets = []) {
+  const tokenToMarkets = new Map();
+  for (const market of markets) {
+    for (const token of new Set(normalizedTokens(polymarketSearchText(market)).filter((part) => part.length >= 2))) {
+      if (!tokenToMarkets.has(token)) tokenToMarkets.set(token, new Set());
+      tokenToMarkets.get(token).add(market);
+    }
+  }
+  return tokenToMarkets;
+}
+
+function unionCandidatesForTokens(index, tokens = []) {
+  const candidates = new Set();
+  for (const token of tokens) {
+    const matches = index.get(token);
+    if (!matches) continue;
+    for (const market of matches) candidates.add(market);
+  }
+  return candidates;
+}
+
+function intersectCandidateSets(left, right) {
+  const result = new Set();
+  const [small, large] = left.size <= right.size ? [left, right] : [right, left];
+  for (const item of small) {
+    if (large.has(item)) result.add(item);
+  }
+  return result;
+}
+
+function candidatePolymarketMarkets(index, cloudbetEvent = {}) {
+  const homeTokens = candidateTokensForEntity(cloudbetEvent.home);
+  const awayTokens = candidateTokensForEntity(cloudbetEvent.away);
+  if (!homeTokens.length || !awayTokens.length) return [];
+  const homeCandidates = unionCandidatesForTokens(index, homeTokens);
+  const awayCandidates = unionCandidatesForTokens(index, awayTokens);
+  if (!homeCandidates.size || !awayCandidates.size) return [];
+  return [...intersectCandidateSets(homeCandidates, awayCandidates)];
+}
+
 function buildPolymarketCoverage(polymarketMarkets = [], cloudbetEvents = []) {
   return polymarketMarkets.map((polyMarket) => {
     const candidates = [];
@@ -1526,13 +1577,17 @@ async function scanCrossSportArbitrage(env, options = {}) {
   const checked = [];
   const opportunities = [];
   let matchedMarkets = 0;
+  let candidateComparisons = 0;
   const collectCoverage = Boolean(options.includeCoverage);
   const polymarketCoverage = collectCoverage ? buildPolymarketCoverage(polymarket.markets.slice(0, 30), cloudbet.events.slice(0, 30)) : [];
+  const polymarketCandidateIndex = buildPolymarketCandidateIndex(polymarket.markets);
 
   for (const cloudbetEvent of cloudbet.events) {
     const eventMatches = [];
     const nearMatches = [];
-    for (const polyMarket of polymarket.markets) {
+    const candidateMarkets = candidatePolymarketMarkets(polymarketCandidateIndex, cloudbetEvent);
+    candidateComparisons += candidateMarkets.length;
+    for (const polyMarket of candidateMarkets) {
       const sides = polymarketCloudbetMatch(polyMarket, cloudbetEvent);
       if (!sides) {
         if (collectCoverage && nearMatches.length < 3) {
@@ -1556,6 +1611,7 @@ async function scanCrossSportArbitrage(env, options = {}) {
       sport: cloudbetEvent.sport,
       competition: cloudbetEvent.competition,
       startIso: cloudbetEvent.startIso,
+      candidateMarkets: candidateMarkets.length,
       polymarketMatches: eventMatches.slice(0, 3),
       polymarketNearMatches: collectCoverage ? nearMatches.slice(0, 3) : [],
     });
@@ -1565,6 +1621,7 @@ async function scanCrossSportArbitrage(env, options = {}) {
     cloudbetEventsScanned: cloudbet.events.length,
     polymarketMarketsScanned: polymarket.markets.length,
     matchedMarkets,
+    candidateComparisons,
     opportunities,
     checked,
     polymarketCoverage,
@@ -1694,6 +1751,7 @@ async function getArbitrage(request, env) {
       summary: {
         cloudbetEventsScanned: cross.cloudbetEventsScanned,
         polymarketMarketsScanned: cross.polymarketMarketsScanned,
+        candidateComparisons: cross.candidateComparisons,
         matchedMarkets: cross.matchedMarkets,
         polymarketMatched: cross.polymarketCoverage.filter((item) => item.matched).length,
         polymarketUnmatched: cross.polymarketCoverage.filter((item) => !item.matched).length,
