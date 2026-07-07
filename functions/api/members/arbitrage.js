@@ -1100,7 +1100,7 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
     diagnostics.errors.push(`sports metadata: ${error.message}`);
   }
   diagnostics.seriesInferred = slugs.map((slug) => ({ slug, cloudbetEvents: seriesToCloudbetEvents.get(slug)?.length || 0 }));
-  const teamsByLeague = await getPolymarketTeamsForLeagues(env, slugs, diagnostics, options);
+  const teamsByLeague = options.includeCoverage ? await getPolymarketTeamsForLeagues(env, slugs, diagnostics, options) : new Map();
 
   const normalized = [];
   const seen = new Set();
@@ -1511,7 +1511,8 @@ async function scanCrossSportArbitrage(env, options = {}) {
   const checked = [];
   const opportunities = [];
   let matchedMarkets = 0;
-  const polymarketCoverage = buildPolymarketCoverage(polymarket.markets, cloudbet.events);
+  const collectCoverage = Boolean(options.includeCoverage);
+  const polymarketCoverage = collectCoverage ? buildPolymarketCoverage(polymarket.markets.slice(0, 30), cloudbet.events.slice(0, 30)) : [];
 
   for (const cloudbetEvent of cloudbet.events) {
     const eventMatches = [];
@@ -1519,9 +1520,11 @@ async function scanCrossSportArbitrage(env, options = {}) {
     for (const polyMarket of polymarket.markets) {
       const sides = polymarketCloudbetMatch(polyMarket, cloudbetEvent);
       if (!sides) {
-        const analysis = polymarketCloudbetAnalysis(polyMarket, cloudbetEvent);
-        if (analysis.teamsMatched || (analysis.dateClose && analysis.combinedScore >= 1.2)) {
-          nearMatches.push({ question: polyMarket.question, reason: nearMatchReason(analysis), dateGapHours: analysis.dateGapHours });
+        if (collectCoverage && nearMatches.length < 3) {
+          const analysis = polymarketCloudbetAnalysis(polyMarket, cloudbetEvent);
+          if (analysis.teamsMatched || (analysis.dateClose && analysis.combinedScore >= 1.2)) {
+            nearMatches.push({ question: polyMarket.question, reason: nearMatchReason(analysis), dateGapHours: analysis.dateGapHours });
+          }
         }
         continue;
       }
@@ -1539,7 +1542,7 @@ async function scanCrossSportArbitrage(env, options = {}) {
       competition: cloudbetEvent.competition,
       startIso: cloudbetEvent.startIso,
       polymarketMatches: eventMatches.slice(0, 3),
-      polymarketNearMatches: nearMatches.slice(0, 3),
+      polymarketNearMatches: collectCoverage ? nearMatches.slice(0, 3) : [],
     });
   }
 
@@ -1626,6 +1629,7 @@ async function getArbitrage(request, env) {
     polymarketSeries: requestedSeries,
     rowLimit: clampInteger(url.searchParams.get("limit") || "160", 160, 10, 500),
     polyBuffer: clampNumber(url.searchParams.get("poly_buffer") || env.POLYMARKET_PRICE_BUFFER || "0", 0, 0, 0.1),
+    includeCoverage: url.searchParams.get("coverage") === "1",
   };
 
   if (mode === "polymarket-odds") {
