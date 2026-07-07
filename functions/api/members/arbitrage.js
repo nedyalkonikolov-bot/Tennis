@@ -191,6 +191,11 @@ function parseProbability(value) {
   return Number.isFinite(price) && price > 0.01 && price < 0.99 ? price : null;
 }
 
+function parseTradeProbability(value) {
+  const price = Number.parseFloat(value);
+  return Number.isFinite(price) && price > 0 && price < 1 ? price : null;
+}
+
 function clampNumber(value, fallback, min, max) {
   const number = Number.parseFloat(value);
   if (!Number.isFinite(number)) return fallback;
@@ -236,6 +241,10 @@ function safeJsonArray(value) {
   } catch {
     return [];
   }
+}
+
+function roundPrice(value) {
+  return Math.round(Number(value) * 10000) / 10000;
 }
 
 function normalizedTokens(value = "") {
@@ -875,6 +884,28 @@ function rawPolymarketYesNoMoneyline(rawMarket = {}, event = {}) {
   return /\b(winning|winner|moneyline|match result|draw|tie|tied)\b/i.test(text);
 }
 
+function polymarketFeeRate(rawMarket = {}) {
+  const scheduleRate = Number(rawMarket.feeSchedule?.rate);
+  if (Number.isFinite(scheduleRate) && scheduleRate >= 0 && scheduleRate < 0.2) return scheduleRate;
+  return 0;
+}
+
+function applyPolymarketBuyFee(price, rawMarket = {}) {
+  const parsed = parseTradeProbability(price);
+  if (!parsed) return null;
+  const withFee = parsed * (1 + polymarketFeeRate(rawMarket));
+  return roundPrice(Math.min(0.99, withFee));
+}
+
+function polymarketBuyPrices(rawMarket = {}, referencePrices = []) {
+  const bestAsk = parseTradeProbability(rawMarket.bestAsk);
+  const bestBid = parseTradeProbability(rawMarket.bestBid);
+  const firstBuy = applyPolymarketBuyFee(bestAsk || referencePrices[0], rawMarket);
+  const secondAsk = bestBid ? 1 - bestBid : referencePrices[1];
+  const secondBuy = applyPolymarketBuyFee(secondAsk, rawMarket);
+  return [firstBuy || referencePrices[0] || null, secondBuy || referencePrices[1] || null];
+}
+
 function normalizePolymarketMarket(rawMarket = {}, event = {}) {
   if (!rawMarket || rawMarket.closed || rawMarket.archived || rawMarket.active === false || rawMarket.acceptingOrders === false || rawMarket.enableOrderBook === false) return null;
   const outcomes = safeJsonArray(rawMarket.outcomes);
@@ -919,6 +950,11 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
     url: polymarketMarketUrl(rawMarket, event),
     outcomes: outcomes.map(String),
     prices: [firstPrice, secondPrice],
+    buyPrices: polymarketBuyPrices(rawMarket, [firstPrice, secondPrice]),
+    feeRate: polymarketFeeRate(rawMarket),
+    bestBid: parseTradeProbability(rawMarket.bestBid),
+    bestAsk: parseTradeProbability(rawMarket.bestAsk),
+    priceSource: rawMarket.bestAsk || rawMarket.bestBid ? "bestAsk+fee" : "outcomePrices",
     volume: Number(rawMarket.volume || rawMarket.volumeNum || event.volume || 0) || 0,
     teams: Array.isArray(event.teams) ? event.teams : [],
   };
@@ -1265,7 +1301,7 @@ function marketOverroundPercent(prices = []) {
   return Math.round((total - 1) * 10000) / 100;
 }
 
-function bettingOutcome(probability, label) {
+function bettingOutcome(probability, label, referenceProbability = null, priceSource = "outcomePrices") {
   const coefficient = decimalCoefficient(probability);
   if (!coefficient) return null;
   return {
@@ -1273,6 +1309,9 @@ function bettingOutcome(probability, label) {
     probability,
     probabilityPercent: probabilityPercent(probability),
     decimalCoefficient: coefficient,
+    referenceProbability,
+    referenceDecimalCoefficient: decimalCoefficient(referenceProbability),
+    priceSource,
   };
 }
 
@@ -1328,9 +1367,10 @@ function bestMoneylineMarkets(markets = []) {
   for (const [eventKey, eventMarkets] of byEvent) {
     const direct = eventMarkets.find(isDirectMoneylineMarket);
     if (direct) {
-      const outcome1 = bettingOutcome(direct.prices[0], direct.outcomes[0]);
-      const outcome2 = bettingOutcome(direct.prices[1], direct.outcomes[1]);
+      const outcome1 = bettingOutcome(direct.buyPrices?.[0] || direct.prices[0], direct.outcomes[0], direct.prices[0], direct.priceSource);
+      const outcome2 = bettingOutcome(direct.buyPrices?.[1] || direct.prices[1], direct.outcomes[1], direct.prices[1], direct.priceSource);
       if (outcome1 && outcome2) {
+        const displayPrices = [outcome1.probability, outcome2.probability];
         rows.push({
           id: `moneyline-${direct.id}`,
           marketId: direct.id,
@@ -1341,8 +1381,11 @@ function bestMoneylineMarkets(markets = []) {
           outcome1,
           outcomeX: null,
           outcome2,
-          probabilityTotal: Math.round((direct.prices[0] + direct.prices[1]) * 10000) / 10000,
-          overroundPercent: marketOverroundPercent(direct.prices),
+          probabilityTotal: Math.round(displayPrices.reduce((sum, price) => sum + price, 0) * 10000) / 10000,
+          overroundPercent: marketOverroundPercent(displayPrices),
+          priceSource: direct.priceSource,
+          feeRate: direct.feeRate,
+          referenceProbabilityTotal: Math.round((direct.prices[0] + direct.prices[1]) * 10000) / 10000,
           startIso: direct.startIso,
           endDate: direct.endDate,
           volume: direct.volume,
@@ -1358,7 +1401,7 @@ function bestMoneylineMarkets(markets = []) {
       if (!isYesNoMarket(market)) continue;
       const code = moneylineCodeForYesMarket(market);
       if (!code || grouped[code]) continue;
-      const yesOutcome = bettingOutcome(market.prices[0], code === "X" ? "Draw" : market.question.replace(/\?$/, ""));
+      const yesOutcome = bettingOutcome(market.buyPrices?.[0] || market.prices[0], code === "X" ? "Draw" : market.question.replace(/\?$/, ""), market.prices[0], market.priceSource);
       if (!yesOutcome) continue;
       grouped[code] = yesOutcome;
       source ||= market;
@@ -1366,6 +1409,7 @@ function bestMoneylineMarkets(markets = []) {
 
     if (source && (grouped["1"] || grouped["2"] || grouped.X)) {
       const prices = [grouped["1"]?.probability, grouped.X?.probability, grouped["2"]?.probability].filter((value) => value !== undefined && value !== null);
+      const referencePrices = [grouped["1"]?.referenceProbability, grouped.X?.referenceProbability, grouped["2"]?.referenceProbability].filter((value) => value !== undefined && value !== null);
       rows.push({
         id: `moneyline-${eventKey}`,
         marketId: source.marketId || source.id,
@@ -1378,6 +1422,9 @@ function bestMoneylineMarkets(markets = []) {
         outcome2: grouped["2"],
         probabilityTotal: Math.round(prices.reduce((sum, price) => sum + Number(price || 0), 0) * 10000) / 10000,
         overroundPercent: marketOverroundPercent(prices),
+        priceSource: source.priceSource,
+        feeRate: source.feeRate,
+        referenceProbabilityTotal: Math.round(referencePrices.reduce((sum, price) => sum + Number(price || 0), 0) * 10000) / 10000,
         startIso: source.startIso,
         endDate: source.endDate,
         volume: Math.max(...eventMarkets.map((market) => Number(market.volume || 0))),
