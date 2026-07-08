@@ -1129,12 +1129,17 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
     }
   }
 
+  const fallbackSlugs = Array.isArray(options.polymarketSeries) && options.polymarketSeries.length
+    ? options.polymarketSeries
+    : POLYMARKET_SPORT_SERIES;
   const inferredSlugs = [...seriesToCloudbetEvents.keys()].slice(0, options.polymarketSeriesLimit);
+  const usingFallbackSeries = inferredSlugs.length === 0;
+  const candidateSlugs = usingFallbackSeries ? fallbackSlugs.slice(0, options.polymarketSeriesLimit) : inferredSlugs;
   let slugs = inferredSlugs;
   try {
     const sportsMetadata = await getPolymarketSportsMetadata(env, diagnostics);
     const availableSports = new Set(sportsMetadata.map((sport) => sport.sport));
-    slugs = inferredSlugs.filter((slug) => availableSports.has(slug));
+    slugs = candidateSlugs.filter((slug) => availableSports.has(slug));
     diagnostics.sportsMatched = sportsMetadata.filter((sport) => slugs.includes(sport.sport)).map((sport) => ({
       sport: sport.sport,
       series: sport.series,
@@ -1142,8 +1147,9 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
     }));
   } catch (error) {
     diagnostics.errors.push(`sports metadata: ${error.message}`);
+    slugs = candidateSlugs;
   }
-  diagnostics.seriesInferred = slugs.map((slug) => ({ slug, cloudbetEvents: seriesToCloudbetEvents.get(slug)?.length || 0 }));
+  diagnostics.seriesInferred = slugs.map((slug) => ({ slug, cloudbetEvents: seriesToCloudbetEvents.get(slug)?.length || (usingFallbackSeries ? cloudbetEvents.length : 0), fallback: usingFallbackSeries }));
   const teamsByLeague = options.includeCoverage ? await getPolymarketTeamsForLeagues(env, slugs, diagnostics, options) : new Map();
 
   const normalized = [];
@@ -1152,7 +1158,7 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
   diagnostics.startDateMin = startDateMin;
   for (const slug of slugs) {
     if (diagnostics.eventsHydrated >= options.polymarketEventLimit) break;
-    const cloudbetForSeries = seriesToCloudbetEvents.get(slug) || [];
+    const cloudbetForSeries = seriesToCloudbetEvents.get(slug) || (usingFallbackSeries ? cloudbetEvents : []);
     const endpoint = `/events?series_slug=${encodeURIComponent(slug)}&active=true&start_date_min=${encodeURIComponent(startDateMin)}&limit=${encodeURIComponent(options.polymarketRawEventsPerSeries || 20)}`;
     diagnostics.endpointsTried.push(endpoint);
     try {
