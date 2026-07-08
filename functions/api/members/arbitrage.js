@@ -131,6 +131,217 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
+async function ensureArbitrageTables(db) {
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS arbitrage_scan_runs (
+        id TEXT PRIMARY KEY,
+        mode TEXT NOT NULL,
+        strategy TEXT,
+        live_only INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        scan_started_at TEXT NOT NULL,
+        scan_completed_at TEXT NOT NULL,
+        cloudbet_events_scanned INTEGER NOT NULL DEFAULT 0,
+        polymarket_markets_scanned INTEGER NOT NULL DEFAULT 0,
+        matched_markets INTEGER NOT NULL DEFAULT 0,
+        opportunities_count INTEGER NOT NULL DEFAULT 0,
+        arbitrage_count INTEGER NOT NULL DEFAULT 0,
+        best_edge_percent REAL,
+        summary_json TEXT NOT NULL,
+        options_json TEXT NOT NULL,
+        diagnostics_json TEXT NOT NULL,
+        errors_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_scan_runs_mode_date ON arbitrage_scan_runs(mode, scan_started_at DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_scan_runs_live_date ON arbitrage_scan_runs(live_only, scan_started_at DESC)"),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS arbitrage_opportunities (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES arbitrage_scan_runs(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL,
+        live INTEGER NOT NULL DEFAULT 0,
+        arbitrage INTEGER NOT NULL DEFAULT 0,
+        event_key TEXT,
+        sport TEXT,
+        competition TEXT,
+        match_name TEXT,
+        start_iso TEXT,
+        cloudbet_pick TEXT,
+        cloudbet_odds REAL,
+        polymarket_pick TEXT,
+        polymarket_price REAL,
+        edge_percent REAL,
+        implied_total REAL,
+        stake_plan_json TEXT NOT NULL,
+        raw_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_run ON arbitrage_opportunities(run_id, edge_percent DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_edge ON arbitrage_opportunities(mode, arbitrage, edge_percent DESC, created_at DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_live ON arbitrage_opportunities(live, created_at DESC)"),
+  ]);
+}
+
+function scanSummaryFromRows(cross, rows = []) {
+  return {
+    cloudbetEventsScanned: cross.cloudbetEventsScanned,
+    cloudbetLiveEventsScanned: cross.cloudbetLiveEventsScanned,
+    polymarketMarketsScanned: cross.polymarketMarketsScanned,
+    candidateComparisons: cross.candidateComparisons,
+    matchedMarkets: cross.matchedMarkets,
+    polymarketMatched: (cross.polymarketCoverage || []).filter((item) => item.matched).length,
+    polymarketUnmatched: (cross.polymarketCoverage || []).filter((item) => !item.matched).length,
+    pricedMatches: rows.length,
+    arbitrageCount: rows.filter((item) => item.arbitrage).length,
+    bestEdgePercent: rows.length ? rows[0].edgePercent : null,
+  };
+}
+
+async function storeArbitrageScan(env, { mode, options, cross, rows, startedAt, completedAt, errors = [] }) {
+  if (!env.TENNIS_DB) return { stored: false, reason: "missing D1" };
+  const db = env.TENNIS_DB;
+  await ensureArbitrageTables(db);
+  const runId = crypto.randomUUID();
+  const summary = scanSummaryFromRows(cross, rows);
+  await db.prepare(`
+    INSERT INTO arbitrage_scan_runs (
+      id, mode, strategy, live_only, status, scan_started_at, scan_completed_at,
+      cloudbet_events_scanned, polymarket_markets_scanned, matched_markets,
+      opportunities_count, arbitrage_count, best_edge_percent,
+      summary_json, options_json, diagnostics_json, errors_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    runId,
+    mode,
+    options.crossVenueStrategy || "",
+    options.liveOnly ? 1 : 0,
+    errors.length ? "partial" : "ok",
+    startedAt,
+    completedAt,
+    summary.cloudbetEventsScanned || 0,
+    summary.polymarketMarketsScanned || 0,
+    summary.matchedMarkets || 0,
+    rows.length,
+    summary.arbitrageCount || 0,
+    summary.bestEdgePercent,
+    JSON.stringify(summary),
+    JSON.stringify(options),
+    JSON.stringify({
+      cloudbet: cross.cloudbetDiagnostics || {},
+      polymarket: cross.polymarketDiagnostics || {},
+      checked: (cross.checked || []).slice(0, 80),
+    }),
+    JSON.stringify(errors)
+  ).run();
+
+  const limitedRows = rows.slice(0, 100);
+  if (limitedRows.length) {
+    await db.batch(limitedRows.map((row, index) => db.prepare(`
+      INSERT INTO arbitrage_opportunities (
+        id, run_id, mode, live, arbitrage, event_key, sport, competition, match_name,
+        start_iso, cloudbet_pick, cloudbet_odds, polymarket_pick, polymarket_price,
+        edge_percent, implied_total, stake_plan_json, raw_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      `${runId}:${index}`,
+      runId,
+      mode,
+      row.live ? 1 : 0,
+      row.arbitrage ? 1 : 0,
+      row.eventKey || "",
+      row.sport || "",
+      row.competition || "",
+      row.match || "",
+      row.startIso || "",
+      row.cloudbetPick || "",
+      row.cloudbetOdds || null,
+      row.polymarketPick || "",
+      row.polymarketPrice || null,
+      row.edgePercent ?? null,
+      row.impliedTotal ?? null,
+      JSON.stringify(row.stakePlan || {}),
+      JSON.stringify(row)
+    )));
+  }
+
+  return { stored: true, runId, summary };
+}
+
+function storedOpportunityRow(row = {}) {
+  let raw = {};
+  try {
+    raw = row.raw_json ? JSON.parse(row.raw_json) : {};
+  } catch {
+    raw = {};
+  }
+  return {
+    ...raw,
+    storedRunId: row.run_id,
+    storedAt: row.created_at,
+    eventKey: raw.eventKey || row.event_key,
+    sport: raw.sport || row.sport,
+    competition: raw.competition || row.competition,
+    match: raw.match || row.match_name,
+    startIso: raw.startIso || row.start_iso,
+    cloudbetPick: raw.cloudbetPick || row.cloudbet_pick,
+    cloudbetOdds: raw.cloudbetOdds ?? row.cloudbet_odds,
+    polymarketPick: raw.polymarketPick || row.polymarket_pick,
+    polymarketPrice: raw.polymarketPrice ?? row.polymarket_price,
+    edgePercent: raw.edgePercent ?? row.edge_percent,
+    impliedTotal: raw.impliedTotal ?? row.implied_total,
+    arbitrage: Boolean(raw.arbitrage ?? row.arbitrage),
+    live: Boolean(raw.live ?? row.live),
+    stakePlan: raw.stakePlan || {},
+  };
+}
+
+async function readStoredArbitrage(env, { mode, liveOnly, limit = 100 }) {
+  if (!env.TENNIS_DB) return { ok: false, error: "Missing TENNIS_DB D1 binding" };
+  const db = env.TENNIS_DB;
+  await ensureArbitrageTables(db);
+  const runResult = await db.prepare(`
+    SELECT * FROM arbitrage_scan_runs
+    WHERE mode = ? OR (? = 1 AND live_only = 1)
+    ORDER BY scan_started_at DESC
+    LIMIT 10
+  `).bind(mode, liveOnly ? 1 : 0).all();
+  const runs = runResult.results || [];
+  const latestRun = runs[0] || null;
+  const rowsResult = await db.prepare(`
+    SELECT * FROM arbitrage_opportunities
+    WHERE mode = ? OR (? = 1 AND live = 1)
+    ORDER BY arbitrage DESC, edge_percent DESC, created_at DESC
+    LIMIT ?
+  `).bind(mode, liveOnly ? 1 : 0, limit).all();
+  const rows = (rowsResult.results || []).map(storedOpportunityRow);
+  let latestSummary = {};
+  try {
+    latestSummary = latestRun?.summary_json ? JSON.parse(latestRun.summary_json) : {};
+  } catch {
+    latestSummary = {};
+  }
+  return {
+    ok: true,
+    mode,
+    source: "Stored arbitrage scans from D1",
+    generatedAt: new Date().toISOString(),
+    latestRun,
+    runs,
+    summary: {
+      ...latestSummary,
+      storedRuns: runs.length,
+      storedRows: rows.length,
+      arbitrageCount: rows.filter((item) => item.arbitrage).length,
+      bestEdgePercent: rows.length ? rows[0].edgePercent : latestSummary.bestEdgePercent ?? null,
+    },
+    opportunities: rows,
+  };
+}
+
 async function hashToken(token) {
   const data = new TextEncoder().encode(token);
   const digest = await crypto.subtle.digest("SHA-256", data);
@@ -1779,6 +1990,12 @@ async function getArbitrage(request, env) {
     liveOnly: mode === "cross-sport-live" || url.searchParams.get("live") === "1",
   };
 
+  if (url.searchParams.get("stored") === "1") {
+    const limit = clampInteger(url.searchParams.get("limit") || "100", 100, 1, 500);
+    const stored = await readStoredArbitrage(env, { mode, liveOnly: options.liveOnly, limit });
+    return jsonResponse(stored, stored.ok === false ? 500 : 200);
+  }
+
   if (mode === "polymarket-odds") {
     const normalized = await scanPolymarketOdds(env, options);
     const coefficients = normalized.rows.flatMap((row) => [row.outcome1, row.outcomeX, row.outcome2]
@@ -1807,10 +2024,22 @@ async function getArbitrage(request, env) {
 
   if (isCrossSportMode) {
     if (!env.CLOUDBET_API_KEY) return jsonResponse({ ok: false, error: "Missing CLOUDBET_API_KEY" }, 500);
+    const startedAt = new Date().toISOString();
     const cross = await scanCrossSportArbitrage(env, options);
     const rows = cross.opportunities
       .sort((a, b) => Number(b.arbitrage) - Number(a.arbitrage) || b.edgePercent - a.edgePercent)
       .slice(0, 100);
+    const summary = scanSummaryFromRows(cross, rows);
+    const stored = url.searchParams.get("store") === "1" || request.method === "POST"
+      ? await storeArbitrageScan(env, {
+        mode,
+        options,
+        cross,
+        rows,
+        startedAt,
+        completedAt: new Date().toISOString(),
+      })
+      : null;
     return jsonResponse({
       ok: true,
       mode,
@@ -1820,18 +2049,8 @@ async function getArbitrage(request, env) {
       authType: auth.type,
       member: auth.member ? { email: auth.member.email, name: auth.member.name || "" } : null,
       options,
-      summary: {
-        cloudbetEventsScanned: cross.cloudbetEventsScanned,
-        cloudbetLiveEventsScanned: cross.cloudbetLiveEventsScanned,
-        polymarketMarketsScanned: cross.polymarketMarketsScanned,
-        candidateComparisons: cross.candidateComparisons,
-        matchedMarkets: cross.matchedMarkets,
-        polymarketMatched: cross.polymarketCoverage.filter((item) => item.matched).length,
-        polymarketUnmatched: cross.polymarketCoverage.filter((item) => !item.matched).length,
-        pricedMatches: rows.length,
-        arbitrageCount: rows.filter((item) => item.arbitrage).length,
-        bestEdgePercent: rows.length ? rows[0].edgePercent : null,
-      },
+      stored,
+      summary,
       opportunities: rows,
       checked: cross.checked.slice(0, 80),
       polymarketCoverage: cross.polymarketCoverage.slice(0, 100),
@@ -1872,6 +2091,14 @@ async function getArbitrage(request, env) {
 }
 
 export async function onRequestGet({ request, env }) {
+  try {
+    return await getArbitrage(request, env);
+  } catch (error) {
+    return jsonResponse({ ok: false, error: error.message }, 500);
+  }
+}
+
+export async function onRequestPost({ request, env }) {
   try {
     return await getArbitrage(request, env);
   } catch (error) {

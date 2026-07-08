@@ -120,6 +120,21 @@ async function syncGscSeo(env) {
   };
 }
 
+async function scanLiveArbitrage(env) {
+  const scan = Number.parseInt(env.ARBITRAGE_SCAN_LIMIT || "120", 10);
+  const sports = Number.parseInt(env.ARBITRAGE_SPORT_LIMIT || "8", 10);
+  const competitions = Number.parseInt(env.ARBITRAGE_COMPETITION_LIMIT || "20", 10);
+  const cloudbetTotal = Number.parseInt(env.ARBITRAGE_CLOUDBET_COMPETITIONS_TOTAL || "12", 10);
+  const url = `/api/members/arbitrage?mode=cross-sport-live&strategy=cloudbet-first&store=1&scan=${encodeURIComponent(scan)}&bankroll=100&sports=${encodeURIComponent(sports)}&competitions=${encodeURIComponent(competitions)}&cloudbet_competitions_total=${encodeURIComponent(cloudbetTotal)}&cloudbet_competitions_per_sport=4&poly_series=8&poly_raw_events_per_series=12&poly_events_per_series=8&poly_events=24`;
+  const result = await callSite(env, url, { method: "POST", authenticated: true });
+  return {
+    task: "arbitrage-live-scan",
+    ok: result.payload?.ok === true,
+    stored: result.payload?.stored || null,
+    summary: result.payload?.summary || null,
+  };
+}
+
 async function cleanupRecentMatches(env) {
   const result = await callSite(env, "/api/db/cleanup-recent", { method: "POST", authenticated: true });
   return {
@@ -208,6 +223,7 @@ async function runTask(task, env, request) {
   if (task === "seo-article") return generateSeoArticle(env);
   if (task === "content-autopublish") return generateSeoArticle(env);
   if (task === "gsc-seo-sync") return syncGscSeo(env);
+  if (task === "arbitrage-live-scan") return scanLiveArbitrage(env);
   if (task === "scheduled") {
     const url = new URL(request.url);
     const scheduledTime = url.searchParams.get("at") ? Date.parse(url.searchParams.get("at")) : Date.now();
@@ -220,6 +236,7 @@ async function runTask(task, env, request) {
     results.push(await runDbMaintenance(env, new Date()));
     results.push(await generateSeoArticle(env));
     results.push(await syncGscSeo(env));
+    results.push(await scanLiveArbitrage(env));
     return { task: "all", results };
   }
   throw new Error(`Unknown task: ${task}`);
@@ -246,6 +263,10 @@ async function runScheduled(controller, env) {
   const configuredGscCron = env.GSC_SEO_CRON || "30 6 * * *";
   if (cron === configuredGscCron || cron === "30 6 * * *") {
     results.push(await runSafely("gsc-seo-sync", () => syncGscSeo(env)));
+  }
+  const configuredArbitrageCron = env.ARBITRAGE_SCAN_CRON || "*/5 * * * *";
+  if (cron === configuredArbitrageCron || cron === "*/5 * * * *") {
+    results.push(await runSafely("arbitrage-live-scan", () => scanLiveArbitrage(env)));
   }
   return { ok: true, cron, ranAt: new Date().toISOString(), results };
 }

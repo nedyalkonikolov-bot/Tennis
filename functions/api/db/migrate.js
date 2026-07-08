@@ -270,6 +270,60 @@ async function migrate(request, env) {
   ]);
   applied.push("gsc_seo_tables");
 
+  await db.batch([
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS arbitrage_scan_runs (
+        id TEXT PRIMARY KEY,
+        mode TEXT NOT NULL,
+        strategy TEXT,
+        live_only INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        scan_started_at TEXT NOT NULL,
+        scan_completed_at TEXT NOT NULL,
+        cloudbet_events_scanned INTEGER NOT NULL DEFAULT 0,
+        polymarket_markets_scanned INTEGER NOT NULL DEFAULT 0,
+        matched_markets INTEGER NOT NULL DEFAULT 0,
+        opportunities_count INTEGER NOT NULL DEFAULT 0,
+        arbitrage_count INTEGER NOT NULL DEFAULT 0,
+        best_edge_percent REAL,
+        summary_json TEXT NOT NULL,
+        options_json TEXT NOT NULL,
+        diagnostics_json TEXT NOT NULL,
+        errors_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_scan_runs_mode_date ON arbitrage_scan_runs(mode, scan_started_at DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_scan_runs_live_date ON arbitrage_scan_runs(live_only, scan_started_at DESC)"),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS arbitrage_opportunities (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES arbitrage_scan_runs(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL,
+        live INTEGER NOT NULL DEFAULT 0,
+        arbitrage INTEGER NOT NULL DEFAULT 0,
+        event_key TEXT,
+        sport TEXT,
+        competition TEXT,
+        match_name TEXT,
+        start_iso TEXT,
+        cloudbet_pick TEXT,
+        cloudbet_odds REAL,
+        polymarket_pick TEXT,
+        polymarket_price REAL,
+        edge_percent REAL,
+        implied_total REAL,
+        stake_plan_json TEXT NOT NULL,
+        raw_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_run ON arbitrage_opportunities(run_id, edge_percent DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_edge ON arbitrage_opportunities(mode, arbitrage, edge_percent DESC, created_at DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_live ON arbitrage_opportunities(live, created_at DESC)"),
+  ]);
+  applied.push("arbitrage_scan_tables");
+
   return jsonResponse({ ok: true, applied, migratedAt: new Date().toISOString() });
 }
 

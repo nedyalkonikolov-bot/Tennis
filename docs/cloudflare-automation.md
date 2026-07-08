@@ -4,6 +4,7 @@ This worker runs TennisTipz automation inside Cloudflare so it does not depend o
 
 ## Schedules
 
+- `*/5 * * * *` scans live Cloudbet sport events against active Polymarket markets and stores each run plus opportunities in D1.
 - `*/15 * * * *` refreshes `/api/live-data`, which also upserts the current Cloudbet matches and predictions into D1.
 - `0 */2 * * *` runs database maintenance independent from any PC:
   - `/api/live-data?refresh=1`
@@ -18,6 +19,8 @@ The two-hour maintenance run rotates ATP/WTA profile offsets so the database sta
 
 The GSC SEO sync imports Search Console rows into D1, checks priority URLs with the URL Inspection API, and asks OpenAI to turn real query/page data into actionable SEO opportunities. It does not invent rankings or traffic; if OpenAI is unavailable, it stores deterministic opportunities from the GSC data.
 
+The arbitrage scanner stores historical scan runs in `arbitrage_scan_runs` and the top 100 rows per run in `arbitrage_opportunities`. Use those tables to review missed windows, repeated matches, and edge changes over time before acting on any live price.
+
 ## Deploy from any machine once
 
 ```bash
@@ -31,6 +34,13 @@ Manual test after deployment:
 
 ```bash
 curl "https://tennistipz-automation-cron.<your-subdomain>.workers.dev/?task=all" -H "x-sync-token: <SYNC_TOKEN>"
+```
+
+Manual live arbitrage scan and stored-results checks:
+
+```bash
+curl "https://tennistipz-automation-cron.<your-subdomain>.workers.dev/?task=arbitrage-live-scan" -H "x-sync-token: <SYNC_TOKEN>"
+curl "https://www.tennistipz.win/api/members/arbitrage?mode=cross-sport-live&stored=1&token=<SYNC_TOKEN>"
 ```
 
 Manual two-hour DB maintenance test:
