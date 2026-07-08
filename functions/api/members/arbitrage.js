@@ -567,6 +567,13 @@ function isCloudbetUpcoming(event = {}) {
   return !/finished|ended|complete|retired|walkover|cancelled|canceled|abandoned|settled/.test(status);
 }
 
+function isCloudbetLive(event = {}) {
+  const status = String(event.status || "").toLowerCase();
+  const text = [event.status, event.state, event.phase, event.eventStatus, event.tradingStatus].filter(Boolean).join(" ").toLowerCase();
+  return Boolean(event.live || event.inPlay || event.in_play || event.inRunning || event.isLive)
+    || /\b(live|in[-_\s]?play|in[-_\s]?progress|started|running|1st|2nd|3rd|4th|period|quarter|set)\b/.test(`${status} ${text}`);
+}
+
 function asPrice(value) {
   const price = Number.parseFloat(value);
   return Number.isFinite(price) && price >= 1.01 ? price : null;
@@ -780,6 +787,8 @@ async function getCloudbetAllSportEvents(env, options = {}) {
       for (const event of rawEvents) {
         if (events.length >= options.eventLimit) break;
         if (CROSS_SPORT_BLOCKED_RE.test(eventText(event))) continue;
+        const live = isCloudbetLive(event);
+        if (options.liveOnly && !live) continue;
         const odds = extractGenericBinaryCloudbetOdds(event);
         if (!odds) continue;
         events.push({
@@ -788,6 +797,8 @@ async function getCloudbetAllSportEvents(env, options = {}) {
           sportKey: sport.key,
           competition: event.competition?.name || event.name || sport.name || "Sport",
           startIso: eventStartIso(event),
+          status: String(event.status || event.state || ""),
+          live,
           home: event.home.name,
           away: event.away.name,
           odds,
@@ -962,8 +973,31 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
   };
 }
 
-function isOpenPolymarketSportsEvent(event = {}) {
+function polymarketEventStartMs(event = {}) {
+  const raw = event.startTime || event.eventDate || event.startDate || event.startDateIso || event.start_time || event.start_date_iso || event.creationDate;
+  const date = raw ? new Date(raw) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.getTime() : null;
+}
+
+function polymarketEventEndMs(event = {}) {
+  const raw = event.endDate || event.endDateIso || event.end_date_iso || event.end_time || event.closeTime || event.close_time;
+  const date = raw ? new Date(raw) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.getTime() : null;
+}
+
+function isLivePolymarketSportsEvent(event = {}) {
   if (!event || event.closed || event.ended || event.archived || event.active === false) return false;
+  const now = Date.now();
+  const start = polymarketEventStartMs(event);
+  const end = polymarketEventEndMs(event);
+  const started = start === null || start <= now + (1000 * 60 * 10);
+  const stillOpen = end === null || end >= now - (1000 * 60 * 30);
+  return started && stillOpen;
+}
+
+function isOpenPolymarketSportsEvent(event = {}, options = {}) {
+  if (!event || event.closed || event.ended || event.archived || event.active === false) return false;
+  if (options.liveOnly) return isLivePolymarketSportsEvent(event);
   const date = new Date(event.startTime || event.endDate || event.endDateIso || event.startDate || event.creationDate || 0);
   if (Number.isNaN(date.getTime())) return true;
   const now = Date.now();
@@ -1028,7 +1062,7 @@ async function getPolymarketBinaryMarkets(env, options = {}) {
       diagnostics.seriesScanned += 1;
       const seriesSlug = slug;
       const events = polymarketList(payload)
-        .filter(isOpenPolymarketSportsEvent)
+        .filter((event) => isOpenPolymarketSportsEvent(event, options))
         .slice(0, options.polymarketEventsPerSeries);
       diagnostics.eventsDiscovered += events.length;
       if (events.length) {
@@ -1118,7 +1152,7 @@ async function getPolymarketBinaryMarketsForCloudbetEvents(env, cloudbetEvents =
       diagnostics.seriesScanned += 1;
       const seriesSlug = slug;
       const teams = teamsByLeague.get(seriesSlug) || [];
-      const events = polymarketList(payload).filter(isOpenPolymarketSportsEvent);
+      const events = polymarketList(payload).filter((event) => isOpenPolymarketSportsEvent(event, options));
       const relevantEvents = events
         .filter((event) => cloudbetForSeries.some((cloudbetEvent) => rawPolymarketEventDateClose(event, cloudbetEvent) && rawPolymarketEventMatchesCloudbet(event, cloudbetEvent)))
         .slice(0, options.polymarketEventsPerSeries);
@@ -1543,6 +1577,8 @@ function buildCrossVenueCandidate(cloudbetEvent, polyMarket, sides, cloudbetSide
     competition: cloudbetEvent.competition,
     match: `${cloudbetEvent.home} vs ${cloudbetEvent.away}`,
     startIso: cloudbetEvent.startIso,
+    status: cloudbetEvent.status || "",
+    live: Boolean(cloudbetEvent.live),
     cloudbetSide,
     cloudbetPick: cloudbetSide === "home" ? cloudbetEvent.home : cloudbetEvent.away,
     polymarketPick: opposite === "home" ? cloudbetEvent.home : cloudbetEvent.away,
@@ -1627,6 +1663,8 @@ async function scanCrossSportArbitrage(env, options = {}) {
       sport: cloudbetEvent.sport,
       competition: cloudbetEvent.competition,
       startIso: cloudbetEvent.startIso,
+      status: cloudbetEvent.status || "",
+      live: Boolean(cloudbetEvent.live),
       candidateMarkets: candidateMarkets.length,
       polymarketMatches: eventMatches.slice(0, 3),
       polymarketNearMatches: collectCoverage ? nearMatches.slice(0, 3) : [],
@@ -1635,9 +1673,11 @@ async function scanCrossSportArbitrage(env, options = {}) {
 
   return {
     cloudbetEventsScanned: cloudbet.events.length,
+    cloudbetLiveEventsScanned: cloudbet.events.filter((event) => event.live).length,
     polymarketMarketsScanned: polymarket.markets.length,
     matchedMarkets,
     candidateComparisons,
+    liveOnly: Boolean(options.liveOnly),
     opportunities,
     checked,
     polymarketCoverage,
@@ -1695,7 +1735,8 @@ async function getArbitrage(request, env) {
 
   const url = new URL(request.url);
   const requestedMode = url.searchParams.get("mode");
-  const mode = ["cross-sport", "polymarket-odds"].includes(requestedMode) ? requestedMode : "tennis";
+  const mode = ["cross-sport", "cross-sport-live", "polymarket-odds"].includes(requestedMode) ? requestedMode : "tennis";
+  const isCrossSportMode = mode === "cross-sport" || mode === "cross-sport-live";
   const requestedSeries = String(url.searchParams.get("series") || "")
     .split(",")
     .map((slug) => slug.trim().toLowerCase())
@@ -1704,7 +1745,7 @@ async function getArbitrage(request, env) {
   const options = {
     dateStart: url.searchParams.get("date_start") || isoDate(0),
     dateStop: url.searchParams.get("date_stop") || isoDate(7),
-    scanLimit: clampInteger(url.searchParams.get("scan") || "40", 40, 1, mode === "cross-sport" ? 250 : 80),
+    scanLimit: clampInteger(url.searchParams.get("scan") || "40", 40, 1, isCrossSportMode ? 250 : 80),
     bankroll: clampNumber(url.searchParams.get("bankroll") || "100", 100, 1, 100000),
     sportLimit: clampInteger(url.searchParams.get("sports") || env.CLOUDBET_ARB_SPORT_LIMIT || "4", 4, 1, 8),
     competitionLimitPerSport: clampInteger(url.searchParams.get("competitions") || env.CLOUDBET_ARB_COMPETITION_LIMIT || "16", 16, 1, 40),
@@ -1721,6 +1762,7 @@ async function getArbitrage(request, env) {
     polyBuffer: clampNumber(url.searchParams.get("poly_buffer") || env.POLYMARKET_PRICE_BUFFER || "0", 0, 0, 0.1),
     includeCoverage: url.searchParams.get("coverage") === "1",
     crossVenueStrategy: requestedStrategy,
+    liveOnly: mode === "cross-sport-live" || url.searchParams.get("live") === "1",
   };
 
   if (mode === "polymarket-odds") {
@@ -1749,7 +1791,7 @@ async function getArbitrage(request, env) {
     });
   }
 
-  if (mode === "cross-sport") {
+  if (isCrossSportMode) {
     if (!env.CLOUDBET_API_KEY) return jsonResponse({ ok: false, error: "Missing CLOUDBET_API_KEY" }, 500);
     const cross = await scanCrossSportArbitrage(env, options);
     const rows = cross.opportunities
@@ -1759,13 +1801,14 @@ async function getArbitrage(request, env) {
       ok: true,
       mode,
       generatedAt: new Date().toISOString(),
-      source: "Cloudbet current sport events + matched Polymarket active binary markets",
+      source: options.liveOnly ? "Cloudbet live sport events + matched live Polymarket active binary markets" : "Cloudbet current sport events + matched Polymarket active binary markets",
       memberOnly: true,
       authType: auth.type,
       member: auth.member ? { email: auth.member.email, name: auth.member.name || "" } : null,
       options,
       summary: {
         cloudbetEventsScanned: cross.cloudbetEventsScanned,
+        cloudbetLiveEventsScanned: cross.cloudbetLiveEventsScanned,
         polymarketMarketsScanned: cross.polymarketMarketsScanned,
         candidateComparisons: cross.candidateComparisons,
         matchedMarkets: cross.matchedMarkets,
