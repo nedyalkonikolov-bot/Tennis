@@ -1007,6 +1007,16 @@ function MembersArbitragePage({ initialMode = "cross-sport" }) {
   const rowGridClass = isPolymarketOdds
     ? "grid gap-4 border-t border-white/10 bg-white/[0.03] px-5 py-5 md:grid-cols-[1.45fr_0.72fr_0.72fr_0.72fr_0.65fr_0.55fr] md:items-center"
     : "";
+  const polymarketHedgeHelper = (row) => {
+    const action = row.polymarketAction || "Buy";
+    const liability = row.polymarketLiabilityPrice ? ` · liability ${row.polymarketLiabilityPrice}` : "";
+    const reference = row.polymarketReferencePrice ? ` · ref ${Math.round((1 / row.polymarketReferencePrice) * 100) / 100}` : "";
+    const source = row.polymarketPriceSource ? ` · ${row.polymarketPriceSource}` : "";
+    return `${action} ${row.polymarketPrice}${liability}${reference}${source}`;
+  };
+  const stakeHelper = (row) => row.hedgeStrategy === "sell-same"
+    ? `Liability ${row.stakePlan.polymarketLiability} · proceeds ${row.stakePlan.polymarketProceeds} · profit ${row.stakePlan.expectedProfit}`
+    : `Profit ${row.stakePlan.expectedProfit}`;
 
   return <section className="mx-auto max-w-7xl px-5 py-12 md:px-6">
     <div className="grid gap-8 md:grid-cols-[1.1fr_0.9fr] md:items-start">
@@ -1052,7 +1062,7 @@ function MembersArbitragePage({ initialMode = "cross-sport" }) {
     </div>
 
     <div className="mt-8 border border-amber-300/20 bg-amber-300/[0.06] p-5 text-sm leading-7 text-amber-100">
-      {isPolymarketOdds ? "1 is the first listed side, X is draw when Polymarket exposes a draw market, and 2 is the second listed side. Odds use buy-side pricing when available, including Polymarket fee estimates, so they can differ from raw Gamma outcomePrices." : "Arbitrage shown here is theoretical. Odds can move, limits can apply, markets can be voided, and bookmaker terms differ. Recheck every price manually before using any stake plan."}
+      {isPolymarketOdds ? "1 is the first listed side, X is draw when Polymarket exposes a draw market, and 2 is the second listed side. Odds use buy-side pricing when available, including Polymarket fee estimates, so they can differ from raw Gamma outcomePrices." : "Arbitrage shown here is theoretical. Sell-same Polymarket rows assume sell/short execution is available or you already hold the same-side shares. Odds can move, limits can apply, markets can be voided, and bookmaker terms differ. Recheck every price manually before using any stake plan."}
     </div>
 
     <div className="mt-8 overflow-hidden border border-white/10">
@@ -1067,16 +1077,16 @@ function MembersArbitragePage({ initialMode = "cross-sport" }) {
         <Metric label="Market total" value={row.probabilityTotal || "N/A"} helper={`Overround ${row.overroundPercent}% · ${row.priceSource || "price"}`} />
         <div className="bg-slate-900 p-4"><p className="text-xs text-slate-500">Market</p><a href={row.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10">Open Polymarket <ExternalLink size={13} /></a></div>
       </article>) : isCrossSport ? rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
-        <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.sport}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${row.arbitrage ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300"}`}>{row.arbitrage ? "Cross-venue arb" : "Watchlist"}</span></div><h2 className="mt-2 text-lg font-black">{row.match}</h2><p className="mt-1 text-sm text-slate-500">{row.competition}{row.startIso ? ` - ${formatUpdatedAt(row.startIso)}` : ""}</p><p className="mt-2 text-xs text-slate-500">{row.polymarketQuestion}</p></div>
+        <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.sport}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${row.arbitrage ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300"}`}>{row.arbitrage ? "Cross-venue arb" : "Watchlist"}</span><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.hedgeStrategy === "sell-same" ? "Sell same side" : "Buy opposite"}</span></div><h2 className="mt-2 text-lg font-black">{row.match}</h2><p className="mt-1 text-sm text-slate-500">{row.competition}{row.startIso ? ` - ${formatUpdatedAt(row.startIso)}` : ""}</p><p className="mt-2 text-xs text-slate-500">{row.polymarketQuestion}</p></div>
         <Metric label="Cloudbet pick" value={row.cloudbetPick} helper={`Odds ${row.cloudbetOdds}`} />
-        <Metric label="Polymarket hedge" value={row.polymarketPick} helper={`Buy ${row.polymarketPrice}${row.polymarketReferencePrice ? ` · ref ${Math.round((1 / row.polymarketReferencePrice) * 100) / 100}` : ""}${row.polymarketPriceSource ? ` · ${row.polymarketPriceSource}` : ""}`} />
+        <Metric label="Polymarket hedge" value={row.polymarketPick} helper={polymarketHedgeHelper(row)} />
         <div className="bg-slate-900 p-4">
           <p className="text-xs text-slate-500">Open markets</p>
           <a href={row.cloudbetUrl || cloudbetUrl} target="_blank" rel="noreferrer sponsored" onClick={() => trackAffiliateClick("Cloudbet", "cross_arbitrage_row")} className="mt-2 inline-flex items-center gap-1 rounded-lg bg-lime-400 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-lime-300">Cloudbet <ExternalLink size={13} /></a>
           <a href={row.polymarketUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10">Polymarket <ExternalLink size={13} /></a>
         </div>
         <Metric label="Edge" value={`${row.edgePercent}%`} helper={`Implied ${row.impliedTotal}`} />
-        <Metric label={`${row.stakePlan.bankroll} stake`} value={`${row.stakePlan.cloudbetStake}/${row.stakePlan.polymarketCost}`} helper={`Profit ${row.stakePlan.expectedProfit}`} />
+        <Metric label={`${row.stakePlan.bankroll} stake`} value={`${row.stakePlan.cloudbetStake}/${row.stakePlan.polymarketCost}`} helper={stakeHelper(row)} />
       </article>) : rows.map((row) => <article key={row.eventKey} className={`grid gap-4 border-t border-white/10 px-5 py-5 md:grid-cols-[1.35fr_0.7fr_0.7fr_0.75fr_0.55fr_0.75fr] md:items-center ${row.arbitrage ? "bg-lime-400/[0.08]" : "bg-white/[0.03]"}`}>
         <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-white/5 px-2 py-1 text-xs text-slate-300">{row.tour}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${row.arbitrage ? "bg-lime-400 text-slate-950" : "bg-white/5 text-slate-300"}`}>{row.arbitrage ? "Arbitrage" : "Near miss"}</span></div><h2 className="mt-2 text-lg font-black">{row.match}</h2><p className="mt-1 text-sm text-slate-500">{row.tournament} - {row.startDate} {row.startTime}</p></div>
         <Metric label={row.bestHome.bookmaker} value={row.bestHome.price} helper={row.playerA || "Home"} />

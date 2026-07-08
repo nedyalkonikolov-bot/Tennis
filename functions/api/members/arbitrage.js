@@ -899,6 +899,13 @@ function applyPolymarketBuyFee(price, rawMarket = {}) {
   return roundPrice(Math.min(0.99, withFee));
 }
 
+function applyPolymarketSellFee(price, rawMarket = {}) {
+  const parsed = parseTradeProbability(price);
+  if (!parsed) return null;
+  const withFee = parsed * (1 - polymarketFeeRate(rawMarket));
+  return roundPrice(Math.max(0.01, withFee));
+}
+
 function polymarketBuyPrices(rawMarket = {}, referencePrices = []) {
   const bestAsk = parseTradeProbability(rawMarket.bestAsk);
   const bestBid = parseTradeProbability(rawMarket.bestBid);
@@ -906,6 +913,15 @@ function polymarketBuyPrices(rawMarket = {}, referencePrices = []) {
   const secondAsk = bestBid ? 1 - bestBid : referencePrices[1];
   const secondBuy = applyPolymarketBuyFee(secondAsk, rawMarket);
   return [firstBuy || referencePrices[0] || null, secondBuy || referencePrices[1] || null];
+}
+
+function polymarketSellPrices(rawMarket = {}) {
+  const bestAsk = parseTradeProbability(rawMarket.bestAsk);
+  const bestBid = parseTradeProbability(rawMarket.bestBid);
+  const firstSell = applyPolymarketSellFee(bestBid, rawMarket);
+  const secondBid = bestAsk ? 1 - bestAsk : null;
+  const secondSell = applyPolymarketSellFee(secondBid, rawMarket);
+  return [firstSell, secondSell];
 }
 
 function normalizePolymarketMarket(rawMarket = {}, event = {}) {
@@ -953,10 +969,12 @@ function normalizePolymarketMarket(rawMarket = {}, event = {}) {
     outcomes: outcomes.map(String),
     prices: [firstPrice, secondPrice],
     buyPrices: polymarketBuyPrices(rawMarket, [firstPrice, secondPrice]),
+    sellPrices: polymarketSellPrices(rawMarket),
     feeRate: polymarketFeeRate(rawMarket),
     bestBid: parseTradeProbability(rawMarket.bestBid),
     bestAsk: parseTradeProbability(rawMarket.bestAsk),
     priceSource: rawMarket.bestAsk || rawMarket.bestBid ? "bestAsk+fee" : "outcomePrices",
+    sellPriceSource: rawMarket.bestBid || rawMarket.bestAsk ? "bestBid-fee" : "",
     volume: Number(rawMarket.volume || rawMarket.volumeNum || event.volume || 0) || 0,
     teams: Array.isArray(event.teams) ? event.teams : [],
   };
@@ -1212,15 +1230,34 @@ function nearMatchReason(analysis = {}) {
 function inferPolymarketSides(polyMarket = {}, cloudbetEvent = {}) {
   const [firstOutcome, secondOutcome] = polyMarket.outcomes;
   const [firstPrice, secondPrice] = Array.isArray(polyMarket.buyPrices) && polyMarket.buyPrices.length === 2 ? polyMarket.buyPrices : polyMarket.prices;
+  const [firstSellPrice, secondSellPrice] = Array.isArray(polyMarket.sellPrices) && polyMarket.sellPrices.length === 2 ? polyMarket.sellPrices : [null, null];
   const [firstReferencePrice, secondReferencePrice] = polyMarket.prices || [];
   const firstText = firstOutcome || "";
   const secondText = secondOutcome || "";
 
+  const orderedSides = (homeIndex, awayIndex, matchType) => {
+    const buyPrices = [firstPrice, secondPrice];
+    const sellPrices = [firstSellPrice, secondSellPrice];
+    const referencePrices = [firstReferencePrice, secondReferencePrice];
+    return {
+      homePrice: buyPrices[homeIndex],
+      awayPrice: buyPrices[awayIndex],
+      homeSellPrice: sellPrices[homeIndex],
+      awaySellPrice: sellPrices[awayIndex],
+      homeReferencePrice: referencePrices[homeIndex],
+      awayReferencePrice: referencePrices[awayIndex],
+      priceSource: polyMarket.priceSource,
+      sellPriceSource: polyMarket.sellPriceSource,
+      feeRate: polyMarket.feeRate,
+      matchType,
+    };
+  };
+
   if (entityMentionedForMarket(polyMarket, firstText, cloudbetEvent.home) && entityMentionedForMarket(polyMarket, secondText, cloudbetEvent.away)) {
-    return { homePrice: firstPrice, awayPrice: secondPrice, homeReferencePrice: firstReferencePrice, awayReferencePrice: secondReferencePrice, priceSource: polyMarket.priceSource, feeRate: polyMarket.feeRate, matchType: "outcome names" };
+    return orderedSides(0, 1, "outcome names");
   }
   if (entityMentionedForMarket(polyMarket, firstText, cloudbetEvent.away) && entityMentionedForMarket(polyMarket, secondText, cloudbetEvent.home)) {
-    return { homePrice: secondPrice, awayPrice: firstPrice, homeReferencePrice: secondReferencePrice, awayReferencePrice: firstReferencePrice, priceSource: polyMarket.priceSource, feeRate: polyMarket.feeRate, matchType: "outcome names reversed" };
+    return orderedSides(1, 0, "outcome names reversed");
   }
 
   const yesNo = normalizeName(firstOutcome) === "yes" && normalizeName(secondOutcome) === "no";
@@ -1234,8 +1271,8 @@ function inferPolymarketSides(polyMarket = {}, cloudbetEvent = {}) {
   const awayIndex = entityFirstIndexForMarket(polyMarket, normalizedText, cloudbetEvent.away);
   if (homeIndex < 0 || awayIndex < 0) return null;
 
-  if (homeIndex < awayIndex) return { homePrice: firstPrice, awayPrice: secondPrice, homeReferencePrice: firstReferencePrice, awayReferencePrice: secondReferencePrice, priceSource: polyMarket.priceSource, feeRate: polyMarket.feeRate, matchType: "yes/no first-mentioned home" };
-  return { homePrice: secondPrice, awayPrice: firstPrice, homeReferencePrice: secondReferencePrice, awayReferencePrice: firstReferencePrice, priceSource: polyMarket.priceSource, feeRate: polyMarket.feeRate, matchType: "yes/no first-mentioned away" };
+  if (homeIndex < awayIndex) return orderedSides(0, 1, "yes/no first-mentioned home");
+  return orderedSides(1, 0, "yes/no first-mentioned away");
 }
 
 function polymarketCloudbetMatch(polyMarket = {}, cloudbetEvent = {}) {
@@ -1523,6 +1560,8 @@ function buildCrossVenueCandidate(cloudbetEvent, polyMarket, sides, cloudbetSide
 
   return {
     eventKey: `cross-${cloudbetEvent.id}-${polyMarket.id}-${cloudbetSide}`,
+    hedgeStrategy: "buy-opposite",
+    polymarketAction: "Buy",
     sport: cloudbetEvent.sport,
     competition: cloudbetEvent.competition,
     match: `${cloudbetEvent.home} vs ${cloudbetEvent.away}`,
@@ -1548,6 +1587,61 @@ function buildCrossVenueCandidate(cloudbetEvent, polyMarket, sides, cloudbetSide
       bankroll,
       cloudbetStake: Math.round(cloudbetStake * 100) / 100,
       polymarketCost: Math.round(polymarketCost * 100) / 100,
+      polymarketShares: Math.round(polymarketShares * 100) / 100,
+      expectedProfit: Math.round(expectedProfit * 100) / 100,
+      expectedReturnPercent: Math.round((expectedProfit / bankroll) * 10000) / 100,
+    },
+  };
+}
+
+function buildCrossVenueSellSameCandidate(cloudbetEvent, polyMarket, sides, cloudbetSide, bankroll, cloudbetAffiliateUrl) {
+  const cloudbetPrice = cloudbetEvent.odds[cloudbetSide];
+  const polySellPrice = sides[`${cloudbetSide}SellPrice`];
+  const polyReferencePrice = sides[`${cloudbetSide}ReferencePrice`];
+  if (!cloudbetPrice || !polySellPrice) return null;
+  const sellPrice = Math.max(0.01, Math.round(polySellPrice * 10000) / 10000);
+  const liabilityPrice = Math.round((1 - sellPrice) * 10000) / 10000;
+  const impliedTotal = (1 / cloudbetPrice) + liabilityPrice;
+  const edgePercent = (1 - impliedTotal) * 100;
+  const cloudbetStake = bankroll / (1 + cloudbetPrice * liabilityPrice);
+  const polymarketShares = cloudbetStake * cloudbetPrice;
+  const polymarketLiability = polymarketShares * liabilityPrice;
+  const polymarketProceeds = polymarketShares * sellPrice;
+  const expectedProfit = cloudbetStake * ((cloudbetPrice * sellPrice) - 1);
+
+  return {
+    eventKey: `cross-sell-${cloudbetEvent.id}-${polyMarket.id}-${cloudbetSide}`,
+    hedgeStrategy: "sell-same",
+    polymarketAction: "Sell",
+    sport: cloudbetEvent.sport,
+    competition: cloudbetEvent.competition,
+    match: `${cloudbetEvent.home} vs ${cloudbetEvent.away}`,
+    startIso: cloudbetEvent.startIso,
+    cloudbetSide,
+    cloudbetPick: cloudbetSide === "home" ? cloudbetEvent.home : cloudbetEvent.away,
+    polymarketPick: cloudbetSide === "home" ? cloudbetEvent.home : cloudbetEvent.away,
+    cloudbetOdds: cloudbetPrice,
+    polymarketPrice: sellPrice,
+    polymarketSellPrice: polySellPrice,
+    polymarketReferencePrice: polyReferencePrice,
+    polymarketRawPrice: polySellPrice,
+    polymarketLiabilityPrice: liabilityPrice,
+    polymarketPriceSource: sides.sellPriceSource || polyMarket.sellPriceSource || "sell-price",
+    polymarketFeeRate: sides.feeRate ?? polyMarket.feeRate ?? null,
+    polymarketQuestion: polyMarket.question,
+    polymarketUrl: polyMarket.url,
+    cloudbetUrl: cloudbetAffiliateUrl,
+    marketMatchType: sides.matchType,
+    executableCaveat: "Sell-same rows assume Polymarket sell/short execution is available or the user already holds the same-side shares.",
+    arbitrage: impliedTotal < 1,
+    impliedTotal: Math.round(impliedTotal * 10000) / 10000,
+    edgePercent: Math.round(edgePercent * 100) / 100,
+    stakePlan: {
+      bankroll,
+      cloudbetStake: Math.round(cloudbetStake * 100) / 100,
+      polymarketCost: Math.round(polymarketLiability * 100) / 100,
+      polymarketLiability: Math.round(polymarketLiability * 100) / 100,
+      polymarketProceeds: Math.round(polymarketProceeds * 100) / 100,
       polymarketShares: Math.round(polymarketShares * 100) / 100,
       expectedProfit: Math.round(expectedProfit * 100) / 100,
       expectedReturnPercent: Math.round((expectedProfit / bankroll) * 10000) / 100,
@@ -1601,8 +1695,10 @@ async function scanCrossSportArbitrage(env, options = {}) {
       matchedMarkets += 1;
       eventMatches.push(polyMarket.question);
       for (const side of ["home", "away"]) {
-        const candidate = buildCrossVenueCandidate(cloudbetEvent, polyMarket, sides, side, options.bankroll, options.polyBuffer, cloudbetAffiliateUrl);
-        if (candidate) opportunities.push(candidate);
+        const buyOppositeCandidate = buildCrossVenueCandidate(cloudbetEvent, polyMarket, sides, side, options.bankroll, options.polyBuffer, cloudbetAffiliateUrl);
+        const sellSameCandidate = buildCrossVenueSellSameCandidate(cloudbetEvent, polyMarket, sides, side, options.bankroll, cloudbetAffiliateUrl);
+        if (buyOppositeCandidate) opportunities.push(buyOppositeCandidate);
+        if (sellSameCandidate) opportunities.push(sellSameCandidate);
       }
     }
     checked.push({
@@ -1764,7 +1860,7 @@ async function getArbitrage(request, env) {
       polymarketCoverage: cross.polymarketCoverage.slice(0, 100),
       cloudbetDiagnostics: cross.cloudbetDiagnostics,
       polymarketDiagnostics: cross.polymarketDiagnostics,
-      note: "Cross-venue arbitrage is theoretical before odds latency, order-book depth, Polymarket spreads/fees, stake limits, void rules, KYC restrictions and settlement-rule differences. Recheck every price manually before acting.",
+      note: "Cross-venue arbitrage is theoretical before odds latency, order-book depth, Polymarket spreads/fees, stake limits, void rules, KYC restrictions and settlement-rule differences. Sell-same rows assume Polymarket sell/short execution is available or the user already holds the same-side shares. Recheck every price manually before acting.",
     });
   }
 
