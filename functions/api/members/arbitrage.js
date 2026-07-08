@@ -570,8 +570,16 @@ function isCloudbetUpcoming(event = {}) {
 function isCloudbetLive(event = {}) {
   const status = String(event.status || "").toLowerCase();
   const text = [event.status, event.state, event.phase, event.eventStatus, event.tradingStatus].filter(Boolean).join(" ").toLowerCase();
+  const startIso = eventStartIso(event);
+  const startMs = startIso ? new Date(startIso).getTime() : NaN;
+  const now = Date.now();
+  const startedRecently = Number.isFinite(startMs)
+    && startMs <= now + (1000 * 60 * 5)
+    && startMs >= now - (1000 * 60 * 60 * 12)
+    && isCloudbetUpcoming(event);
   return Boolean(event.live || event.inPlay || event.in_play || event.inRunning || event.isLive)
-    || /\b(live|in[-_\s]?play|in[-_\s]?progress|started|running|1st|2nd|3rd|4th|period|quarter|set)\b/.test(`${status} ${text}`);
+    || /\b(live|in[-_\s]?play|in[-_\s]?progress|started|running|1st|2nd|3rd|4th|period|quarter|set)\b/.test(`${status} ${text}`)
+    || startedRecently;
 }
 
 function asPrice(value) {
