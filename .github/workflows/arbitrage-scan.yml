@@ -1,0 +1,43 @@
+name: Store live arbitrage scans
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/arbitrage-scan.yml"
+      - "functions/api/members/arbitrage.js"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-arbitrage-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Wait for Pages deployment after a push
+        if: github.event_name == 'push'
+        run: sleep 90
+
+      - name: Scan and store live Cloudbet vs Polymarket markets
+        env:
+          SYNC_TOKEN: ${{ secrets.TENNISTIPZ_DATABASE_SYNC_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "Missing TENNISTIPZ_DATABASE_SYNC_TOKEN secret"
+            exit 1
+          fi
+
+          curl --fail-with-body --retry 2 --retry-delay 5 --max-time 110 \
+            -X POST \
+            "https://tennistipz.win/api/members/arbitrage?mode=cross-sport-live&strategy=cloudbet-first&store=1&scan=120&bankroll=100&sports=8&competitions=20&cloudbet_competitions_total=12&cloudbet_competitions_per_sport=4&poly_series=8&poly_raw_events_per_series=12&poly_events_per_series=8&poly_events=24" \
+            -H "accept: application/json" \
+            -H "x-sync-token: $SYNC_TOKEN"

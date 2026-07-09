@@ -21,6 +21,8 @@ The GSC SEO sync imports Search Console rows into D1, checks priority URLs with 
 
 The arbitrage scanner stores historical scan runs in `arbitrage_scan_runs` and the top 100 rows per run in `arbitrage_opportunities`. Use those tables to review missed windows, repeated matches, and edge changes over time before acting on any live price.
 
+The repository also includes `.github/workflows/arbitrage-scan.yml`, which runs the same stored scan every five minutes using `TENNISTIPZ_DATABASE_SYNC_TOKEN`. This keeps collection independent from a local PC and provides a fallback when the Cloudflare Worker cannot be deployed.
+
 ## Deploy from any machine once
 
 ```bash
