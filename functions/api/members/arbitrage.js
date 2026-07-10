@@ -183,6 +183,37 @@ async function ensureArbitrageTables(db) {
     db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_run ON arbitrage_opportunities(run_id, edge_percent DESC)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_edge ON arbitrage_opportunities(mode, arbitrage, edge_percent DESC, created_at DESC)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_live ON arbitrage_opportunities(live, created_at DESC)"),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS arbitrage_scan_candidates (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES arbitrage_scan_runs(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        event_key TEXT,
+        sport TEXT,
+        competition TEXT,
+        match_name TEXT,
+        start_iso TEXT,
+        cloudbet_event_id TEXT,
+        polymarket_market_id TEXT,
+        cloudbet_home TEXT,
+        cloudbet_away TEXT,
+        cloudbet_home_odds REAL,
+        cloudbet_away_odds REAL,
+        polymarket_question TEXT,
+        polymarket_url TEXT,
+        match_confidence REAL,
+        home_score REAL,
+        away_score REAL,
+        date_gap_hours REAL,
+        reason TEXT,
+        raw_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_candidates_run_kind ON arbitrage_scan_candidates(run_id, kind, match_confidence DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_candidates_kind_date ON arbitrage_scan_candidates(kind, created_at DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_candidates_match ON arbitrage_scan_candidates(match_name, created_at DESC)"),
   ]);
 }
 
@@ -199,6 +230,84 @@ function scanSummaryFromRows(cross, rows = []) {
     arbitrageCount: rows.filter((item) => item.arbitrage).length,
     bestEdgePercent: rows.length ? rows[0].edgePercent : null,
   };
+}
+
+async function runD1Batches(db, statements = [], size = 50) {
+  for (let i = 0; i < statements.length; i += size) {
+    await db.batch(statements.slice(i, i + size));
+  }
+}
+
+function candidateMatchName(item = {}) {
+  if (item.match) return item.match;
+  if (item.home || item.away) return [item.home, item.away].filter(Boolean).join(" vs ");
+  return item.question || item.title || "";
+}
+
+function candidateRowsFromTelemetry(cross = {}, mode = "") {
+  const telemetry = cross.telemetry || {};
+  const rows = [];
+
+  for (const event of telemetry.cloudbetPricedEvents || []) {
+    rows.push({
+      kind: "cloudbet_priced_event",
+      eventKey: event.id,
+      sport: event.sport,
+      competition: event.competition,
+      match: candidateMatchName(event),
+      startIso: event.startIso,
+      cloudbetEventId: event.id,
+      cloudbetHome: event.home,
+      cloudbetAway: event.away,
+      cloudbetHomeOdds: event.odds?.home ?? null,
+      cloudbetAwayOdds: event.odds?.away ?? null,
+      reason: event.live ? "live priced Cloudbet event" : "priced Cloudbet event",
+      raw: event,
+    });
+  }
+
+  for (const market of telemetry.polymarketMarkets || []) {
+    rows.push({
+      kind: "polymarket_active_market",
+      eventKey: market.eventSlug || market.id,
+      sport: market.seriesSlug,
+      competition: market.seriesSlug,
+      match: market.title || market.question,
+      startIso: market.startIso || market.endDate || "",
+      polymarketMarketId: market.id,
+      polymarketQuestion: market.question,
+      polymarketUrl: market.url,
+      reason: "active Polymarket binary market",
+      raw: market,
+    });
+  }
+
+  for (const near of telemetry.nearMatches || []) {
+    rows.push({
+      kind: near.kind || "near_match",
+      eventKey: near.eventKey,
+      sport: near.sport,
+      competition: near.competition,
+      match: near.match,
+      startIso: near.startIso,
+      cloudbetEventId: near.cloudbetEventId,
+      polymarketMarketId: near.polymarketMarketId,
+      cloudbetHome: near.cloudbetHome,
+      cloudbetAway: near.cloudbetAway,
+      cloudbetHomeOdds: near.cloudbetHomeOdds ?? null,
+      cloudbetAwayOdds: near.cloudbetAwayOdds ?? null,
+      polymarketQuestion: near.polymarketQuestion,
+      polymarketUrl: near.polymarketUrl,
+      matchConfidence: near.matchConfidence ?? null,
+      homeScore: near.homeScore ?? null,
+      awayScore: near.awayScore ?? null,
+      dateGapHours: near.dateGapHours ?? null,
+      reason: near.reason || "",
+      raw: near,
+    });
+  }
+
+  return rows.map((row) => ({ mode, ...row }));
 }
 
 async function storeArbitrageScan(env, { mode, options, cross, rows, startedAt, completedAt, errors = [] }) {
@@ -240,7 +349,7 @@ async function storeArbitrageScan(env, { mode, options, cross, rows, startedAt, 
 
   const limitedRows = rows.slice(0, 100);
   if (limitedRows.length) {
-    await db.batch(limitedRows.map((row, index) => db.prepare(`
+    await runD1Batches(db, limitedRows.map((row, index) => db.prepare(`
       INSERT INTO arbitrage_opportunities (
         id, run_id, mode, live, arbitrage, event_key, sport, competition, match_name,
         start_iso, cloudbet_pick, cloudbet_odds, polymarket_pick, polymarket_price,
@@ -268,7 +377,44 @@ async function storeArbitrageScan(env, { mode, options, cross, rows, startedAt, 
     )));
   }
 
-  return { stored: true, runId, summary };
+  const candidateRows = candidateRowsFromTelemetry(cross, mode)
+    .slice(0, options.telemetryLimit || 240);
+  if (candidateRows.length) {
+    await runD1Batches(db, candidateRows.map((row, index) => db.prepare(`
+      INSERT INTO arbitrage_scan_candidates (
+        id, run_id, mode, kind, event_key, sport, competition, match_name,
+        start_iso, cloudbet_event_id, polymarket_market_id, cloudbet_home, cloudbet_away,
+        cloudbet_home_odds, cloudbet_away_odds, polymarket_question, polymarket_url,
+        match_confidence, home_score, away_score, date_gap_hours, reason, raw_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      `${runId}:candidate:${index}`,
+      runId,
+      row.mode,
+      row.kind,
+      row.eventKey || "",
+      row.sport || "",
+      row.competition || "",
+      row.match || "",
+      row.startIso || "",
+      row.cloudbetEventId || "",
+      row.polymarketMarketId || "",
+      row.cloudbetHome || "",
+      row.cloudbetAway || "",
+      row.cloudbetHomeOdds ?? null,
+      row.cloudbetAwayOdds ?? null,
+      row.polymarketQuestion || "",
+      row.polymarketUrl || "",
+      row.matchConfidence ?? null,
+      row.homeScore ?? null,
+      row.awayScore ?? null,
+      row.dateGapHours ?? null,
+      row.reason || "",
+      JSON.stringify(row.raw || row)
+    )));
+  }
+
+  return { stored: true, runId, summary, candidatesStored: candidateRows.length };
 }
 
 function storedOpportunityRow(row = {}) {
@@ -299,7 +445,40 @@ function storedOpportunityRow(row = {}) {
   };
 }
 
-async function readStoredArbitrage(env, { mode, liveOnly, limit = 100 }) {
+function storedCandidateRow(row = {}) {
+  let raw = {};
+  try {
+    raw = row.raw_json ? JSON.parse(row.raw_json) : {};
+  } catch {
+    raw = {};
+  }
+  return {
+    ...raw,
+    storedRunId: row.run_id,
+    storedAt: row.created_at,
+    kind: row.kind,
+    eventKey: raw.eventKey || row.event_key,
+    sport: raw.sport || row.sport,
+    competition: raw.competition || row.competition,
+    match: raw.match || row.match_name,
+    startIso: raw.startIso || row.start_iso,
+    cloudbetEventId: raw.cloudbetEventId || row.cloudbet_event_id,
+    polymarketMarketId: raw.polymarketMarketId || row.polymarket_market_id,
+    cloudbetHome: raw.cloudbetHome || row.cloudbet_home,
+    cloudbetAway: raw.cloudbetAway || row.cloudbet_away,
+    cloudbetHomeOdds: raw.cloudbetHomeOdds ?? row.cloudbet_home_odds,
+    cloudbetAwayOdds: raw.cloudbetAwayOdds ?? row.cloudbet_away_odds,
+    polymarketQuestion: raw.polymarketQuestion || row.polymarket_question,
+    polymarketUrl: raw.polymarketUrl || row.polymarket_url,
+    matchConfidence: raw.matchConfidence ?? row.match_confidence,
+    homeScore: raw.homeScore ?? row.home_score,
+    awayScore: raw.awayScore ?? row.away_score,
+    dateGapHours: raw.dateGapHours ?? row.date_gap_hours,
+    reason: raw.reason || row.reason,
+  };
+}
+
+async function readStoredArbitrage(env, { mode, liveOnly, limit = 100, includeCandidates = false }) {
   if (!env.TENNIS_DB) return { ok: false, error: "Missing TENNIS_DB D1 binding" };
   const db = env.TENNIS_DB;
   await ensureArbitrageTables(db);
@@ -318,6 +497,16 @@ async function readStoredArbitrage(env, { mode, liveOnly, limit = 100 }) {
     LIMIT ?
   `).bind(mode, liveOnly ? 1 : 0, limit).all();
   const rows = (rowsResult.results || []).map(storedOpportunityRow);
+  let candidateRows = [];
+  if (includeCandidates) {
+    const candidateResult = await db.prepare(`
+      SELECT * FROM arbitrage_scan_candidates
+      WHERE mode = ? OR (? = 1 AND mode = 'cross-sport-live')
+      ORDER BY created_at DESC, kind, match_confidence DESC
+      LIMIT ?
+    `).bind(mode, liveOnly ? 1 : 0, limit).all();
+    candidateRows = (candidateResult.results || []).map(storedCandidateRow);
+  }
   let latestSummary = {};
   try {
     latestSummary = latestRun?.summary_json ? JSON.parse(latestRun.summary_json) : {};
@@ -335,10 +524,12 @@ async function readStoredArbitrage(env, { mode, liveOnly, limit = 100 }) {
       ...latestSummary,
       storedRuns: runs.length,
       storedRows: rows.length,
+      storedCandidates: candidateRows.length,
       arbitrageCount: rows.filter((item) => item.arbitrage).length,
       bestEdgePercent: rows.length ? rows[0].edgePercent : latestSummary.bestEdgePercent ?? null,
     },
     opportunities: rows,
+    candidates: includeCandidates ? candidateRows : undefined,
   };
 }
 
@@ -1614,6 +1805,76 @@ function buildPolymarketCoverage(polymarketMarkets = [], cloudbetEvents = []) {
   });
 }
 
+function cloudbetTelemetryEvent(event = {}) {
+  return {
+    id: event.id,
+    sport: event.sport,
+    sportKey: event.sportKey,
+    competition: event.competition,
+    startIso: event.startIso,
+    status: event.status || "",
+    live: Boolean(event.live),
+    home: event.home,
+    away: event.away,
+    odds: event.odds ? {
+      home: event.odds.home,
+      away: event.odds.away,
+      marketType: event.odds.marketType,
+      marketKey: event.odds.marketKey,
+    } : null,
+  };
+}
+
+function polymarketTelemetryMarket(market = {}) {
+  return {
+    id: market.id,
+    seriesSlug: market.seriesSlug,
+    title: market.title,
+    question: market.question,
+    eventSlug: market.eventSlug,
+    startIso: market.startIso,
+    endDate: market.endDate,
+    outcomes: market.outcomes,
+    prices: market.prices,
+    buyPrices: market.buyPrices,
+    priceSource: market.priceSource,
+    feeRate: market.feeRate,
+    volume: market.volume,
+    url: market.url,
+  };
+}
+
+function matchConfidencePercent(analysis = {}) {
+  const raw = Math.min(1, Math.max(0, Number(analysis.combinedScore || 0) / 4));
+  return Math.round(raw * 10000) / 100;
+}
+
+function nearMatchTelemetryRow(cloudbetEvent = {}, polyMarket = {}, analysis = {}, reason = "") {
+  return {
+    kind: analysis.teamsMatched && analysis.dateClose ? "matched_candidate" : "near_match",
+    eventKey: `near-${cloudbetEvent.id}-${polyMarket.id}`,
+    sport: cloudbetEvent.sport,
+    competition: cloudbetEvent.competition,
+    match: `${cloudbetEvent.home} vs ${cloudbetEvent.away}`,
+    startIso: cloudbetEvent.startIso,
+    cloudbetEventId: cloudbetEvent.id,
+    polymarketMarketId: polyMarket.id,
+    cloudbetHome: cloudbetEvent.home,
+    cloudbetAway: cloudbetEvent.away,
+    cloudbetHomeOdds: cloudbetEvent.odds?.home ?? null,
+    cloudbetAwayOdds: cloudbetEvent.odds?.away ?? null,
+    polymarketQuestion: polyMarket.question,
+    polymarketUrl: polyMarket.url,
+    matchConfidence: matchConfidencePercent(analysis),
+    homeScore: analysis.homeScore?.score ?? null,
+    awayScore: analysis.awayScore?.score ?? null,
+    dateGapHours: analysis.dateGapHours,
+    reason: reason || nearMatchReason(analysis),
+    cloudbet: cloudbetTelemetryEvent(cloudbetEvent),
+    polymarket: polymarketTelemetryMarket(polyMarket),
+  };
+}
+
 function decimalCoefficient(probability) {
   if (!probability || probability <= 0 || probability >= 1) return null;
   return Math.round((1 / probability) * 100) / 100;
@@ -1858,6 +2119,7 @@ async function scanCrossSportArbitrage(env, options = {}) {
   const collectCoverage = Boolean(options.includeCoverage);
   const polymarketCoverage = collectCoverage ? buildPolymarketCoverage(polymarket.markets.slice(0, 30), cloudbet.events.slice(0, 30)) : [];
   const polymarketCandidateIndex = buildPolymarketCandidateIndex(polymarket.markets);
+  const telemetryNearMatches = [];
 
   for (const cloudbetEvent of cloudbet.events) {
     const eventMatches = [];
@@ -1867,14 +2129,23 @@ async function scanCrossSportArbitrage(env, options = {}) {
     for (const polyMarket of candidateMarkets) {
       const sides = polymarketCloudbetMatch(polyMarket, cloudbetEvent);
       if (!sides) {
-        if (collectCoverage && nearMatches.length < 3) {
-          const analysis = polymarketCloudbetAnalysis(polyMarket, cloudbetEvent);
-          if (analysis.teamsMatched || (analysis.dateClose && analysis.combinedScore >= 1.2)) {
-            nearMatches.push({ question: polyMarket.question, reason: nearMatchReason(analysis), dateGapHours: analysis.dateGapHours });
+        const analysis = polymarketCloudbetAnalysis(polyMarket, cloudbetEvent);
+        if (analysis.teamsMatched || (analysis.dateClose && analysis.combinedScore >= 1.2)) {
+          const telemetryRow = nearMatchTelemetryRow(cloudbetEvent, polyMarket, analysis);
+          telemetryNearMatches.push(telemetryRow);
+          if (nearMatches.length < 3) {
+            nearMatches.push({
+              question: polyMarket.question,
+              reason: telemetryRow.reason,
+              matchConfidence: telemetryRow.matchConfidence,
+              dateGapHours: analysis.dateGapHours,
+            });
           }
         }
         continue;
       }
+      const matchedAnalysis = polymarketCloudbetAnalysis(polyMarket, cloudbetEvent);
+      telemetryNearMatches.push(nearMatchTelemetryRow(cloudbetEvent, polyMarket, matchedAnalysis, `matched via ${sides.matchType}`));
       matchedMarkets += 1;
       eventMatches.push(polyMarket.question);
       for (const side of ["home", "away"]) {
@@ -1906,6 +2177,17 @@ async function scanCrossSportArbitrage(env, options = {}) {
     opportunities,
     checked,
     polymarketCoverage,
+    telemetry: {
+      cloudbetPricedEvents: cloudbet.events
+        .slice(0, options.telemetryCloudbetLimit || 80)
+        .map(cloudbetTelemetryEvent),
+      polymarketMarkets: polymarket.markets
+        .slice(0, options.telemetryPolymarketLimit || 80)
+        .map(polymarketTelemetryMarket),
+      nearMatches: telemetryNearMatches
+        .sort((a, b) => (b.matchConfidence || 0) - (a.matchConfidence || 0) || (a.dateGapHours ?? 9999) - (b.dateGapHours ?? 9999))
+        .slice(0, options.telemetryNearLimit || 80),
+    },
     cloudbetDiagnostics: cloudbet.diagnostics,
     polymarketDiagnostics: polymarket.diagnostics,
     competitionHints: polymarket.competitionHints || [],
@@ -1984,6 +2266,10 @@ async function getArbitrage(request, env) {
     polymarketEventLimit: clampInteger(url.searchParams.get("poly_events") || env.POLYMARKET_ARB_EVENT_LIMIT || "12", 12, 1, 30),
     polymarketSeries: requestedSeries,
     rowLimit: clampInteger(url.searchParams.get("limit") || "160", 160, 10, 500),
+    telemetryLimit: clampInteger(url.searchParams.get("telemetry") || env.ARBITRAGE_TELEMETRY_LIMIT || "240", 240, 0, 500),
+    telemetryCloudbetLimit: clampInteger(url.searchParams.get("telemetry_cloudbet") || env.ARBITRAGE_TELEMETRY_CLOUDBET_LIMIT || "80", 80, 0, 200),
+    telemetryPolymarketLimit: clampInteger(url.searchParams.get("telemetry_polymarket") || env.ARBITRAGE_TELEMETRY_POLYMARKET_LIMIT || "80", 80, 0, 200),
+    telemetryNearLimit: clampInteger(url.searchParams.get("telemetry_near") || env.ARBITRAGE_TELEMETRY_NEAR_LIMIT || "80", 80, 0, 200),
     polyBuffer: clampNumber(url.searchParams.get("poly_buffer") || env.POLYMARKET_PRICE_BUFFER || "0", 0, 0, 0.1),
     includeCoverage: url.searchParams.get("coverage") === "1",
     crossVenueStrategy: requestedStrategy,
@@ -1992,7 +2278,8 @@ async function getArbitrage(request, env) {
 
   if (url.searchParams.get("stored") === "1") {
     const limit = clampInteger(url.searchParams.get("limit") || "100", 100, 1, 500);
-    const stored = await readStoredArbitrage(env, { mode, liveOnly: options.liveOnly, limit });
+    const includeCandidates = url.searchParams.get("candidates") === "1";
+    const stored = await readStoredArbitrage(env, { mode, liveOnly: options.liveOnly, limit, includeCandidates });
     return jsonResponse(stored, stored.ok === false ? 500 : 200);
   }
 

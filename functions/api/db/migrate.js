@@ -321,6 +321,37 @@ async function migrate(request, env) {
     db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_run ON arbitrage_opportunities(run_id, edge_percent DESC)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_edge ON arbitrage_opportunities(mode, arbitrage, edge_percent DESC, created_at DESC)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_opportunities_live ON arbitrage_opportunities(live, created_at DESC)"),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS arbitrage_scan_candidates (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES arbitrage_scan_runs(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        event_key TEXT,
+        sport TEXT,
+        competition TEXT,
+        match_name TEXT,
+        start_iso TEXT,
+        cloudbet_event_id TEXT,
+        polymarket_market_id TEXT,
+        cloudbet_home TEXT,
+        cloudbet_away TEXT,
+        cloudbet_home_odds REAL,
+        cloudbet_away_odds REAL,
+        polymarket_question TEXT,
+        polymarket_url TEXT,
+        match_confidence REAL,
+        home_score REAL,
+        away_score REAL,
+        date_gap_hours REAL,
+        reason TEXT,
+        raw_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_candidates_run_kind ON arbitrage_scan_candidates(run_id, kind, match_confidence DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_candidates_kind_date ON arbitrage_scan_candidates(kind, created_at DESC)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_arbitrage_candidates_match ON arbitrage_scan_candidates(match_name, created_at DESC)"),
   ]);
   applied.push("arbitrage_scan_tables");
 

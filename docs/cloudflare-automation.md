@@ -19,7 +19,7 @@ The two-hour maintenance run rotates ATP/WTA profile offsets so the database sta
 
 The GSC SEO sync imports Search Console rows into D1, checks priority URLs with the URL Inspection API, and asks OpenAI to turn real query/page data into actionable SEO opportunities. It does not invent rankings or traffic; if OpenAI is unavailable, it stores deterministic opportunities from the GSC data.
 
-The arbitrage scanner stores historical scan runs in `arbitrage_scan_runs` and the top 100 rows per run in `arbitrage_opportunities`. Use those tables to review missed windows, repeated matches, and edge changes over time before acting on any live price.
+The arbitrage scanner stores historical scan runs in `arbitrage_scan_runs`, the top 100 matched rows per run in `arbitrage_opportunities`, and capped scan evidence in `arbitrage_scan_candidates`. Candidate rows include Cloudbet priced events, active Polymarket markets, and near/fuzzy matches with confidence scores so matching gaps can be debugged later. Use those tables to review missed windows, repeated matches, and edge changes over time before acting on any live price.
 
 The repository also includes `.github/workflows/arbitrage-scan.yml`, which runs the same stored scan every five minutes using `TENNISTIPZ_DATABASE_SYNC_TOKEN`. This keeps collection independent from a local PC and provides a fallback when the Cloudflare Worker cannot be deployed.
 
@@ -43,6 +43,7 @@ Manual live arbitrage scan and stored-results checks:
 ```bash
 curl "https://tennistipz-automation-cron.<your-subdomain>.workers.dev/?task=arbitrage-live-scan" -H "x-sync-token: <SYNC_TOKEN>"
 curl "https://www.tennistipz.win/api/members/arbitrage?mode=cross-sport-live&stored=1&token=<SYNC_TOKEN>"
+curl "https://www.tennistipz.win/api/members/arbitrage?mode=cross-sport-live&stored=1&candidates=1&token=<SYNC_TOKEN>"
 ```
 
 Manual two-hour DB maintenance test:
